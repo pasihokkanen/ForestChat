@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS property_boundaries (
   fetched_at    TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_property_boundaries_geom ON property_boundaries USING GIST(geometry);
+CREATE INDEX IF NOT EXISTS idx_property_boundaries_geom ON property_boundaries USING GIST(geometry);
 
 ALTER TABLE property_boundaries ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Owner access via forest" ON property_boundaries;
@@ -119,8 +119,8 @@ CREATE TABLE IF NOT EXISTS compartments (
   UNIQUE(forest_id, kuvio_id)
 );
 
-CREATE INDEX idx_compartments_geom ON compartments USING GIST(geometry);
-CREATE INDEX idx_compartments_forest ON compartments(forest_id);
+CREATE INDEX IF NOT EXISTS idx_compartments_geom ON compartments USING GIST(geometry);
+CREATE INDEX IF NOT EXISTS idx_compartments_forest ON compartments(forest_id);
 
 -- Add FK for plan_shares now that forests exists
 ALTER TABLE plan_shares ADD CONSTRAINT fk_plan_shares_forest 
@@ -162,8 +162,8 @@ CREATE TABLE IF NOT EXISTS operations (
   updated_at    TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_operations_forest ON operations(forest_id);
-CREATE INDEX idx_operations_year ON operations(forest_id, year);
+CREATE INDEX IF NOT EXISTS idx_operations_forest ON operations(forest_id);
+CREATE INDEX IF NOT EXISTS idx_operations_year ON operations(forest_id, year);
 
 ALTER TABLE operations ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Owner access via forest" ON operations;
@@ -229,7 +229,7 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
   created_at    TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_chat_sessions_forest ON chat_sessions(forest_id);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_forest ON chat_sessions(forest_id);
 
 ALTER TABLE chat_sessions ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Owner access via forest" ON chat_sessions;
@@ -245,7 +245,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   created_at    TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_chat_messages_session ON chat_messages(session_id);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
 
 ALTER TABLE chat_messages ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Owner access via session" ON chat_messages;
