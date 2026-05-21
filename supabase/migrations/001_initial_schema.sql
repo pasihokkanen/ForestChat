@@ -9,16 +9,16 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 -- ====================
 -- Profiles (Supabase Auth handles users, this extends it)
 -- ====================
-CREATE TABLE profiles (
+CREATE TABLE IF NOT EXISTS profiles (
   id            UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   display_name  TEXT,
   created_at    TIMESTAMPTZ DEFAULT now()
 );
 
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users can read own profile" ON profiles
+CREATE POLICY IF NOT EXISTS "Users can read own profile" ON profiles
   FOR SELECT USING (id = auth.uid());
-CREATE POLICY "Users can update own profile" ON profiles
+CREATE POLICY IF NOT EXISTS "Users can update own profile" ON profiles
   FOR UPDATE USING (id = auth.uid());
 
 -- Auto-create profile on signup
@@ -38,7 +38,7 @@ CREATE OR REPLACE TRIGGER on_auth_user_created
 -- ====================
 -- Plan sharing (must be created BEFORE forests for RLS policy references)
 -- ====================
-CREATE TABLE plan_shares (
+CREATE TABLE IF NOT EXISTS plan_shares (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   forest_id     UUID NOT NULL,  -- FK added after forests table is created
   shared_with   UUID NOT NULL REFERENCES profiles(id),
@@ -50,7 +50,7 @@ CREATE TABLE plan_shares (
 -- ====================
 -- Forests (metsätila)
 -- ====================
-CREATE TABLE forests (
+CREATE TABLE IF NOT EXISTS forests (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   owner_id      UUID NOT NULL REFERENCES profiles(id),
   name          TEXT NOT NULL,
@@ -63,9 +63,9 @@ CREATE TABLE forests (
 );
 
 ALTER TABLE forests ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Owner full access" ON forests
+CREATE POLICY IF NOT EXISTS "Owner full access" ON forests
   FOR ALL USING (owner_id = auth.uid());
-CREATE POLICY "Shared read access" ON forests
+CREATE POLICY IF NOT EXISTS "Shared read access" ON forests
   FOR SELECT USING (
     id IN (SELECT forest_id FROM plan_shares WHERE shared_with = auth.uid())
   );
@@ -73,7 +73,7 @@ CREATE POLICY "Shared read access" ON forests
 -- ====================
 -- Property boundaries (MML:stä)
 -- ====================
-CREATE TABLE property_boundaries (
+CREATE TABLE IF NOT EXISTS property_boundaries (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   forest_id     UUID NOT NULL UNIQUE REFERENCES forests(id) ON DELETE CASCADE,
   property_id   TEXT NOT NULL,
@@ -84,13 +84,13 @@ CREATE TABLE property_boundaries (
 CREATE INDEX idx_property_boundaries_geom ON property_boundaries USING GIST(geometry);
 
 ALTER TABLE property_boundaries ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Owner access via forest" ON property_boundaries
+CREATE POLICY IF NOT EXISTS "Owner access via forest" ON property_boundaries
   FOR ALL USING (forest_id IN (SELECT id FROM forests WHERE owner_id = auth.uid()));
 
 -- ====================
 -- Compartments (kuviot) — PostGIS geometry
 -- ====================
-CREATE TABLE compartments (
+CREATE TABLE IF NOT EXISTS compartments (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   forest_id     UUID NOT NULL REFERENCES forests(id) ON DELETE CASCADE,
   kuvio_id      TEXT NOT NULL,
@@ -122,15 +122,15 @@ ALTER TABLE plan_shares ADD CONSTRAINT fk_plan_shares_forest
   FOREIGN KEY (forest_id) REFERENCES forests(id) ON DELETE CASCADE;
 
 ALTER TABLE plan_shares ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Owner manages shares" ON plan_shares
+CREATE POLICY IF NOT EXISTS "Owner manages shares" ON plan_shares
   FOR ALL USING (forest_id IN (SELECT id FROM forests WHERE owner_id = auth.uid()));
-CREATE POLICY "User sees own shares" ON plan_shares
+CREATE POLICY IF NOT EXISTS "User sees own shares" ON plan_shares
   FOR SELECT USING (shared_with = auth.uid());
 
 ALTER TABLE compartments ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Owner access via forest" ON compartments
+CREATE POLICY IF NOT EXISTS "Owner access via forest" ON compartments
   FOR ALL USING (forest_id IN (SELECT id FROM forests WHERE owner_id = auth.uid()));
-CREATE POLICY "Shared read access" ON compartments
+CREATE POLICY IF NOT EXISTS "Shared read access" ON compartments
   FOR SELECT USING (
     forest_id IN (SELECT forest_id FROM plan_shares WHERE shared_with = auth.uid())
   );
@@ -138,7 +138,7 @@ CREATE POLICY "Shared read access" ON compartments
 -- ====================
 -- Operations (toimenpiteet)
 -- ====================
-CREATE TABLE operations (
+CREATE TABLE IF NOT EXISTS operations (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   compartment_id UUID NOT NULL REFERENCES compartments(id) ON DELETE CASCADE,
   forest_id     UUID NOT NULL REFERENCES forests(id) ON DELETE CASCADE,
@@ -157,9 +157,9 @@ CREATE INDEX idx_operations_forest ON operations(forest_id);
 CREATE INDEX idx_operations_year ON operations(forest_id, year);
 
 ALTER TABLE operations ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Owner access via forest" ON operations
+CREATE POLICY IF NOT EXISTS "Owner access via forest" ON operations
   FOR ALL USING (forest_id IN (SELECT id FROM forests WHERE owner_id = auth.uid()));
-CREATE POLICY "Shared read access" ON operations
+CREATE POLICY IF NOT EXISTS "Shared read access" ON operations
   FOR SELECT USING (
     forest_id IN (SELECT forest_id FROM plan_shares WHERE shared_with = auth.uid())
   );
@@ -167,7 +167,7 @@ CREATE POLICY "Shared read access" ON operations
 -- ====================
 -- Timber prices
 -- ====================
-CREATE TABLE timber_prices (
+CREATE TABLE IF NOT EXISTS timber_prices (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   source        TEXT,
   fetched_at    TIMESTAMPTZ DEFAULT now(),
@@ -175,13 +175,13 @@ CREATE TABLE timber_prices (
 );
 
 ALTER TABLE timber_prices ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Authenticated read" ON timber_prices
+CREATE POLICY IF NOT EXISTS "Authenticated read" ON timber_prices
   FOR SELECT USING (auth.role() = 'authenticated');
 
 -- ====================
 -- Plan metadata
 -- ====================
-CREATE TABLE plan_metadata (
+CREATE TABLE IF NOT EXISTS plan_metadata (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   forest_id     UUID NOT NULL REFERENCES forests(id) ON DELETE CASCADE,
   name          TEXT,
@@ -197,9 +197,9 @@ CREATE TABLE plan_metadata (
 );
 
 ALTER TABLE plan_metadata ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Owner access via forest" ON plan_metadata
+CREATE POLICY IF NOT EXISTS "Owner access via forest" ON plan_metadata
   FOR ALL USING (forest_id IN (SELECT id FROM forests WHERE owner_id = auth.uid()));
-CREATE POLICY "Shared read access" ON plan_metadata
+CREATE POLICY IF NOT EXISTS "Shared read access" ON plan_metadata
   FOR SELECT USING (
     forest_id IN (SELECT forest_id FROM plan_shares WHERE shared_with = auth.uid())
   );
@@ -207,7 +207,7 @@ CREATE POLICY "Shared read access" ON plan_metadata
 -- ====================
 -- Chat
 -- ====================
-CREATE TABLE chat_sessions (
+CREATE TABLE IF NOT EXISTS chat_sessions (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   forest_id     UUID NOT NULL REFERENCES forests(id) ON DELETE CASCADE,
   user_id       UUID NOT NULL REFERENCES profiles(id),
@@ -218,10 +218,10 @@ CREATE TABLE chat_sessions (
 CREATE INDEX idx_chat_sessions_forest ON chat_sessions(forest_id);
 
 ALTER TABLE chat_sessions ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Owner access via forest" ON chat_sessions
+CREATE POLICY IF NOT EXISTS "Owner access via forest" ON chat_sessions
   FOR ALL USING (forest_id IN (SELECT id FROM forests WHERE owner_id = auth.uid()));
 
-CREATE TABLE chat_messages (
+CREATE TABLE IF NOT EXISTS chat_messages (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   session_id    UUID NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
   role          TEXT NOT NULL,
@@ -233,7 +233,7 @@ CREATE TABLE chat_messages (
 CREATE INDEX idx_chat_messages_session ON chat_messages(session_id);
 
 ALTER TABLE chat_messages ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Owner access via session" ON chat_messages
+CREATE POLICY IF NOT EXISTS "Owner access via session" ON chat_messages
   FOR ALL USING (session_id IN (
     SELECT id FROM chat_sessions WHERE forest_id IN (
       SELECT id FROM forests WHERE owner_id = auth.uid()
