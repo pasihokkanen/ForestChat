@@ -16,9 +16,11 @@ CREATE TABLE IF NOT EXISTS profiles (
 );
 
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-CREATE POLICY IF NOT EXISTS "Users can read own profile" ON profiles
+DROP POLICY IF EXISTS "Users can read own profile" ON profiles;
+CREATE POLICY "Users can read own profile" ON profiles
   FOR SELECT USING (id = auth.uid());
-CREATE POLICY IF NOT EXISTS "Users can update own profile" ON profiles
+DROP POLICY IF EXISTS "Users can update own profile" ON profiles;
+CREATE POLICY "Users can update own profile" ON profiles
   FOR UPDATE USING (id = auth.uid());
 
 -- Auto-create profile on signup
@@ -63,9 +65,11 @@ CREATE TABLE IF NOT EXISTS forests (
 );
 
 ALTER TABLE forests ENABLE ROW LEVEL SECURITY;
-CREATE POLICY IF NOT EXISTS "Owner full access" ON forests
+DROP POLICY IF EXISTS "Owner full access" ON forests;
+CREATE POLICY "Owner full access" ON forests
   FOR ALL USING (owner_id = auth.uid());
-CREATE POLICY IF NOT EXISTS "Shared read access" ON forests
+DROP POLICY IF EXISTS "Shared read access" ON forests;
+CREATE POLICY "Shared read access" ON forests
   FOR SELECT USING (
     id IN (SELECT forest_id FROM plan_shares WHERE shared_with = auth.uid())
   );
@@ -84,7 +88,8 @@ CREATE TABLE IF NOT EXISTS property_boundaries (
 CREATE INDEX idx_property_boundaries_geom ON property_boundaries USING GIST(geometry);
 
 ALTER TABLE property_boundaries ENABLE ROW LEVEL SECURITY;
-CREATE POLICY IF NOT EXISTS "Owner access via forest" ON property_boundaries
+DROP POLICY IF EXISTS "Owner access via forest" ON property_boundaries;
+CREATE POLICY "Owner access via forest" ON property_boundaries
   FOR ALL USING (forest_id IN (SELECT id FROM forests WHERE owner_id = auth.uid()));
 
 -- ====================
@@ -122,15 +127,19 @@ ALTER TABLE plan_shares ADD CONSTRAINT fk_plan_shares_forest
   FOREIGN KEY (forest_id) REFERENCES forests(id) ON DELETE CASCADE;
 
 ALTER TABLE plan_shares ENABLE ROW LEVEL SECURITY;
-CREATE POLICY IF NOT EXISTS "Owner manages shares" ON plan_shares
+DROP POLICY IF EXISTS "Owner manages shares" ON plan_shares;
+CREATE POLICY "Owner manages shares" ON plan_shares
   FOR ALL USING (forest_id IN (SELECT id FROM forests WHERE owner_id = auth.uid()));
-CREATE POLICY IF NOT EXISTS "User sees own shares" ON plan_shares
+DROP POLICY IF EXISTS "User sees own shares" ON plan_shares;
+CREATE POLICY "User sees own shares" ON plan_shares
   FOR SELECT USING (shared_with = auth.uid());
 
 ALTER TABLE compartments ENABLE ROW LEVEL SECURITY;
-CREATE POLICY IF NOT EXISTS "Owner access via forest" ON compartments
+DROP POLICY IF EXISTS "Owner access via forest" ON compartments;
+CREATE POLICY "Owner access via forest" ON compartments
   FOR ALL USING (forest_id IN (SELECT id FROM forests WHERE owner_id = auth.uid()));
-CREATE POLICY IF NOT EXISTS "Shared read access" ON compartments
+DROP POLICY IF EXISTS "Shared read access" ON compartments;
+CREATE POLICY "Shared read access" ON compartments
   FOR SELECT USING (
     forest_id IN (SELECT forest_id FROM plan_shares WHERE shared_with = auth.uid())
   );
@@ -157,9 +166,11 @@ CREATE INDEX idx_operations_forest ON operations(forest_id);
 CREATE INDEX idx_operations_year ON operations(forest_id, year);
 
 ALTER TABLE operations ENABLE ROW LEVEL SECURITY;
-CREATE POLICY IF NOT EXISTS "Owner access via forest" ON operations
+DROP POLICY IF EXISTS "Owner access via forest" ON operations;
+CREATE POLICY "Owner access via forest" ON operations
   FOR ALL USING (forest_id IN (SELECT id FROM forests WHERE owner_id = auth.uid()));
-CREATE POLICY IF NOT EXISTS "Shared read access" ON operations
+DROP POLICY IF EXISTS "Shared read access" ON operations;
+CREATE POLICY "Shared read access" ON operations
   FOR SELECT USING (
     forest_id IN (SELECT forest_id FROM plan_shares WHERE shared_with = auth.uid())
   );
@@ -175,7 +186,8 @@ CREATE TABLE IF NOT EXISTS timber_prices (
 );
 
 ALTER TABLE timber_prices ENABLE ROW LEVEL SECURITY;
-CREATE POLICY IF NOT EXISTS "Authenticated read" ON timber_prices
+DROP POLICY IF EXISTS "Authenticated read" ON timber_prices;
+CREATE POLICY "Authenticated read" ON timber_prices
   FOR SELECT USING (auth.role() = 'authenticated');
 
 -- ====================
@@ -197,9 +209,11 @@ CREATE TABLE IF NOT EXISTS plan_metadata (
 );
 
 ALTER TABLE plan_metadata ENABLE ROW LEVEL SECURITY;
-CREATE POLICY IF NOT EXISTS "Owner access via forest" ON plan_metadata
+DROP POLICY IF EXISTS "Owner access via forest" ON plan_metadata;
+CREATE POLICY "Owner access via forest" ON plan_metadata
   FOR ALL USING (forest_id IN (SELECT id FROM forests WHERE owner_id = auth.uid()));
-CREATE POLICY IF NOT EXISTS "Shared read access" ON plan_metadata
+DROP POLICY IF EXISTS "Shared read access" ON plan_metadata;
+CREATE POLICY "Shared read access" ON plan_metadata
   FOR SELECT USING (
     forest_id IN (SELECT forest_id FROM plan_shares WHERE shared_with = auth.uid())
   );
@@ -218,7 +232,8 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
 CREATE INDEX idx_chat_sessions_forest ON chat_sessions(forest_id);
 
 ALTER TABLE chat_sessions ENABLE ROW LEVEL SECURITY;
-CREATE POLICY IF NOT EXISTS "Owner access via forest" ON chat_sessions
+DROP POLICY IF EXISTS "Owner access via forest" ON chat_sessions;
+CREATE POLICY "Owner access via forest" ON chat_sessions
   FOR ALL USING (forest_id IN (SELECT id FROM forests WHERE owner_id = auth.uid()));
 
 CREATE TABLE IF NOT EXISTS chat_messages (
@@ -233,7 +248,8 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 CREATE INDEX idx_chat_messages_session ON chat_messages(session_id);
 
 ALTER TABLE chat_messages ENABLE ROW LEVEL SECURITY;
-CREATE POLICY IF NOT EXISTS "Owner access via session" ON chat_messages
+DROP POLICY IF EXISTS "Owner access via session" ON chat_messages;
+CREATE POLICY "Owner access via session" ON chat_messages
   FOR ALL USING (session_id IN (
     SELECT id FROM chat_sessions WHERE forest_id IN (
       SELECT id FROM forests WHERE owner_id = auth.uid()
