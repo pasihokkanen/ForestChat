@@ -36,6 +36,18 @@ CREATE OR REPLACE TRIGGER on_auth_user_created
   FOR EACH ROW EXECUTE FUNCTION handle_new_user();
 
 -- ====================
+-- Plan sharing (must be created BEFORE forests for RLS policy references)
+-- ====================
+CREATE TABLE plan_shares (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  forest_id     UUID NOT NULL,  -- FK added after forests table is created
+  shared_with   UUID NOT NULL REFERENCES profiles(id),
+  role          TEXT DEFAULT 'viewer',
+  created_at    TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(forest_id, shared_with)
+);
+
+-- ====================
 -- Forests (metsätila)
 -- ====================
 CREATE TABLE forests (
@@ -104,6 +116,16 @@ CREATE TABLE compartments (
 
 CREATE INDEX idx_compartments_geom ON compartments USING GIST(geometry);
 CREATE INDEX idx_compartments_forest ON compartments(forest_id);
+
+-- Add FK for plan_shares now that forests exists
+ALTER TABLE plan_shares ADD CONSTRAINT fk_plan_shares_forest 
+  FOREIGN KEY (forest_id) REFERENCES forests(id) ON DELETE CASCADE;
+
+ALTER TABLE plan_shares ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Owner manages shares" ON plan_shares
+  FOR ALL USING (forest_id IN (SELECT id FROM forests WHERE owner_id = auth.uid()));
+CREATE POLICY "User sees own shares" ON plan_shares
+  FOR SELECT USING (shared_with = auth.uid());
 
 ALTER TABLE compartments ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Owner access via forest" ON compartments
@@ -217,22 +239,3 @@ CREATE POLICY "Owner access via session" ON chat_messages
       SELECT id FROM forests WHERE owner_id = auth.uid()
     )
   ));
-
--- ====================
--- Plan sharing
--- ====================
-CREATE TABLE plan_shares (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  forest_id     UUID NOT NULL REFERENCES forests(id) ON DELETE CASCADE,
-  shared_with   UUID NOT NULL REFERENCES profiles(id),
-  role          TEXT DEFAULT 'viewer',
-  created_at    TIMESTAMPTZ DEFAULT now(),
-  
-  UNIQUE(forest_id, shared_with)
-);
-
-ALTER TABLE plan_shares ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Owner manages shares" ON plan_shares
-  FOR ALL USING (forest_id IN (SELECT id FROM forests WHERE owner_id = auth.uid()));
-CREATE POLICY "User sees own shares" ON plan_shares
-  FOR SELECT USING (shared_with = auth.uid());
