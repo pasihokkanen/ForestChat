@@ -123,8 +123,15 @@ CREATE INDEX IF NOT EXISTS idx_compartments_geom ON compartments USING GIST(geom
 CREATE INDEX IF NOT EXISTS idx_compartments_forest ON compartments(forest_id);
 
 -- Add FK for plan_shares now that forests exists
-ALTER TABLE plan_shares ADD CONSTRAINT IF NOT EXISTS fk_plan_shares_forest 
-  FOREIGN KEY (forest_id) REFERENCES forests(id) ON DELETE CASCADE;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_plan_shares_forest'
+  ) THEN
+    ALTER TABLE plan_shares ADD CONSTRAINT fk_plan_shares_forest 
+      FOREIGN KEY (forest_id) REFERENCES forests(id) ON DELETE CASCADE;
+  END IF;
+END $$;
 
 ALTER TABLE plan_shares ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Owner manages shares" ON plan_shares;
