@@ -191,15 +191,15 @@ export interface CompartmentFeatureCollection extends GeoJSON.FeatureCollection<
 **Key considerations:**
 - MapLibre GL requires `window` / WebGL — must be dynamically imported with `ssr: false`
 - In Next.js 16, use `next/dynamic` with `{ ssr: false }`
-- Import `maplibre-gl/dist/maplibre-gl.css` in layout or globals
+- Import `maplibre-gl/dist/maplibre-gl.css` **only** in `globals.css` (via `@import`). Do NOT import it in the component file — Next.js handles CSS imports differently for client components and globals.css is the canonical location.
+- Set `cooperativeGestures: false` — the map is full-screen in ForestLayout, so single-finger pan is the expected UX (unlike embedded maps on scrollable pages).
 
 ```tsx
 // src/components/map/MapView.tsx — skeleton
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import maplibregl from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
 
 export default function MapView() {
   const mapContainer = useRef<HTMLDivElement>(null);
@@ -212,6 +212,7 @@ export default function MapView() {
       style: "https://tiles.openfreemap.org/styles/liberty", // OpenStreetMap, no API key
       center: [24.0, 62.5], // Central Finland
       zoom: 6,
+      cooperativeGestures: false, // Full-screen map: allow single-finger pan
     });
     return () => { map.current?.remove(); };
   }, []);
@@ -253,32 +254,60 @@ export default function MapView() {
 - Modify: `src/components/map/MapView.tsx` — integrate StandLayer
 - Create: `src/lib/map/styles.ts` — color scheme for development classes
 
-**Color scheme (Finnish development classes → hex):**
+**Color scheme (development classes → hex):**
 
 ```typescript
 // src/lib/map/styles.ts
+
+// English keys — the data in Supabase uses Finnish names (from Metsäkeskus WFS).
+// This mapping handles both. The MapLibre match expression uses the English keys,
+// and the legend component shows both Finnish original + English translation.
 export const DEVELOPMENT_CLASS_COLORS: Record<string, string> = {
-  "Taimikko":                    "#90EE90", // light green — seedling
-  "Nuori kasvatusmetsikkö":      "#228B22", // forest green — young thinning
-  "Varttunut kasvatusmetsikkö":  "#006400", // dark green — mature thinning
-  "Uudistuskypsä":               "#FFD700", // gold — regeneration-ready
-  "Eri-ikäisrakenteinen":        "#9370DB", // medium purple — uneven-aged
-  "Suojuspuusto":                "#8B4513", // saddle brown — shelterwood
-  default:                       "#CCCCCC", // grey — unknown
+  "seedling":            "#90EE90", // light green — Taimikko
+  "young_thinning":      "#228B22", // forest green — Nuori kasvatusmetsikkö
+  "mature_thinning":     "#006400", // dark green — Varttunut kasvatusmetsikkö
+  "regeneration_ready":  "#FFD700", // gold — Uudistuskypsä
+  "uneven_aged":         "#9370DB", // medium purple — Eri-ikäisrakenteinen
+  "shelterwood":         "#8B4513", // saddle brown — Suojuspuusto
+  default:               "#CCCCCC", // grey — unknown
 };
 
-export function getStandColor(developmentClass: string | null): string {
-  if (!developmentClass) return DEVELOPMENT_CLASS_COLORS.default;
-  return DEVELOPMENT_CLASS_COLORS[developmentClass] ?? DEVELOPMENT_CLASS_COLORS.default;
+// Map Finnish development class names (from data) to English keys
+export const DEV_CLASS_FI_TO_EN: Record<string, string> = {
+  "Taimikko":                  "seedling",
+  "Nuori kasvatusmetsikkö":    "young_thinning",
+  "Varttunut kasvatusmetsikkö": "mature_thinning",
+  "Uudistuskypsä":             "regeneration_ready",
+  "Eri-ikäisrakenteinen":      "uneven_aged",
+  "Suojuspuusto":              "shelterwood",
+};
+
+// Human-readable labels for legend (English name → display name with Finnish)
+export const DEV_CLASS_LABELS: Record<string, string> = {
+  "seedling":            "Seedling (Taimikko)",
+  "young_thinning":      "Young thinning (Nuori kasvatusmetsikkö)",
+  "mature_thinning":     "Mature thinning (Varttunut kasvatusmetsikkö)",
+  "regeneration_ready":  "Regeneration-ready (Uudistuskypsä)",
+  "uneven_aged":         "Uneven-aged (Eri-ikäisrakenteinen)",
+  "shelterwood":         "Shelterwood (Suojuspuusto)",
+};
+
+export function getStandColor(developmentClassFi: string | null): string {
+  if (!developmentClassFi) return DEVELOPMENT_CLASS_COLORS.default;
+  const key = DEV_CLASS_FI_TO_EN[developmentClassFi];
+  return key ? (DEVELOPMENT_CLASS_COLORS[key] ?? DEVELOPMENT_CLASS_COLORS.default) : DEVELOPMENT_CLASS_COLORS.default;
 }
 ```
 
 **StandLayer component:**
-- Accepts `compartments: CompartmentFeatureCollection` as prop
-- When data changes, updates the GeoJSON source with `setData()`
+- Accepts `map: maplibregl.Map | null` and `compartments: CompartmentFeatureCollection` as props
+- The `map` prop is passed down from `MapView` which holds the map instance in a ref
+- **Map ref flow:** MapView creates the map → stores it in `useRef<maplibregl.Map>` → passes it to `StandLayer` via prop. Do NOT use a separate context or global. The ref-forwarding pattern is simplest for this two-component tree.
+- On mount (when `map` becomes non-null): call `map.addSource('stands', ...)` then `map.addLayer(...)`
+- When `compartments` changes: update the source with `map.getSource('stands').setData(compartments)`
+- On unmount: remove the layer and source from the map
 - Uses `fill-color` with match expression on `development_class`
 - Sets `fill-opacity: 0.6`, `fill-outline-color: #333`
-- Adds to map on mount, removes on unmount
 
 **StandLayer should handle:**
 - Empty data (no error, just no layer)
@@ -385,6 +414,8 @@ export const useForestStore = create<ForestStore>()((...a) => ({
 }));
 ```
 
+> **Note:** This creates a store with only MapSlice. P1.12 will recreate the store with both MapSlice + ForestSlice — this is intentional incremental construction. Don't add ForestSlice here.
+
 **Verification:** Import `useForestStore` in a test component, call `selectStand("123")`, verify state via `getState()`.
 
 ---
@@ -480,9 +511,34 @@ export default async function ForestPage({ params }: { params: Promise<{ id: str
 
 **Test data:**
 - ~10 stands with realistic Finnish attributes
-- Varied development classes (seedling, young, mature, regeneration-ready)
-- Realistic coordinates for a forest in Finland
-- Hand-crafted GeoJSON — small, self-contained
+- Varied development classes (seedling, young thinning, mature thinning, regeneration-ready)
+- Uses English development class keys (matched to `DEV_CLASS_FI_TO_EN` mapping)
+- Uses `stand_id` field (matches migration column name)
+- Realistic coordinates for a forest in Finland (~24°E, 62.5°N area)
+- Hand-crafted GeoJSON — small, self-contained, no external dependencies
+
+```typescript
+// src/lib/test-data.ts — example snippet
+import type { CompartmentFeatureCollection } from "@/types/database";
+
+export const testCompartments: CompartmentFeatureCollection = {
+  type: "FeatureCollection",
+  features: [
+    {
+      type: "Feature",
+      geometry: {
+        type: "MultiPolygon",
+        coordinates: [[[[24.00, 62.50], [24.01, 62.50], [24.01, 62.51], [24.00, 62.51], [24.00, 62.50]]]],
+      },
+      properties: {
+        id: "test-1", stand_id: "1", main_species: "Pine",
+        development_class: "mature_thinning", site_type: "mesic",
+        area_ha: 2.5, age_years: 55, volume_m3: 450,
+      },
+    },
+    // ... ~9 more stands with varied development_class values
+  ],
+};
 
 **Verification:** Load page → 10 colored polygons on map. Click each → correct popup. Legend matches. Map controls work.
 
@@ -494,7 +550,7 @@ export default async function ForestPage({ params }: { params: Promise<{ id: str
 
 ### P1.10 — Supabase Repository Functions (1h)
 
-**Objective:** Create typed data access functions that query Supabase.
+**Objective:** Create typed data access functions for server-side use (API routes, server components). Uses `createServerSupabase()` — NOT the browser client. These are safe to call from `async` server components and route handlers.
 
 **Files:**
 - Create: `src/lib/repos/compartments.ts`
@@ -506,11 +562,11 @@ export default async function ForestPage({ params }: { params: Promise<{ id: str
 
 ```typescript
 // src/lib/repos/compartments.ts
-import { createClient } from "@/lib/supabase/client";
+import { createServerSupabase } from "@/lib/supabase/server";
 import type { Compartment } from "@/types/database";
 
 export async function getCompartmentsByForest(forestId: string): Promise<Compartment[]> {
-  const supabase = createClient();
+  const supabase = await createServerSupabase();  // server-side client — awaits cookies()
   const { data, error } = await supabase
     .from("compartments")
     .select("*")
@@ -518,21 +574,6 @@ export async function getCompartmentsByForest(forestId: string): Promise<Compart
     .order("stand_id");
 
   if (error) throw new Error(`Failed to fetch compartments: ${error.message}`);
-  return data;
-}
-
-export async function getCompartmentById(id: string): Promise<Compartment | null> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("compartments")
-    .select("*")
-    .eq("id", id)
-    .single();
-
-  if (error) {
-    if (error.code === "PGRST116") return null; // no rows
-    throw new Error(`Failed to fetch compartment: ${error.message}`);
-  }
   return data;
 }
 ```
@@ -548,7 +589,7 @@ export async function getCompartmentById(id: string): Promise<Compartment | null
 
 ### P1.11 — React Data Hooks (0.75h)
 
-**Objective:** Create React hooks that fetch data on mount and expose loading/error state.
+**Objective:** Create React hooks that fetch data from Supabase using the browser client directly (NOT the server-side repos from P1.10). Each hook calls `createClient()` from `@/lib/supabase/client` inline — this is the correct pattern for client components. The repos (P1.10) are for server-side use only.
 
 **Files:**
 - Create: `src/lib/hooks/use-compartments.ts`
@@ -562,7 +603,7 @@ export async function getCompartmentById(id: string): Promise<Compartment | null
 "use client";
 
 import { useState, useEffect } from "react";
-import { getCompartmentsByForest } from "@/lib/repos/compartments";
+import { createClient } from "@/lib/supabase/client";
 import type { Compartment } from "@/types/database";
 
 export function useCompartments(forestId: string | null) {
@@ -576,8 +617,17 @@ export function useCompartments(forestId: string | null) {
     setLoading(true);
     setError(null);
 
-    getCompartmentsByForest(forestId)
-      .then((result) => { if (!cancelled) setData(result); })
+    const supabase = createClient();
+    supabase
+      .from("compartments")
+      .select("*")
+      .eq("forest_id", forestId)
+      .order("stand_id")
+      .then(({ data: compartments, error: err }) => {
+        if (cancelled) return;
+        if (err) throw new Error(err.message);
+        setData(compartments ?? []);
+      })
       .catch((err) => { if (!cancelled) setError(err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
 
@@ -644,6 +694,8 @@ export const useForestStore = create<ForestStore>()((...a) => ({
 }));
 ```
 
+> **Note:** This recreates the store from P1.6, now with both slices. Subagent: update the existing `src/lib/store/index.ts` — do NOT create a new file.
+
 **Verification:** Call `useForestStore.getState().setCompartments(data)` → `getState().compartments` reflects data.
 
 ---
@@ -696,6 +748,16 @@ export function compartmentsToGeoJSON(compartments: Compartment[]): CompartmentF
 ```
 
 **Verification:** Navigate to `/app/forest/<real-forest-id>` → compartments load from Supabase and display on map.
+
+**⚠️ Geometry format verification (before P1.13):** PostgREST (Supabase's API layer) auto-converts PostGIS geometry to GeoJSON in API responses. However, this must be verified with real data before wiring the map. Verify by:
+```bash
+# Insert a test compartment manually (via Supabase SQL Editor or admin client), then query:
+curl -s "https://xxx.supabase.co/rest/v1/compartments?select=stand_id,geometry&limit=1" \
+  -H "apikey: $NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY" \
+  -H "Authorization: Bearer $NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
+# Response should include geometry as a GeoJSON object: {"type":"MultiPolygon","coordinates":[...]}
+```
+If geometry returns as anything other than GeoJSON (e.g., hex WKB, WKT string), the `compartmentsToGeoJSON` function in P1.13 must be adjusted. PostgREST defaults to GeoJSON for geometry columns — this is almost certainly correct, but verify once data exists.
 
 ---
 
@@ -816,12 +878,14 @@ src/app/page.tsx                                ← P1.7 (landing page)
 | Risk | Probability | Mitigation |
 |---|---|---|
 | MapLibre GL SSR issues (window/WebGL) | Medium | Dynamic import `{ssr: false}` — already planned |
-| MapLibre GL 5.x API changes from docs | Low | Check [maplibre.org/maplibre-gl-js/docs/](https://maplibre.org/maplibre-gl-js/docs/) for v5 |
-| Supabase RLS prevents reads (no auth yet) | High | Phase 1 uses `createClient()` (browser, with public key) — RLS policies allow `authenticated` reads. For testing without auth, temporarily use `createAdminClient()` bypass or seed a test user session. This is a known limitation — Phase 2 (Auth) will resolve it properly. |
-| PostGIS geometry column naming in Supabase | Low | Migration uses `geometry GEOMETRY(MultiPolygon, 3067)` — Supabase returns GeoJSON automatically via `ST_AsGeoJSON`. Verify with test query. |
+| MapLibre GL 5.x cooperative gestures break single-finger pan | ✅ Fixed | Set `cooperativeGestures: false` in Map constructor (v5 defaults to true) |
+| Supabase RLS prevents reads (no auth yet) | ✅ Fixed | RLS recursion fixed via `get_shared_forest_ids_for_user()` SECURITY DEFINER function. For testing without auth, temporarily use `createAdminClient()` or seed a test session — Phase 2 (Auth) will resolve fully. |
+| PostGIS geometry return format differs from GeoJSON | Low | PostgREST returns GeoJSON by default for geometry columns. Verification step added to P1.13. |
 | OpenFreeMap tile server performance | Low | Falls back to CartoDB Positron tiles if needed |
+| Column name mismatch (stand_id vs kuvio_id) | ✅ Fixed | Migration column renamed to `stand_id`. Plan types match. |
+| Repo functions called from client components | ✅ Fixed | Hooks (P1.11) use browser client directly. Repos (P1.10) use server client — separate concerns. |
 
 ---
 
-*Plan version: 1.0 — Phase 1 detailed breakdown for ForestChat Map Foundation & Database Layer.*
+*Plan version: 1.1 — Reviewed 2026-05-21. Fixes: migration column `kuvio_id` → `stand_id`, RLS recursion via SECURITY DEFINER function, cooperative gestures, repo/hooks client pattern, English development class keys, geometry verification step, explicit map ref flow, CSS deduplication.*
 *Derived from: `~/.hermes/plans/forestchat-architecture.md` v3.0, sections 6 and 9.*

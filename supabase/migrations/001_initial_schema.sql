@@ -49,6 +49,18 @@ CREATE TABLE IF NOT EXISTS plan_shares (
   UNIQUE(forest_id, shared_with)
 );
 
+-- SECURITY DEFINER function to break RLS recursion.
+-- The "Shared read access" policies on forests/compartments/operations/plan_metadata
+-- need to read plan_shares, but plan_shares RLS references forests — creating a cycle.
+-- This function runs as the function owner, bypassing plan_shares RLS.
+CREATE OR REPLACE FUNCTION get_shared_forest_ids_for_user(user_id UUID)
+RETURNS SETOF UUID
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  SELECT forest_id FROM plan_shares WHERE shared_with = user_id
+$$;
+
 -- ====================
 -- Forests (metsätila)
 -- ====================
@@ -71,7 +83,7 @@ CREATE POLICY "Owner full access" ON forests
 DROP POLICY IF EXISTS "Shared read access" ON forests;
 CREATE POLICY "Shared read access" ON forests
   FOR SELECT USING (
-    id IN (SELECT forest_id FROM plan_shares WHERE shared_with = auth.uid())
+    id IN (SELECT get_shared_forest_ids_for_user(auth.uid()))
   );
 
 -- ====================
@@ -98,7 +110,7 @@ CREATE POLICY "Owner access via forest" ON property_boundaries
 CREATE TABLE IF NOT EXISTS compartments (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   forest_id     UUID NOT NULL REFERENCES forests(id) ON DELETE CASCADE,
-  kuvio_id      TEXT NOT NULL,
+  stand_id      TEXT NOT NULL,
   area_ha       NUMERIC,
   main_species  TEXT,
   development_class TEXT,
@@ -116,7 +128,7 @@ CREATE TABLE IF NOT EXISTS compartments (
   created_at    TIMESTAMPTZ DEFAULT now(),
   updated_at    TIMESTAMPTZ DEFAULT now(),
   
-  UNIQUE(forest_id, kuvio_id)
+  UNIQUE(forest_id, stand_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_compartments_geom ON compartments USING GIST(geometry);
@@ -148,7 +160,7 @@ CREATE POLICY "Owner access via forest" ON compartments
 DROP POLICY IF EXISTS "Shared read access" ON compartments;
 CREATE POLICY "Shared read access" ON compartments
   FOR SELECT USING (
-    forest_id IN (SELECT forest_id FROM plan_shares WHERE shared_with = auth.uid())
+    forest_id IN (SELECT get_shared_forest_ids_for_user(auth.uid()))
   );
 
 -- ====================
@@ -179,7 +191,7 @@ CREATE POLICY "Owner access via forest" ON operations
 DROP POLICY IF EXISTS "Shared read access" ON operations;
 CREATE POLICY "Shared read access" ON operations
   FOR SELECT USING (
-    forest_id IN (SELECT forest_id FROM plan_shares WHERE shared_with = auth.uid())
+    forest_id IN (SELECT get_shared_forest_ids_for_user(auth.uid()))
   );
 
 -- ====================
@@ -222,7 +234,7 @@ CREATE POLICY "Owner access via forest" ON plan_metadata
 DROP POLICY IF EXISTS "Shared read access" ON plan_metadata;
 CREATE POLICY "Shared read access" ON plan_metadata
   FOR SELECT USING (
-    forest_id IN (SELECT forest_id FROM plan_shares WHERE shared_with = auth.uid())
+    forest_id IN (SELECT get_shared_forest_ids_for_user(auth.uid()))
   );
 
 -- ====================
