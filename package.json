@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint"
   },
@@ -21,6 +21,7 @@
     "zustand": "^5.0.13"
   },
   "devDependencies": {
+    "@serwist/next": "^9.5.11",
     "@tailwindcss/postcss": "^4",
     "@types/geojson": "^7946.0.16",
     "@types/node": "^20",
