@@ -30,9 +30,14 @@ export async function proxy(request: NextRequest) {
     data: { session },
   } = await supabase.auth.getSession();
 
-  // Protect /app/* routes — only need session existence check,
+  // Protect authenticated routes — only need session existence check,
   // NOT getUser() which makes a network call on every request
-  if (!session && request.nextUrl.pathname.startsWith("/app")) {
+  const path = request.nextUrl.pathname;
+  const isProtected =
+    path.startsWith("/dashboard") ||
+    path.startsWith("/forest");
+
+  if (!session && isProtected) {
     const redirectUrl = new URL("/auth/login", request.url);
     redirectUrl.searchParams.set("redirect", request.nextUrl.pathname);
     return NextResponse.redirect(redirectUrl);

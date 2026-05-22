@@ -64,7 +64,7 @@ export default function ForestList() {
           Import your first forest to get started.
         </p>
         <Link
-          href="/app/forest/new"
+          href="/forest/new"
           className="mt-4 inline-block rounded-md bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 transition-colors"
         >
           Import Forest
@@ -78,7 +78,7 @@ export default function ForestList() {
       {forests.map((forest) => (
         <Link
           key={forest.id}
-          href={`/app/forest/${forest.id}`}
+          href={`/forest/${forest.id}`}
           className="block rounded-lg border border-gray-200 hover:border-green-300 hover:bg-green-50/50 transition-colors"
         >
           <div className="px-5 py-4 flex items-center justify-between">

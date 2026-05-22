@@ -44,7 +44,7 @@ export default function NewForestPage() {
       // Show done briefly before navigating
       setStage("done");
       await new Promise((r) => setTimeout(r, 600));
-      router.push(`/app/forest/${data.forest_id}`);
+      router.push(`/forest/${data.forest_id}`);
     } catch (err) {
       setStage("error");
       setError(err instanceof Error ? err.message : "Something went wrong");
