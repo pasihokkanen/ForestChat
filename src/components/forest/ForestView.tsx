@@ -39,8 +39,11 @@ const CROSSHAIR_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColo
  */
 export default function ForestView({ forestId }: ForestViewProps) {
   const { data: forest } = useForest(forestId);
-  const { data: compartments, error: compartmentsError } =
-    useCompartments(forestId);
+  const {
+    data: compartments,
+    loading: compartmentsLoading,
+    error: compartmentsError,
+  } = useCompartments(forestId);
   const { setForest, setCompartments } = useForestStore();
 
   // Sync Supabase data to Zustand store
@@ -55,10 +58,13 @@ export default function ForestView({ forestId }: ForestViewProps) {
   const [map, setMap] = useState<maplibregl.Map | null>(null);
 
   // Use real compartments if they have geometry, otherwise test data
+  // Only fall back to test data after loading completes (avoid flash)
   const hasGeometry = compartments.some((c) => c.geometry !== null);
   const geojson = hasGeometry
     ? compartmentsToGeoJSON(compartments)
-    : testCompartments;
+    : compartmentsLoading
+      ? null
+      : testCompartments;
 
   // Add zoom-to-property control (crosshair icon, top-right)
   const zoomControlRef = useRef<maplibregl.IControl | null>(null);
@@ -103,7 +109,7 @@ export default function ForestView({ forestId }: ForestViewProps) {
 
     // Listen for the custom zoom event
     const handleZoomToProperty = () => {
-      fitBoundsToFeatures(map, geojson);
+      if (geojson) fitBoundsToFeatures(map, geojson);
     };
     map.on("zoomtoproperty", handleZoomToProperty);
 
@@ -127,7 +133,7 @@ export default function ForestView({ forestId }: ForestViewProps) {
       >
         <MapView onMapReady={setMap} />
       </Suspense>
-      <StandLayer map={map} compartments={geojson} />
+      {geojson && <StandLayer map={map} compartments={geojson} />}
       <StandLegend />
 
       {compartmentsError && (

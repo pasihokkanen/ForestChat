@@ -13,13 +13,28 @@ const EPSG4326 = "+proj=longlat +datum=WGS84 +no_defs +type=crs";
 
 /**
  * Check if a GeoJSON geometry uses EPSG:3067 (which MapLibre can't render).
- * The Supabase import stores geometry in the original CRS.
+ * The Supabase import pipeline now stores everything in EPSG:4326,
+ * but the PostGIS column SRID may add a misleading CRS tag. Always
+ * check actual coordinate values to avoid double-reprojection.
  */
 function isEPSG3067(geometry: Record<string, unknown>): boolean {
   const crs = geometry.crs as
     | { type?: string; properties?: { name?: string } }
     | undefined;
-  return crs?.properties?.name?.includes("3067") === true;
+  if (!crs?.properties?.name?.includes("3067")) return false;
+
+  // CRS claims 3067 — but verify coordinates are actually in meters,
+  // not already reprojected to WGS84 degrees. EPSG:3067 coords for
+  // Finland are roughly x=[70k,750k] y=[6.6M,7.8M]. If coords are
+  // in degree range (-90..90 lat, -180..180 lon), they're already 4326.
+  const coords = (geometry as { coordinates?: number[][][][] }).coordinates;
+  if (!coords?.[0]?.[0]?.[0]) return true; // can't verify, trust CRS
+
+  const [x, y] = coords[0][0][0];
+  // EPSG:3067 X values for Finland are > 70,000; EPSG:4326 lon are < 180
+  if (Math.abs(x) < 180 && Math.abs(y) < 90) return false; // already 4326
+
+  return true; // large coordinate values — truly 3067
 }
 
 /**
