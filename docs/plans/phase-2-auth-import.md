@@ -23,13 +23,17 @@
 
 **⚠️ Prerequisites to Verify Before Starting (CRITICAL):**
 
-- ⚠️ **MML API key service activation:** The MML API key must be activated for the "Kiinteistötiedot" (property data) service in [OmaTili](https://omatili.maanmittauslaitos.fi). Without this, all MML requests return 401. Verify with:
+- ⚠️ **MML API endpoint verification:** The MML API must return 200 for the property boundary endpoint before the import pipeline can work. The correct auth format is **HTTP Basic Authentication** with the API key as BOTH username and password (`-u "key:key"`). Header-based auth (`-H "api-key: ..."`) does NOT work. Verify the endpoint:
 
 ```bash
-curl -sI -H "api-key: $MML_API_KEY" \
-  "https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/ogc/features/v1/"
-# Expected: HTTP 200, not 401
+curl -sI -u "$MML_API_KEY:$MML_API_KEY" \
+  "https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/ogcapi/v1/collections"
+# Expected: HTTP 200 (not 401 or 404)
+# If 404: the endpoint path may have changed. Check MML documentation at:
+# https://www.maanmittauslaitos.fi/rajapinnat/ohjeita-rajapinta-avaimen-kayttoon
 ```
+
+- ⚠️ **If the MML endpoint returns 404:** The MML API infrastructure may have been restructured. The base domain is confirmed working (bigip passes auth with 200-series response once the correct path is found). This prerequisite MUST be resolved before P2.5. Contact MML technical support at verkkopalvelut@maanmittauslaitos.fi if the documented endpoint is unreachable.
 
 - ⚠️ **Supabase Auth email provider:** Verify email auth is enabled in Supabase Dashboard → Authentication → Providers → Email (no "Confirm email" for development; enable for production).
 
@@ -61,21 +65,23 @@ P2.0 Supabase Middleware ──┬──► Track A: Auth UI ──────�
 
 ## Track A: Auth UI (~3h)
 
-### P2.0 — Supabase Auth Middleware (0.5h) **[BLOCKS ALL TRACKS]**
+### P2.0 — Supabase Auth Proxy (0.5h) **[BLOCKS ALL TRACKS]**
 
-**Objective:** Set up Next.js middleware that refreshes the Supabase session on every request and protects `/app/*` routes from unauthenticated access.
+**Objective:** Set up Next.js proxy that refreshes the Supabase session on every request and protects `/app/*` routes from unauthenticated access.
+
+**⚠️ Next.js 16:** The `middleware` naming convention is **deprecated**. The file MUST be named `src/proxy.ts` and export a function named `proxy`. The runtime is `nodejs` (not `edge`).
 
 **Files:**
-- Create: `src/middleware.ts`
+- Create: `src/proxy.ts`
 
 **Architecture:** Uses `@supabase/ssr` middleware pattern. Middleware calls `supabase.auth.getUser()` to validate the session cookie. If no valid session, redirects to `/auth/login`. Excludes public routes (`/`, `/auth/*`, `/api/*`, static assets).
 
 ```typescript
-// src/middleware.ts
+// src/proxy.ts
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -99,16 +105,12 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Refresh session (important: don't use getUser() here — it forces a network call.
-  // getSession() reads the cookie only, which is fast enough for middleware)
-  await supabase.auth.getSession();
+  // Refresh session (cookie-only, no network call)
+  const { data: { session } } = await supabase.auth.getSession();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  // Protect /app/* routes
-  if (!user && request.nextUrl.pathname.startsWith("/app")) {
+  // Protect /app/* routes — only need session existence check,
+  // NOT getUser() which makes a network call on every request
+  if (!session && request.nextUrl.pathname.startsWith("/app")) {
     const redirectUrl = new URL("/auth/login", request.url);
     redirectUrl.searchParams.set("redirect", request.nextUrl.pathname);
     return NextResponse.redirect(redirectUrl);
@@ -119,13 +121,12 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Match all routes except static files, images, and Next.js internals
     "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
 ```
 
-**⚠️ Supabase `@supabase/ssr` 0.10 note:** `getSession()` reads the cookie without a network call — mandatory for middleware performance. `getUser()` makes a network call to validate the token — call this sparingly. In middleware, `getSession()` is sufficient for routing decisions.
+**⚠️ Supabase `@supabase/ssr` 0.10 note:** `getSession()` reads the cookie without a network call — mandatory for proxy performance. Do NOT call `getUser()` in the proxy — it makes a network call to Supabase on every request, doubling latency.
 
 **Verification:** Run `npm run dev`, navigate to `/app/forest/test-1` → redirected to `/auth/login`. Navigate to `/` → landing page loads normally.
 
@@ -149,6 +150,8 @@ export async function GET(request: NextRequest) {
   const next = requestUrl.searchParams.get("next") ?? "/app/dashboard";
 
   if (code) {
+    const response = NextResponse.redirect(new URL(next, request.url));
+
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
@@ -158,44 +161,25 @@ export async function GET(request: NextRequest) {
             return request.cookies.getAll();
           },
           setAll(cookiesToSet) {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              // Route handler can set cookies via NextResponse
-            });
+            // Write cookies to the redirect response, not the request
+            cookiesToSet.forEach(({ name, value, options }) =>
+              response.cookies.set(name, value, options)
+            );
           },
         },
       }
     );
 
     await supabase.auth.exchangeCodeForSession(code);
+    return response;
   }
 
-  return NextResponse.redirect(new URL(next, request.url));
+  // No code present — redirect to login
+  return NextResponse.redirect(new URL("/auth/login", request.url));
 }
 ```
 
-**⚠️ Note:** The `setAll` in route handlers doesn't work the same as in middleware. For the callback route, use a simpler approach:
-
-```typescript
-// Simplified callback — exchange code, then redirect (cookies auto-set by Supabase)
-import { createClient } from "@supabase/supabase-js";
-import { NextResponse, type NextRequest } from "next/server";
-
-export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
-  const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/app/dashboard";
-
-  if (code) {
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
-    );
-    await supabase.auth.exchangeCodeForSession(code);
-  }
-
-  return NextResponse.redirect(new URL(next, request.url));
-}
-```
+**⚠️ Key pattern:** In route handlers (unlike middleware), `setAll` must write to the `NextResponse` object, not to a result of `NextResponse.next({ request })`. Create the response FIRST, pass it to `setAll`'s cookies, then return it after `exchangeCodeForSession`.
 
 **Supabase Auth redirect URL:** In Supabase Dashboard → Authentication → URL Configuration, set `Site URL` to `http://localhost:3000` (dev) and the production URL. Redirect URLs: `http://localhost:3000/auth/callback`, `https://<prod>/auth/callback`.
 
@@ -247,85 +231,28 @@ export default function LoginPage() {
   const searchParams = useSearchParams();
   const redirect = searchParams.get("redirect") ?? "/app/dashboard";
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
+  // ... rest stays the same
+}
+```
 
-    const supabase = createClient();
-    const { error: authError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+**⚠️ Next.js 16 `useSearchParams()`:** This hook requires a `<Suspense>` boundary. Wrap the login page in `src/app/auth/login/page.tsx`:
 
-    if (authError) {
-      setError(authError.message);
-      setLoading(false);
-    } else {
-      router.push(redirect);
-      router.refresh(); // Refresh server components
-    }
-  }
+```tsx
+// src/app/auth/login/page.tsx
+"use client";
+import { Suspense } from "react";
+import LoginForm from "./LoginForm"; // Move the form logic here
 
+export default function LoginPage() {
   return (
-    <div className="rounded-xl bg-white p-8 shadow-sm border border-gray-200">
-      <h1 className="text-xl font-semibold text-gray-900 text-center">
-        Sign in to ForestChat
-      </h1>
-      <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-        <div>
-          <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-            Email
-          </label>
-          <input
-            id="email"
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-green-500 focus:ring-1 focus:ring-green-500"
-            placeholder="you@example.com"
-          />
-        </div>
-        <div>
-          <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-            Password
-          </label>
-          <input
-            id="password"
-            type="password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-green-500 focus:ring-1 focus:ring-green-500"
-            placeholder="••••••••"
-          />
-        </div>
-
-        {error && (
-          <p className="text-sm text-red-600 bg-red-50 rounded-md px-3 py-2">
-            {error}
-          </p>
-        )}
-
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full rounded-md bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:opacity-50 transition-colors"
-        >
-          {loading ? "Signing in…" : "Sign in"}
-        </button>
-      </form>
-
-      <p className="mt-4 text-center text-sm text-gray-600">
-        Don&apos;t have an account?{" "}
-        <Link href="/auth/register" className="font-medium text-green-700 hover:text-green-800">
-          Create one
-        </Link>
-      </p>
-    </div>
+    <Suspense fallback={<div className="animate-pulse ...">Loading...</div>}>
+      <LoginForm />
+    </Suspense>
   );
 }
+```
+
+**Verification:** Navigate to `/auth/login` → enter credentials → redirected to `/app/dashboard`. Navigate to `/auth/register` → create account → see confirmation or redirect.
 ```
 
 **Register page:** Same structure but calls `supabase.auth.signUp()` with `emailRedirectTo` pointing to `/auth/callback`. Shows "Check your email" confirmation after signup (if email confirmation is enabled).
@@ -518,7 +445,7 @@ export default function ForestLayout({ children }: { children: React.ReactNode }
 
 ## Track B: Import Backend (~4.5h)
 
-> **Note for subagents:** The MML API uses header-based authentication, not query parameters. Always pass the API key as `-H "api-key: $MML_API_KEY"`. The base URL is `https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/ogc/features/v1/`. Verify API key service activation before starting track (see Prerequisites at top of plan).
+> **Note for subagents:** The MML API uses **HTTP Basic Authentication** — the API key is both the username AND password (`-u "key:key"`). Header-based auth (`-H "api-key: ..."`) does NOT work. The correct base URL must be verified first (see prerequisites). MML OmaTili API keys work immediately after creation — no service activation needed.
 
 ### P2.5 — MML API Client Utility (0.75h)
 
@@ -531,29 +458,30 @@ export default function ForestLayout({ children }: { children: React.ReactNode }
 
 | Item | Value |
 |---|---|
-| Base URL | `https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/ogc/features/v1/` |
-| Collection | `KiinteistotunnuksenSijaintitiedot` |
-| Auth | Header: `api-key: <key>` |
-| Filter | CQL2: `kiinteistotunnus='989-405-0001-0405'` |
+| Base URL | `https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/ogcapi/v1/` (verify with prerequisite check) |
+| Collection | `kiinteistotunnukset` or `KiinteistotunnuksenSijaintitiedot` |
+| Auth | **HTTP Basic Auth**: username=`api-key-value`, password=`api-key-value` |
+| Filter | CQL2 or query parameter: `kiinteistotunnus=989-405-0001-0405` |
 | CRS | EPSG:3067 (ETRS-TM35FIN, matches PostGIS geometry columns) |
 | License | CC 4.0 |
 
-**⚠️ Expected CQL2 filter note:** The MML OGC API may use a different property name than `kiinteistotunnus`. Common alternatives: `kiinteistotunnus`, `propertyidentifier`, or `kiinteistoTunnus`. The client should handle these gracefully and use the first one that returns results. Start with `kiinteistotunnus=` which is the documented parameter.
+**⚠️ CQL2 filter note:** The MML OGC API may use a different property name than `kiinteistotunnus`. Common alternatives: `kiinteistotunnus`, `propertyidentifier`, or `kiinteistoTunnus`. The client should handle these gracefully.
 
 ```typescript
 // src/lib/import/mml-client.ts
 
-const MML_BASE_URL = "https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/ogc/features/v1/";
-const MML_COLLECTION = "KiinteistotunnuksenSijaintitiedot";
+const MML_BASE_URL = "https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/ogcapi/v1/";
+const MML_COLLECTION = "kiinteistotunnukset"; // Verify during prerequisite check
 
 export interface MmlPropertyBoundary {
   propertyId: string;
-  geometry: GeoJSON.MultiPolygon; // EPSG:3067
+  geometry: GeoJSON.MultiPolygon | GeoJSON.Polygon;
   areaM2: number | null;
 }
 
 /**
  * Fetch a property boundary from MML by Finnish property ID.
+ * Uses HTTP Basic Authentication: api-key as both username and password.
  * Returns null if the property is not found.
  * Throws on network/auth errors.
  */
@@ -566,12 +494,12 @@ export async function fetchPropertyBoundary(
   // CQL2 filter by property ID
   url.searchParams.set("filter", `kiinteistotunnus='${propertyId}'`);
   url.searchParams.set("limit", "1");
-  // Request CRS matching our PostGIS column (EPSG:3067)
   url.searchParams.set("crs", "http://www.opengis.net/def/crs/EPSG/0/3067");
 
   const response = await fetch(url.toString(), {
     headers: {
-      "api-key": apiKey,
+      // HTTP Basic Auth: api-key is both username and password
+      Authorization: `Basic ${btoa(`${apiKey}:${apiKey}`)}`,
       Accept: "application/geo+json",
     },
   });
@@ -595,19 +523,20 @@ export async function fetchPropertyBoundary(
 
   return {
     propertyId,
-    geometry: feature.geometry as GeoJSON.MultiPolygon,
-    areaM2: feature.properties?.pinta_ala ?? null,
+    geometry: feature.geometry as GeoJSON.MultiPolygon | GeoJSON.Polygon,
+    areaM2: feature.properties?.pinta_ala ?? feature.properties?.area ?? null,
   };
 }
-```
 
-**Verification (MANUAL — requires activated MML key):**
+**Verification (MANUAL):**
 ```bash
-curl -s -H "api-key: $MML_API_KEY" \
-  "https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/ogc/features/v1/collections/KiinteistotunnuksenSijaintitiedot/items?filter=kiinteistotunnus='989-405-0001-0405'&limit=1" \
+curl -s -u "$MML_API_KEY:$MML_API_KEY" \
+  "https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/ogcapi/v1/collections/kiinteistotunnukset/items?kiinteistotunnus=989-405-0001-0405&limit=1" \
   | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Features: {len(d.get(\"features\",[]))}')"
 # Expected: Features: 1
-```
+# If 404: the endpoint or collection name has changed. Contact MML support.```
+
+
 
 ---
 
@@ -672,61 +601,146 @@ export async function importPropertyBoundary(
 **Files:**
 - Create: `src/lib/import/wfs-client.ts`
 
-**API details:**
+**API details (verified 2026-05-22):**
 
 | Item | Value |
 |---|---|
 | Base URL | `https://avoin.metsakeskus.fi/geoserver/v1/ows` |
 | Layer | `v1:stand` |
 | Auth | None (anonymous) |
-| Output | GeoJSON (EPSG:4326 is default; request EPSG:3067 for consistency) |
+| Output | GeoJSON with EPSG:3067 CRS |
 | Filter | BBOX spatial filter |
+
+**⚠️ CRITICAL:** The WFS `v1:stand` layer returns field names in **UPPERCASE** with **coded values**, NOT human-readable strings. The plan below uses the verified field names. See `src/lib/import/code-tables.ts` for code→text mappings.
+
+**Actual WFS fields (verified):**
+
+| WFS field | Type | Example | Maps to |
+|---|---|---|---|
+| `STANDNUMBER` | number | 77 | `stand_id` |
+| `AREA` | float | 0.718 | `area_ha` |
+| `DEVELOPMENTCLASS` | **code** | "Y1" | `development_class` (needs code table!) |
+| `FERTILITYCLASS` | **code** | 3 | `site_type` (code table) |
+| `MAINGROUP` | **code** | 1 | `main_species` (code table) |
+| `MAINTREESPECIES` | **code** | 2 | tree species (code table) |
+| `SOILTYPE` | **code** | 10 | `soil_type` (code table) |
+| `DRAINAGESTATE` | **code** | 2 | `drainage_status` (code table) |
+| `MEANAGE` | int | 59 | `age_years` |
+| `VOLUME` | float | 40.18 | `volume_m3` |
+| `BASALAREA` | float | 5.8 | `basal_area` |
+| `MEANDIAMETER` | float | 22.49 | `avg_diameter` |
+| `MEANHEIGHT` | float | 15.48 | `avg_height` |
+| `VOLUMEGROWTH` | float | 1.09 | `growth_m3_per_ha` |
+| `SAWLOGVOLUME` | float | 7.3 | → `attributes` JSONB |
+| `PULPWOODVOLUME` | float | 32.49 | → `attributes` JSONB |
+| `PROPORTIONPINE` | ratio | 0 | → `attributes` JSONB |
+| `PROPORTIONSPRUCE` | ratio | 0.002 | → `attributes` JSONB |
+| `PROPORTIONOTHER` | ratio | 0.998 | → `attributes` JSONB |
+| `STEMCOUNT` | int | 150 | → `attributes` JSONB |
+| `CUTTINGTYPE` | **code** | 1 | Pre-existing harvest proposal |
+| `CUTTINGPROPOSALYEAR` | year | 2028 | Pre-existing harvest year |
+| `SILVICULTURETYPE` | **code** | 2 | Pre-existing silviculture proposal |
+| `SILVICULTUREPROPOSALYEAR` | year | 2029 | Pre-existing silviculture year |
+| `STANDCLASS` | code | 4101 | → `attributes` JSONB |
+| `MEASUREMENTDATE` | date | 2021-06-24 | → `attributes` JSONB |
+| `TREESTANDDATE` | date | 2026-01-01 | → `attributes` JSONB |
+
+**Geometry type:** WFS returns `Polygon` (not `MultiPolygon`). PostGIS auto-casts Polygon→MultiPolygon on insert.
+
+**Code tables** (created in `src/lib/import/code-tables.ts`):
+
+```typescript
+// src/lib/import/code-tables.ts
+// Finnish Forest Centre code→text mappings (Metsätietostandardi)
+
+export const MAINGROUP_MAP: Record<number, string> = {
+  1: "Pine",
+  2: "Spruce",
+  3: "Broadleaf",
+};
+
+export const FERTILITYCLASS_MAP: Record<number, string> = {
+  1: "herb-rich",        // lehto
+  2: "herb-rich heath",  // lehtomainen kangas
+  3: "mesic",            // tuore kangas
+  4: "sub-xeric",        // kuivahko kangas
+  5: "xeric",            // kuiva kangas
+  6: "barren",           // karukkokangas
+};
+
+export const DEVELOPMENTCLASS_MAP: Record<string, string> = {
+  "A0": "open_area",           // Aukea
+  "S0": "seedling",            // Taimikko
+  "T1": "young_thinning",      // Nuori kasvatusmetsikkö (early)
+  "T2": "young_thinning",      // Nuori kasvatusmetsikkö (late)
+  "02": "mature_thinning",     // Varttunut kasvatusmetsikkö
+  "03": "mature_thinning",     // Varttunut kasvatusmetsikkö
+  "Y1": "regeneration_ready",  // Uudistuskypsä
+  "04": "regeneration_ready",  // Uudistuskypsä
+  "ER": "uneven_aged",         // Eri-ikäisrakenteinen
+  "05": "shelterwood",         // Suojuspuusto
+};
+
+export function mapWfsCode(table: Record<string, string>, code: unknown): string | null {
+  if (code === null || code === undefined) return null;
+  return table[String(code)] ?? `unknown:${code}`;
+}
+
+export function mapWfsNumericCode(table: Record<number, string>, code: unknown): string | null {
+  if (code === null || code === undefined) return null;
+  const num = typeof code === "string" ? parseInt(code, 10) : code as number;
+  return table[num] ?? null;
+}
+```
+
+**WFS client:**
 
 ```typescript
 // src/lib/import/wfs-client.ts
+import {
+  MAINGROUP_MAP, FERTILITYCLASS_MAP, DEVELOPMENTCLASS_MAP,
+  mapWfsCode, mapWfsNumericCode,
+} from "./code-tables";
 
 export interface WfsStand {
   standId: string;
   areaHa: number | null;
   mainSpecies: string | null;
-  developmentClass: string | null;
-  siteType: string | null;
-  soilType: string | null;
-  drainageStatus: string | null;
+  developmentClass: string | null;   // human-readable
+  siteType: string | null;           // human-readable
+  soilType: string | null;           // raw code (no lookup table yet)
+  drainageStatus: string | null;     // raw code (no lookup table yet)
   ageYears: number | null;
   volumeM3: number | null;
   basalArea: number | null;
   avgDiameter: number | null;
   avgHeight: number | null;
   growthM3PerHa: number | null;
-  geometry: GeoJSON.MultiPolygon; // EPSG:3067
-  attributes: Record<string, unknown>; // species breakdown, sawlog/pulpwood
+  geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon;
+  attributes: Record<string, unknown>;
 }
 
 const WFS_URL = "https://avoin.metsakeskus.fi/geoserver/v1/ows";
 
-/**
- * Bounding box from a GeoJSON MultiPolygon.
- * Returns [minLng, minLat, maxLng, maxLat] in EPSG:3067.
- */
-function bboxFromGeometry(geometry: GeoJSON.MultiPolygon): [number, number, number, number] {
+/** Bounding box from a GeoJSON Polygon or MultiPolygon. */
+function bboxFromGeometry(
+  geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon
+): [number, number, number, number] {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const polygon of geometry.coordinates) {
-    for (const ring of polygon) {
-      for (const [x, y] of ring) {
-        if (x < minX) minX = x;
-        if (y < minY) minY = y;
-        if (x > maxX) maxX = x;
-        if (y > maxY) maxY = y;
-      }
+  const rings: GeoJSON.Position[][] = geometry.type === "Polygon"
+    ? geometry.coordinates
+    : geometry.coordinates.flat();
+  for (const ring of rings) {
+    for (const [x, y] of ring) {
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
     }
   }
   return [minX, minY, maxX, maxY];
 }
 
-/**
- * Fetch stand features from Metsäkeskus WFS within a bounding box.
- */
 export async function fetchStandsByBbox(
   bbox: [number, number, number, number],
   srsName: string = "EPSG:3067"
@@ -741,50 +755,52 @@ export async function fetchStandsByBbox(
   url.searchParams.set("srsName", `urn:x-ogc:def:crs:${srsName}`);
   url.searchParams.set("bbox", `${minX},${minY},${maxX},${maxY},urn:x-ogc:def:crs:${srsName}`);
   url.searchParams.set("outputFormat", "application/json");
-  url.searchParams.set("count", "1000"); // Max features
+  url.searchParams.set("count", "2000"); // Max features per request
 
   const response = await fetch(url.toString(), {
     headers: { Accept: "application/json" },
   });
 
   if (!response.ok) {
-    throw new Error(`Metsäkeskus WFS returned ${response.status}: ${await response.text()}`);
+    throw new Error(`WFS returned ${response.status}: ${await response.text().then(t => t.slice(0, 200))}`);
   }
 
   const geojson = await response.json();
+  if (!geojson.features?.length) return [];
 
-  if (!geojson.features?.length) {
-    return [];
-  }
-
-  return geojson.features.map((f: GeoJSON.Feature) => ({
-    standId: String(f.properties?.stand_id ?? f.properties?.kuvio_id ?? f.id),
-    areaHa: f.properties?.area_ha ?? f.properties?.pinta_ala ?? null,
-    mainSpecies: f.properties?.main_species ?? f.properties?.paapuulaji ?? null,
-    developmentClass: f.properties?.development_class ?? f.properties?.kehitysluokka ?? null,
-    siteType: f.properties?.site_type ?? f.properties?.kasvupaikka ?? null,
-    soilType: f.properties?.soil_type ?? f.properties?.maapera ?? null,
-    drainageStatus: f.properties?.drainage_status ?? f.properties?.ojitustilanne ?? null,
-    ageYears: f.properties?.age_years ?? f.properties?.ika ?? null,
-    volumeM3: f.properties?.volume_m3 ?? f.properties?.tilavuus ?? null,
-    basalArea: f.properties?.basal_area ?? f.properties?.pohjapinta_ala ?? null,
-    avgDiameter: f.properties?.avg_diameter ?? f.properties?.keskilapimitta ?? null,
-    avgHeight: f.properties?.avg_height ?? f.properties?.keskipituus ?? null,
-    growthM3PerHa: f.properties?.growth_m3_per_ha ?? f.properties?.kasvu ?? null,
-    geometry: f.geometry as GeoJSON.MultiPolygon,
-    attributes: f.properties ?? {},
-  }));
+  return geojson.features.map((f: GeoJSON.Feature) => {
+    const p = f.properties ?? {};
+    return {
+      standId: String(p.STANDNUMBER ?? "?"),
+      areaHa: p.AREA ?? null,
+      // Translate codes to human-readable strings
+      mainSpecies: mapWfsNumericCode(MAINGROUP_MAP, p.MAINGROUP),
+      developmentClass: mapWfsCode(DEVELOPMENTCLASS_MAP, p.DEVELOPMENTCLASS),
+      siteType: mapWfsNumericCode(FERTILITYCLASS_MAP, p.FERTILITYCLASS),
+      soilType: p.SOILTYPE != null ? String(p.SOILTYPE) : null,
+      drainageStatus: p.DRAINAGESTATE != null ? String(p.DRAINAGESTATE) : null,
+      // Direct numeric fields (available in WFS)
+      ageYears: p.MEANAGE ?? null,
+      volumeM3: p.VOLUME ?? null,
+      basalArea: p.BASALAREA ?? null,
+      avgDiameter: p.MEANDIAMETER ?? null,
+      avgHeight: p.MEANHEIGHT ?? null,
+      growthM3PerHa: p.VOLUMEGROWTH ?? null,
+      geometry: f.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon,
+      // Preserve all original properties for future use
+      attributes: p,
+    };
+  });
 }
 ```
 
-**⚠️ WFS field name uncertainty:** The Metsäkeskus WFS `v1:stand` layer field names may differ from the architecture plan's assumptions. The client uses fallback logic (`??` chains) to handle both English and Finnish field names. **The first subagent implementing this must validate actual field names by calling the WFS endpoint and inspecting the response.**
+**⚠️ WFS pagination:** The WFS `count=2000` parameter caps results. Properties with >2000 stands need pagination via `startIndex`. Hokkala has 162 stands — well within limits.
 
-**Verification (MANUAL — test the endpoint):**
+**Verification:**
 ```bash
 curl -s "https://avoin.metsakeskus.fi/geoserver/v1/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=v1:stand&count=1&outputFormat=application/json" \
-  | python3 -c "import sys,json; d=json.load(sys.stdin); f=d['features'][0]; print(list(f['properties'].keys())[:15])"
-# Inspect actual field names
-```
+  | python3 -c "import sys,json; d=json.load(sys.stdin); f=d['features'][0]; print(list(f['properties'].keys()))"
+# Expected: STANDNUMBER, MAINGROUP, DEVELOPMENTCLASS, AREA, VOLUME, MEANAGE, etc.
 
 ---
 
@@ -922,6 +938,7 @@ $$;
 **Files:**
 - Create: `src/app/api/import/property/route.ts`
 - Create: `supabase/migrations/002_spatial_functions.sql` — RPC function for spatial filtering
+- Create: `src/lib/import/code-tables.ts` — WFS code → human-readable mappings
 
 **Migration (create new file):**
 
@@ -1039,72 +1056,16 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 7. Bulk-insert all stands
-    const compartmentRows = stands.map((stand) => ({
-      forest_id: forest.id,
-      stand_id: stand.standId,
-      area_ha: stand.areaHa,
-      main_species: stand.mainSpecies,
-      development_class: stand.developmentClass,
-      site_type: stand.siteType,
-      soil_type: stand.soilType,
-      drainage_status: stand.drainageStatus,
-      age_years: stand.ageYears,
-      volume_m3: stand.volumeM3,
-      basal_area: stand.basalArea,
-      avg_diameter: stand.avgDiameter,
-      avg_height: stand.avgHeight,
-      growth_m3_per_ha: stand.growthM3PerHa,
-      geometry: stand.geometry,
-      attributes: stand.attributes,
-    }));
-
-    const { error: insertError } = await admin
-      .from("compartments")
-      .upsert(compartmentRows, {
-        onConflict: "forest_id, stand_id",
-      });
-
-    if (insertError) {
-      throw new Error(`Failed to insert compartments: ${insertError.message}`);
-    }
-
-    // 8. Spatial filter: mark stands outside boundary for cleanup
-    //    (WFS bbox may include stands from neighboring properties)
-    const { data: withinStands, error: filterError } = await admin.rpc(
-      "compartments_within_boundary",
-      {
-        p_forest_id: forest.id,
-        p_boundary_geojson: boundary.geometry,
-      }
+    // 7. Bulk-insert stands and spatial filter in one step (uses P2.8 service)
+    const { createAdminClient } = await import("@/lib/supabase/admin");
+    const { filterStandsWithinProperty } = await import("@/lib/import/spatial-service");
+    const filteredStands = await filterStandsWithinProperty(
+      boundary.geometry,
+      stands,
+      forest.id
     );
 
-    if (filterError) {
-      // Non-fatal: boundary filtering failed, keep all stands
-      console.warn("Spatial filter warning:", filterError.message);
-    } else {
-      const withinStandIds = new Set(
-        (withinStands as { stand_id: string }[] | null)?.map((s) => s.stand_id) ?? []
-      );
-
-      // Delete stands outside the property boundary
-      const outsideIds = stands
-        .filter((s) => !withinStandIds.has(s.standId))
-        .map((s) => s.standId);
-
-      if (outsideIds.length > 0) {
-        await admin
-          .from("compartments")
-          .delete()
-          .eq("forest_id", forest.id)
-          .in("stand_id", outsideIds);
-      }
-    }
-
-    // 9. Update forest metadata
-    const finalCount = withinStands
-      ? (withinStands as { stand_id: string }[]).length
-      : stands.length;
+    const finalCount = filteredStands.length;
 
     const totalAreaHa = boundary.areaM2
       ? Math.round((boundary.areaM2 / 10000) * 100) / 100
@@ -1363,18 +1324,19 @@ export default function ImportProgress({ stage, message }: ImportProgressProps) 
 ```tsx
 // src/app/(app)/dashboard/page.tsx
 import ForestList from "@/components/forest/ForestList";
+import Link from "next/link";
 
 export default function DashboardPage() {
   return (
     <div className="max-w-4xl mx-auto p-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold text-gray-900">My Forests</h1>
-        <a
+        <Link
           href="/app/forest/new"
           className="rounded-md bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 transition-colors"
         >
           + Import Forest
-        </a>
+        </Link>
       </div>
       <ForestList />
     </div>
@@ -1579,19 +1541,20 @@ describe("Import API", () => {
 ## Files Created (Summary)
 
 ```
-src/middleware.ts                                 ← P2.0 Auth middleware
+src/proxy.ts                                     ← P2.0 Auth proxy (Next.js 16 convention)
 src/app/auth/callback/route.ts                    ← P2.1 Auth callback
 src/app/auth/layout.tsx                           ← P2.2 Auth layout
-src/app/auth/login/page.tsx                       ← P2.2 Login page
+src/app/auth/login/page.tsx                       ← P2.2 Login page (Suspense-wrapped)
+src/app/auth/login/LoginForm.tsx                  ← P2.2 Login form component
 src/app/auth/register/page.tsx                    ← P2.2 Register page
 src/lib/hooks/use-auth.ts                         ← P2.3 Auth hook
 src/components/auth/UserMenu.tsx                  ← P2.4 User menu
-src/components/auth/AuthProvider.tsx              ← P2.3 Auth context (optional)
-src/lib/import/mml-client.ts                      ← P2.5 MML API client
+src/lib/import/mml-client.ts                      ← P2.5 MML API client (Basic Auth)
 src/lib/import/boundary-service.ts                ← P2.6 Boundary store service
-src/lib/import/wfs-client.ts                      ← P2.7 WFS client
+src/lib/import/code-tables.ts                     ← P2.7 WFS code→text lookup tables
+src/lib/import/wfs-client.ts                      ← P2.7 WFS client (UPPERCASE fields)
 src/lib/import/spatial-service.ts                 ← P2.8 Spatial filter service
-src/app/api/import/property/route.ts              ← P2.9 Import API
+src/app/api/import/property/route.ts              ← P2.9 Import API (uses P2.8)
 supabase/migrations/002_spatial_functions.sql     ← P2.9 Spatial RPC
 src/app/(app)/forest/new/page.tsx                 ← P2.10 Import form
 src/components/import/ImportProgress.tsx          ← P2.11 Progress UI
