@@ -79,8 +79,9 @@ export async function filterStandsWithinProperty(
       }
     });
 
-    // 3. Sort by distance to nearest parcel centroid — tiebreaker
-    //    for duplicate stand_ids: the closer stand wins
+    // 3. Sort: first by distance to nearest parcel centroid (tiebreaker
+    //    for cross-property duplicates), then by area desc (keeps largest
+    //    fragment when WFS splits a stand by road/water)
     if (parcelCentroids.length > 0) {
       filteredStands.sort((a, b) => {
         const ca = centroidCache.get(a.standId);
@@ -97,7 +98,10 @@ export async function filterStandsWithinProperty(
             )
           );
 
-        return dist(ca) - dist(cb);
+        const d = dist(ca) - dist(cb);
+        if (d !== 0) return d;
+        // Same distance (same-stand fragments) — prefer larger area
+        return (b.areaHa ?? 0) - (a.areaHa ?? 0);
       });
     }
   } catch (err) {
