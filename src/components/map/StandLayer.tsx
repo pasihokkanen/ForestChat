@@ -125,36 +125,7 @@ export default function StandLayer({ map, compartments }: StandLayerProps) {
     const SOURCE_ID = "stands";
     const LAYER_ID = "stands-fill";
 
-    const addStandLayer = () => {
-      // Only add source/layer once
-      if (map.getSource(SOURCE_ID)) return;
-
-      map.addSource(SOURCE_ID, {
-        type: "geojson",
-        data: compartments,
-      });
-
-      map.addLayer({
-        id: LAYER_ID,
-        type: "fill",
-        source: SOURCE_ID,
-        paint: {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          "fill-color": buildMatchExpression() as any,
-          "fill-opacity": 0.6,
-          "fill-outline-color": "#333",
-        },
-      });
-    };
-
-    // Wait for style to load before adding source/layer
-    if (map.isStyleLoaded()) {
-      addStandLayer();
-    } else {
-      map.once("style.load", addStandLayer);
-    }
-
-    // Hover cursor
+    // Handler functions defined once per mount
     const setPointer = () => {
       map.getCanvas().style.cursor = "pointer";
     };
@@ -162,10 +133,6 @@ export default function StandLayer({ map, compartments }: StandLayerProps) {
       map.getCanvas().style.cursor = "";
     };
 
-    map.on("mouseenter", LAYER_ID, setPointer);
-    map.on("mouseleave", LAYER_ID, resetCursor);
-
-    // Click handler on stands layer
     const handleStandClick = (e: maplibregl.MapLayerMouseEvent) => {
       const feature = e.features?.[0];
       if (!feature) return;
@@ -203,10 +170,9 @@ export default function StandLayer({ map, compartments }: StandLayerProps) {
       popupRef.current.setLngLat(lngLat).setDOMContent(container).addTo(map);
     };
 
-    map.on("click", LAYER_ID, handleStandClick);
-
-    // Close popup on map background click
     const handleBackgroundClick = (e: maplibregl.MapMouseEvent) => {
+      // Only query if layer exists (avoids race condition on first load)
+      if (!map.getLayer(LAYER_ID)) return;
       const features = map.queryRenderedFeatures(e.point, {
         layers: [LAYER_ID],
       });
@@ -215,6 +181,39 @@ export default function StandLayer({ map, compartments }: StandLayerProps) {
       }
     };
 
+    const addStandLayer = () => {
+      // Only add source/layer once
+      if (map.getSource(SOURCE_ID)) return;
+
+      map.addSource(SOURCE_ID, {
+        type: "geojson",
+        data: compartments,
+      });
+
+      map.addLayer({
+        id: LAYER_ID,
+        type: "fill",
+        source: SOURCE_ID,
+        paint: {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          "fill-color": buildMatchExpression() as any,
+          "fill-opacity": 0.6,
+          "fill-outline-color": "#333",
+        },
+      });
+    };
+
+    // Wait for style to load before adding source/layer
+    if (map.isStyleLoaded()) {
+      addStandLayer();
+    } else {
+      map.once("style.load", addStandLayer);
+    }
+
+    // Event handlers — background click is safe (guards with getLayer)
+    map.on("mouseenter", LAYER_ID, setPointer);
+    map.on("mouseleave", LAYER_ID, resetCursor);
+    map.on("click", LAYER_ID, handleStandClick);
     map.on("click", handleBackgroundClick);
 
     return () => {

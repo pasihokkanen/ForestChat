@@ -4,6 +4,7 @@ import { useCompartments } from "@/lib/hooks/use-compartments";
 import { useForest } from "@/lib/hooks/use-forest";
 import { useForestStore } from "@/lib/store";
 import { compartmentsToGeoJSON, fitBoundsToFeatures } from "@/lib/map/geojson";
+import type { CompartmentFeatureCollection } from "@/types/database";
 import { useEffect, useState, useRef, Suspense } from "react";
 import dynamic from "next/dynamic";
 import StandLayer from "@/components/map/StandLayer";
@@ -59,11 +60,12 @@ export default function ForestView({ forestId }: ForestViewProps) {
 
   // Use real compartments if they have geometry, otherwise test data
   // Only fall back to test data after loading completes (avoid flash)
+  const EMPTY_GEOJSON: CompartmentFeatureCollection = { type: "FeatureCollection", features: [] };
   const hasGeometry = compartments.some((c) => c.geometry !== null);
   const geojson = hasGeometry
     ? compartmentsToGeoJSON(compartments)
     : compartmentsLoading
-      ? null
+      ? EMPTY_GEOJSON
       : testCompartments;
 
   // Add zoom-to-property control (crosshair icon, top-right)
@@ -109,7 +111,7 @@ export default function ForestView({ forestId }: ForestViewProps) {
 
     // Listen for the custom zoom event
     const handleZoomToProperty = () => {
-      if (geojson) fitBoundsToFeatures(map, geojson);
+      fitBoundsToFeatures(map, geojson);
     };
     map.on("zoomtoproperty", handleZoomToProperty);
 
@@ -133,7 +135,7 @@ export default function ForestView({ forestId }: ForestViewProps) {
       >
         <MapView onMapReady={setMap} />
       </Suspense>
-      {geojson && <StandLayer map={map} compartments={geojson} />}
+      <StandLayer map={map} compartments={geojson} />
       <StandLegend />
 
       {compartmentsError && (
