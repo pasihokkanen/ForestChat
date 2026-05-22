@@ -15,7 +15,7 @@ export default function StandLegend() {
   );
 
   return (
-    <div className="absolute bottom-6 left-3 z-10 bg-white/90 backdrop-blur rounded-lg shadow-lg p-3 text-xs text-gray-900 max-w-[220px]">
+<div className="absolute bottom-14 left-3 z-10 bg-white/90 dark:bg-gray-900/90 backdrop-blur rounded-lg shadow-lg p-3 text-xs text-gray-900 dark:text-gray-100 max-w-[220px]">
       <h4 className="font-semibold text-sm mb-2">Development class</h4>
       <ul className="space-y-1">
         {entries.map(([key, color]) => (

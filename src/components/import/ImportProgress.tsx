@@ -32,9 +32,9 @@ export default function ImportProgress({
   const currentIndex = stages.findIndex((s) => s.key === stage);
 
   return (
-    <div className="mt-4 rounded-md bg-blue-50 border border-blue-200 px-4 py-3 text-sm">
+    <div className="mt-4 rounded-md bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 px-4 py-3 text-sm">
       {stage === "error" ? (
-        <p className="text-red-700">{message || "Import failed"}</p>
+        <p className="text-red-700 dark:text-red-400">{message || "Import failed"}</p>
       ) : (
         <div className="space-y-1">
           {stages.map((s, i) => (
@@ -42,17 +42,17 @@ export default function ImportProgress({
               {i < currentIndex ? (
                 <span className="text-green-600">✓</span>
               ) : i === currentIndex ? (
-                <span className="animate-spin text-blue-600">⏳</span>
+                <span className="animate-spin text-blue-600 dark:text-blue-400">⏳</span>
               ) : (
                 <span className="text-gray-300">○</span>
               )}
               <span
                 className={
                   i < currentIndex
-                    ? "text-green-700"
+                    ? "text-green-700 dark:text-green-400"
                     : i === currentIndex
-                      ? "text-blue-700 font-medium"
-                      : "text-gray-400"
+                      ? "text-blue-700 dark:text-blue-300 font-medium"
+                      : "text-gray-400 dark:text-gray-500"
                 }
               >
                 {s.label}

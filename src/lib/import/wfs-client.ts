@@ -1,3 +1,4 @@
+import proj4 from "proj4";
 import {
   MAINGROUP_MAP,
   FERTILITYCLASS_MAP,
@@ -6,6 +7,21 @@ import {
   mapWfsNumericCode,
 } from "./code-tables";
 import { reproject3067to4326 } from "./mml-client";
+
+const EPSG3067 =
+  "+proj=utm +zone=35 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs +type=crs";
+
+/**
+ * Reproject bounding box from EPSG:4326 (WGS84 degrees) to EPSG:3067 (ETRS-TM35FIN meters).
+ * MML boundary API returns EPSG:4326, but Metsäkeskus WFS requires EPSG:3067 bbox.
+ */
+export function bbox4326to3067(
+  bbox: [number, number, number, number]
+): [number, number, number, number] {
+  const [minX, minY] = proj4("EPSG:4326", EPSG3067, [bbox[0], bbox[1]]);
+  const [maxX, maxY] = proj4("EPSG:4326", EPSG3067, [bbox[2], bbox[3]]);
+  return [minX, minY, maxX, maxY];
+}
 
 export interface WfsStand {
   standId: string;

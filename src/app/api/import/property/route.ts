@@ -77,10 +77,11 @@ export async function POST(request: NextRequest) {
     }
 
     // 6. Fetch stands from Metsäkeskus WFS
-    const { fetchStandsByBbox, bboxFromGeometry } = await import(
+    const { fetchStandsByBbox, bboxFromGeometry, bbox4326to3067 } = await import(
       "@/lib/import/wfs-client"
     );
-    const bbox = bboxFromGeometry(boundary.geometry);
+    const bbox4326 = bboxFromGeometry(boundary.geometry);
+    const bbox = bbox4326to3067(bbox4326);
     const stands = await fetchStandsByBbox(bbox);
 
     if (stands.length === 0) {

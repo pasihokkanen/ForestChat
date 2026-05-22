@@ -8,10 +8,10 @@ export default function ForestLayout({
 }) {
   return (
     <div className="flex flex-col h-screen">
-      <header className="h-12 border-b bg-white flex items-center justify-between px-4 shrink-0">
+      <header className="h-12 border-b bg-white dark:bg-gray-900 flex items-center justify-between px-4 shrink-0">
         <Link
           href="/dashboard"
-          className="font-semibold text-gray-900 hover:text-green-700 transition-colors"
+          className="font-semibold text-gray-900 dark:text-gray-100 hover:text-green-700 dark:hover:text-green-400 transition-colors"
         >
           ForestChat
         </Link>

@@ -89,7 +89,7 @@ export default function ForestList() {
         {[1, 2, 3].map((i) => (
           <div
             key={i}
-            className="h-16 rounded-lg bg-gray-100 animate-pulse"
+            className="h-16 rounded-lg bg-gray-100 dark:bg-gray-800 animate-pulse"
           />
         ))}
       </div>
@@ -98,7 +98,7 @@ export default function ForestList() {
 
   if (error) {
     return (
-      <div className="rounded-md bg-red-50 px-4 py-3 text-sm text-red-700">
+      <div className="rounded-md bg-red-50 dark:bg-red-950 px-4 py-3 text-sm text-red-700 dark:text-red-400">
         Failed to load forests: {error}
       </div>
     );
@@ -107,13 +107,13 @@ export default function ForestList() {
   if (forests.length === 0) {
     return (
       <div className="text-center py-12">
-        <p className="text-gray-500">No forests yet.</p>
-        <p className="text-sm text-gray-400 mt-1">
+        <p className="text-gray-500 dark:text-gray-400">No forests yet.</p>
+        <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
           Import your first forest to get started.
         </p>
         <Link
           href="/forest/new"
-          className="mt-4 inline-block rounded-md bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 transition-colors"
+          className="mt-4 inline-block rounded-md bg-green-700 dark:bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 dark:hover:bg-green-700 transition-colors"
         >
           Import Forest
         </Link>
@@ -126,7 +126,7 @@ export default function ForestList() {
       {forests.map((forest) => (
         <div
           key={forest.id}
-          className="block rounded-lg border border-gray-200 hover:border-green-300 hover:bg-green-50/50 transition-colors"
+          className="block rounded-lg border border-gray-200 dark:border-gray-700 hover:border-green-300 dark:hover:border-green-700 hover:bg-green-50/50 transition-colors"
         >
           <div className="px-5 py-4 flex items-center justify-between">
             <Link
@@ -134,8 +134,8 @@ export default function ForestList() {
               className="flex-1 flex items-center justify-between"
             >
               <div>
-                <h3 className="font-medium text-gray-900">{forest.name}</h3>
-                <div className="flex gap-3 mt-1 text-xs text-gray-500">
+                <h3 className="font-medium text-gray-900 dark:text-gray-100">{forest.name}</h3>
+                <div className="flex gap-3 mt-1 text-xs text-gray-500 dark:text-gray-400">
                   {forest.property_id && <span>{forest.property_id}</span>}
                   {forest.municipality && <span>· {forest.municipality}</span>}
                   {forest.total_area_ha && (
@@ -143,23 +143,23 @@ export default function ForestList() {
                   )}
                 </div>
               </div>
-              <span className="text-gray-400">→</span>
+              <span className="text-gray-400 dark:text-gray-500">→</span>
             </Link>
 
             {confirmId === forest.id ? (
               <div className="flex items-center gap-2 ml-4">
-                <span className="text-xs text-red-600">Delete?</span>
+                <span className="text-xs text-red-600 dark:text-red-400">Delete?</span>
                 <button
                   onClick={() => handleDelete(forest.id)}
                   disabled={deleting === forest.id}
-                  className="rounded bg-red-600 px-2 py-1 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                  className="rounded bg-red-600 dark:bg-red-500 px-2 py-1 text-xs font-semibold text-white hover:bg-red-700 dark:hover:bg-red-600 disabled:opacity-50"
                 >
                   {deleting === forest.id ? "…" : "Yes"}
                 </button>
                 <button
                   onClick={cancelDelete}
                   disabled={deleting === forest.id}
-                  className="rounded bg-gray-200 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-300 disabled:opacity-50"
+                  className="rounded bg-gray-200 dark:bg-gray-700 px-2 py-1 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 disabled:opacity-50"
                 >
                   No
                 </button>
@@ -170,7 +170,7 @@ export default function ForestList() {
                   e.preventDefault();
                   startDelete(forest.id);
                 }}
-                className="ml-4 rounded-md border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 hover:border-red-300 transition-colors"
+                className="ml-4 rounded-md border border-red-200 dark:border-red-800 px-3 py-1.5 text-xs font-semibold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:border-red-300 dark:hover:border-red-700 transition-colors"
               >
                 Delete
               </button>
