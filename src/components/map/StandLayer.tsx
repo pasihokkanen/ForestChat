@@ -6,31 +6,57 @@ import { createRoot } from "react-dom/client";
 import type { CompartmentFeatureCollection } from "@/types/database";
 import StandPopup from "./StandPopup";
 import { fitBoundsToFeatures } from "@/lib/map/geojson";
+import { DEVELOPMENT_CLASS_COLORS } from "@/lib/map/styles";
 
-// Finnish → English development class mapping
-const FI_TO_EN: Record<string, string> = {
-  Taimikko: "seedling",
-  "Nuori kasvatusmetsikkö": "young_thinning",
-  "Varttunut kasvatusmetsikkö": "mature_thinning",
-  Uudistuskypsä: "regeneration_ready",
-  "Eri-ikäisrakenteinen": "uneven_aged",
-  Suojuspuusto: "shelterwood",
-};
-
-// English → hex color mapping
-const EN_TO_COLOR: Record<string, string> = {
-  seedling: "#90EE90",
-  young_thinning: "#228B22",
-  mature_thinning: "#006400",
-  regeneration_ready: "#FFD700",
-  uneven_aged: "#9370DB",
-  shelterwood: "#8B4513",
-};
+// Age-based color palette (warm=young → cool=old)
+const AGE_COLORS = [
+  "#ffffb2", // 0-10: pale yellow
+  "#fecc5c", // 11-20
+  "#fd8d3c", // 21-40
+  "#f03b20", // 41-60
+  "#bd0026", // 61-80
+  "#4a1486", // 81-100
+  "#1a0a3e", // 101+: deep purple
+];
 
 export interface StandLayerProps {
   map: maplibregl.Map | null;
   compartments: CompartmentFeatureCollection;
 }
+
+/**
+ * Determine if age-based coloring should be used.
+ * Rules: max age gap > 10 years, no dominant bracket > 70%.
+ */
+function shouldUseAgeColoring(
+  features: CompartmentFeatureCollection["features"],
+): boolean {
+  const ages: number[] = [];
+  for (const f of features) {
+    const age = f.properties?.age_years as number | undefined;
+    if (age != null && age > 0) ages.push(age);
+  }
+  if (ages.length < 3) return false;
+
+  const min = Math.min(...ages);
+  const max = Math.max(...ages);
+  if (max - min <= 10) return false;
+
+  // Check no single bracket > 70%
+  const bracketSize = Math.max(10, Math.floor((max - min) / 6));
+  const brackets = new Map<number, number>();
+  for (const a of ages) {
+    const key = Math.floor(a / bracketSize);
+    brackets.set(key, (brackets.get(key) ?? 0) + 1);
+  }
+  const maxPct = Math.max(...brackets.values()) / ages.length;
+  return maxPct <= 0.7;
+}
+
+/**
+ * Build MapLibre step stops for age-based coloring.
+ */
+// (inline in buildMatchExpression)
 
 /**
  * Renders forest stand polygons on a MapLibre map and handles
@@ -39,18 +65,59 @@ export interface StandLayerProps {
 export default function StandLayer({ map, compartments }: StandLayerProps) {
   const popupRef = useRef<maplibregl.Popup | null>(null);
   const hasZoomed = useRef(false);
+  const useAgeColor = shouldUseAgeColoring(compartments.features);
 
+  // Build MapLibre match expression for fill-color
   const buildMatchExpression = useCallback((): maplibregl.Expression => {
-    // Build a MapLibre match expression: ["match", ["get", "development_class"],
-    //   "Taimikko", "#90EE90", ..., "#CCCCCC"]
-    const pairs: unknown[] = ["match", ["get", "development_class"]];
-    for (const [fi, en] of Object.entries(FI_TO_EN)) {
-      pairs.push(fi);
-      pairs.push(EN_TO_COLOR[en] ?? "#CCCCCC");
+    if (useAgeColor) {
+      // Age-based coloring with MapLibre "step" expression (ranges)
+      const ages: number[] = [];
+      for (const f of compartments.features) {
+        const age = f.properties?.age_years as number | undefined;
+        if (age != null && age > 0) ages.push(age);
+      }
+      const min = Math.min(...ages);
+      const max = Math.max(...ages);
+      const bracketSize = Math.max(10, Math.floor((max - min) / (AGE_COLORS.length - 1)));
+
+      // Build step expression: [step, [get, "age_years"], color0, step1, color1, ...]
+      const steps: unknown[] = ["step", ["to-number", ["get", "age_years"]]];
+      steps.push(AGE_COLORS[0]); // default / youngest
+
+      for (let i = 1; i < AGE_COLORS.length; i++) {
+        steps.push(min + bracketSize * i);
+        steps.push(AGE_COLORS[i]);
+      }
+      return steps as unknown as maplibregl.Expression;
     }
+
+    // Development class coloring — handle both FI and EN names
+    const pairs: unknown[] = ["match", ["get", "development_class"]];
+
+    // English values (new imports)
+    for (const [en, color] of Object.entries(DEVELOPMENT_CLASS_COLORS)) {
+      if (en === "default") continue;
+      pairs.push(en);
+      pairs.push(color);
+    }
+
+    // Finnish values (legacy data or unmapped)
+    pairs.push("Taimikko");
+    pairs.push(DEVELOPMENT_CLASS_COLORS.seedling);
+    pairs.push("Nuori kasvatusmetsikkö");
+    pairs.push(DEVELOPMENT_CLASS_COLORS.young_thinning);
+    pairs.push("Varttunut kasvatusmetsikkö");
+    pairs.push(DEVELOPMENT_CLASS_COLORS.mature_thinning);
+    pairs.push("Uudistuskypsä");
+    pairs.push(DEVELOPMENT_CLASS_COLORS.regeneration_ready);
+    pairs.push("Eri-ikäisrakenteinen");
+    pairs.push(DEVELOPMENT_CLASS_COLORS.uneven_aged);
+    pairs.push("Suojuspuusto");
+    pairs.push(DEVELOPMENT_CLASS_COLORS.shelterwood);
+
     pairs.push("#CCCCCC"); // default fallback
     return pairs as unknown as maplibregl.Expression;
-  }, []);
+  }, [compartments.features, useAgeColor]);
 
   useEffect(() => {
     if (!map) return;
@@ -185,7 +252,6 @@ export default function StandLayer({ map, compartments }: StandLayerProps) {
       tryFit();
     } else {
       map.once("style.load", () => {
-        // Small delay to let the source be added
         setTimeout(tryFit, 100);
       });
     }

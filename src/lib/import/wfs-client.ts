@@ -5,6 +5,7 @@ import {
   mapWfsCode,
   mapWfsNumericCode,
 } from "./code-tables";
+import { reproject3067to4326 } from "./mml-client";
 
 export interface WfsStand {
   standId: string;
@@ -96,6 +97,7 @@ export async function fetchStandsByBbox(
 
   return geojson.features.map((f: GeoJSON.Feature) => {
     const p = f.properties ?? {};
+    const rawGeom = f.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
     return {
       standId: String(p.STANDNUMBER ?? "?"),
       areaHa: p.AREA ?? null,
@@ -111,7 +113,9 @@ export async function fetchStandsByBbox(
       avgDiameter: p.MEANDIAMETER ?? null,
       avgHeight: p.MEANHEIGHT ?? null,
       growthM3PerHa: p.VOLUMEGROWTH ?? null,
-      geometry: toMultiPolygon(f.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon),
+      geometry: toMultiPolygon(
+        reproject3067to4326(rawGeom) as GeoJSON.Polygon | GeoJSON.MultiPolygon
+      ),
       attributes: p,
     };
   });

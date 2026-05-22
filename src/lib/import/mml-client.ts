@@ -1,6 +1,6 @@
 import proj4 from "proj4";
 
-// EPSG:3067 (ETRS-TM35FIN) definition for proj4
+// EPSG:3067 (ETRS-TM35FIN) definition for proj4 — used only for WFS reprojection
 const EPSG3067 =
   "+proj=utm +zone=35 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs +type=crs";
 
@@ -10,7 +10,7 @@ const MML_COLLECTION = "PalstanSijaintitiedot"; // Plot boundary polygons
 
 export interface MmlPropertyBoundary {
   propertyId: string;
-  geometry: GeoJSON.MultiPolygon; // Combined from all plots, in EPSG:3067
+  geometry: GeoJSON.MultiPolygon; // Combined from all plots, in EPSG:4326 (WGS84)
   areaM2: number | null;
   plotCount: number;
 }
@@ -24,7 +24,7 @@ function normalizePropertyId(id: string): string {
 
 /**
  * Fetch property boundary from MML v3 API by Finnish property ID.
- * Combines all plots into a single MultiPolygon in EPSG:3067.
+ * Combines all plots into a single MultiPolygon in EPSG:4326.
  * Returns null if the property is not found.
  */
 export async function fetchPropertyBoundary(
@@ -63,22 +63,14 @@ export async function fetchPropertyBoundary(
 
   const features = geojson.features;
 
-  // Combine all plots into a MultiPolygon, converting EPSG:4326→EPSG:3067
-  const polygons: GeoJSON.Polygon[] = features.map(
-    (f: GeoJSON.Feature) => {
-      const geom = f.geometry as GeoJSON.Polygon;
-      const convertedCoords = geom.coordinates.map((ring) =>
-        ring.map(([lon, lat]: number[]) =>
-          proj4("EPSG:4326", EPSG3067, [lon, lat])
-        )
-      );
-      return { type: "Polygon" as const, coordinates: convertedCoords };
-    }
+  // Combine all plots into a MultiPolygon — keep in EPSG:4326
+  const coordinates: GeoJSON.Position[][][] = features.map(
+    (f: GeoJSON.Feature) => (f.geometry as GeoJSON.Polygon).coordinates
   );
 
   const multiPolygon: GeoJSON.MultiPolygon = {
     type: "MultiPolygon",
-    coordinates: polygons.map((p) => p.coordinates),
+    coordinates,
   };
 
   return {
@@ -86,5 +78,31 @@ export async function fetchPropertyBoundary(
     geometry: multiPolygon,
     areaM2: null,
     plotCount: features.length,
+  };
+}
+
+/**
+ * Reproject WFS stand geometry from EPSG:3067 to EPSG:4326.
+ * PostGIS geometry columns use SRID 4326, so all data must be
+ * stored in WGS84 lat/lng for correct spatial queries.
+ */
+export function reproject3067to4326(
+  geom: GeoJSON.Polygon | GeoJSON.MultiPolygon
+): GeoJSON.Polygon | GeoJSON.MultiPolygon {
+  const reprojectRing = (ring: GeoJSON.Position[]): GeoJSON.Position[] =>
+    ring.map(([x, y]) => proj4(EPSG3067, "EPSG:4326", [x, y]));
+
+  if (geom.type === "Polygon") {
+    return {
+      type: "Polygon",
+      coordinates: geom.coordinates.map(reprojectRing),
+    };
+  }
+
+  return {
+    type: "MultiPolygon",
+    coordinates: geom.coordinates.map((polygon) =>
+      polygon.map(reprojectRing)
+    ),
   };
 }
