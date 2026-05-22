@@ -813,11 +813,13 @@ export async function getCachedCompartments(forestId: string) {
 
 ---
 
-### P1.15 — Integration Test (0.25h)
+### P1.15 — Integration Test & Verification (0.25h)
 
-**Objective:** Verify the full pipeline end-to-end.
+**Objective:** Run the full test suite and verify the pipeline end-to-end.
 
-**Test script:** Manual checklist, or optionally a Playwright test.
+**Files:**
+- Run: `npm test` — runs all Vitest tests (unit + integration + component)
+- Run: `npm run test:coverage` — check coverage report
 
 **Checklist:**
 1. `npm run dev` → app compiles with no errors
@@ -830,8 +832,65 @@ export async function getCachedCompartments(forestId: string) {
 8. Refresh → data loads from IndexedDB cache (if previously fetched)
 9. No console errors
 10. `npm run build` → builds successfully (no Webpack errors)
+11. `npm test` → all tests pass (unit + integration + component)
 
-**Verification:** All 10 checklist items pass.
+**Verification:** All 11 checklist items pass.
+
+---
+
+## Testing Strategy
+
+ForestChat uses **Vitest** with a layered test approach. Tests follow TDD: write the test before the implementation (RED → GREEN → REFACTOR).
+
+### Test infrastructure (Phase 1 setup — DONE)
+
+```
+vitest.config.ts                                ← Vitest configuration
+src/__tests__/setup.ts                          ← Global setup (RTL matchers, cleanup)
+src/__tests__/mocks/server.ts                   ← MSW server (Supabase API mock)
+src/__tests__/mocks/handlers.ts                 ← MSW route handlers
+```
+
+### NPM scripts
+
+| Script | Command | Use |
+|---|---|---|
+| `npm test` | `vitest run` | CI / pre-commit (single run) |
+| `npm run test:watch` | `vitest` | Development (auto-rerun on change) |
+| `npm run test:ui` | `vitest --ui` | Visual test explorer (browser UI) |
+| `npm run test:coverage` | `vitest run --coverage` | Coverage report (text + lcov) |
+
+### Test layers
+
+| Layer | Framework | Location | Tests per task |
+|---|---|---|---|
+| **Unit** | Vitest | `src/__tests__/unit/` | Pure functions: map styles, GeoJSON converter, color helpers, store slices |
+| **Component** | Vitest + RTL | `src/__tests__/components/` | React rendering: MapView, StandLayer, StandPopup, StandLegend, ForestView |
+| **Integration** | Vitest + MSW | `src/__tests__/integration/` | Hooks + Supabase REST: useCompartments, useForest, useOperations, IndexedDB sync |
+| **E2E** | Playwright (Phase 5) | `e2e/` | Full browser flows: login → import → map interaction → chat |
+
+### Test-to-task mapping
+
+| Task | Test file(s) | Type | What it validates |
+|---|---|---|---|
+| P1.0 | — | TypeScript | `tsc --noEmit` checks type correctness |
+| P1.3 | `unit/map-styles.test.ts` | Unit | Color map completeness, `getStandColor()` correctness |
+| P1.6 | `unit/map-slice.test.ts` | Unit | Store slice initialization, setters, state transitions |
+| P1.9 | — | Manual | Test data renders correctly (visual verification) |
+| P1.10 | `integration/*.test.ts` | Integration | Repo functions return typed data, error handling |
+| P1.11 | `integration/use-compartments.test.ts` | Integration | Hooks fetch via MSW-mocked Supabase, handle loading/error |
+| P1.12 | `unit/forest-slice.test.ts` | Unit | ForestSlice initialization, setters, clearForestData |
+| P1.13 | `unit/geojson.test.ts` | Unit | `compartmentsToGeoJSON()` edge cases: null geometry, empty, all-null |
+| P1.14 | `integration/*-sync.test.ts` | Integration | IndexedDB cache write, stale-while-revalidate flow |
+| P1.15 | All of the above | Suite | Full `npm test` passes |
+
+### Writing new tests (conventions)
+
+1. **Unit tests** (`src/__tests__/unit/`): Import the function/class directly. No MSW, no React. Fastest.
+2. **Component tests** (`src/__tests__/components/`): Render with RTL. Mock MapLibre GL constructor (jsdom has no WebGL). Test rendering logic and prop contracts — visual map interactions go to Playwright E2E.
+3. **Integration tests** (`src/__tests__/integration/`): Use MSW `server.use()` to add per-test route overrides. Test the full client → mock API → state flow.
+
+All tests use Vitest's `describe`/`it`/`expect` (Jest-compatible API). Global setup in `src/__tests__/setup.ts` auto-imports `@testing-library/jest-dom` matchers and runs `cleanup()` after each test.
 
 ---
 
@@ -859,6 +918,14 @@ src/lib/hooks/use-forest.ts                     ← P1.11
 src/lib/sync/compartments-sync.ts               ← P1.14
 src/lib/sync/operations-sync.ts                 ← P1.14
 src/lib/test-data.ts                            ← P1.9
+src/__tests__/unit/map-styles.test.ts           ← P1.3 test
+src/__tests__/unit/map-slice.test.ts            ← P1.6 test
+src/__tests__/unit/geojson.test.ts              ← P1.13 test
+src/__tests__/integration/use-compartments.test.ts ← P1.11 test
+src/__tests__/components/MapView.test.tsx        ← P1.2 test
+src/__tests__/mocks/handlers.ts                 ← Test infrastructure
+src/__tests__/mocks/server.ts                   ← Test infrastructure
+src/__tests__/setup.ts                          ← Test infrastructure (global)
 src/app/(app)/layout.tsx                        ← P1.7
 src/app/(app)/forest/[id]/page.tsx              ← P1.7, P1.13
 ```
