@@ -12,8 +12,9 @@ interface UseCompartmentsResult {
 
 /**
  * Fetches compartments for a forest from Supabase.
- * Uses the `get_compartments_geojson` RPC to get geometry as
- * GeoJSON (not WKB), so MapLibre can render it directly.
+ * Supabase returns PostGIS geometry as GeoJSON objects directly.
+ * The `compartmentsToGeoJSON` converter handles CRS reprojection
+ * from EPSG:3067 to EPSG:4326 for MapLibre rendering.
  */
 export function useCompartments(
   forestId: string | null
@@ -37,29 +38,17 @@ export function useCompartments(
     const fetchCompartments = async () => {
       try {
         const supabase = createClient();
-        const { data: result, error: fetchError } = await supabase.rpc(
-          "get_compartments_geojson",
-          { p_forest_id: forestId }
-        );
+        const { data: result, error: fetchError } = await supabase
+          .from("compartments")
+          .select("*")
+          .eq("forest_id", forestId)
+          .order("stand_id");
 
         if (cancelled) return;
 
         if (fetchError) {
-          // Fall back to direct query if RPC not deployed yet
-          const { data: fallback, error: fbError } = await supabase
-            .from("compartments")
-            .select("*")
-            .eq("forest_id", forestId)
-            .order("stand_id");
-
-          if (cancelled) return;
-
-          if (fbError) {
-            setError(fbError.message);
-            setData([]);
-          } else {
-            setData((fallback as Compartment[]) ?? []);
-          }
+          setError(fetchError.message);
+          setData([]);
         } else {
           setData((result as Compartment[]) ?? []);
         }

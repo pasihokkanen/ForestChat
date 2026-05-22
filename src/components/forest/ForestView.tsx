@@ -22,10 +22,10 @@ interface ForestViewProps {
 /**
  * Orchestrates data loading and map rendering for a forest.
  *
- * Geometry detection: when using the `get_compartments_geojson` RPC,
- * geometry comes as a JSON object. When using the fallback direct query,
- * geometry is a WKB hex string — not renderable. We detect by checking
- * if geometry has a `type` property (GeoJSON) rather than being a string (WKB).
+ * Supabase returns PostGIS geometry as GeoJSON objects directly.
+ * `compartmentsToGeoJSON` handles EPSG:3067→4326 CRS reprojection
+ * so MapLibre renders stands at correct lat/lng coordinates.
+ * Falls back to test data when no compartments have real geometry.
  */
 export default function ForestView({ forestId }: ForestViewProps) {
   const { data: forest } = useForest(forestId);
@@ -44,15 +44,9 @@ export default function ForestView({ forestId }: ForestViewProps) {
 
   const [map, setMap] = useState<maplibregl.Map | null>(null);
 
-  // Detect if geometry is proper GeoJSON (has "type" property) or WKB string
-  const hasGeoJSON = compartments.some(
-    (c) =>
-      c.geometry !== null &&
-      typeof c.geometry === "object" &&
-      "type" in (c.geometry as unknown as Record<string, unknown>)
-  );
-
-  const geojson = hasGeoJSON
+  // Use real compartments if they have geometry, otherwise test data
+  const hasGeometry = compartments.some((c) => c.geometry !== null);
+  const geojson = hasGeometry
     ? compartmentsToGeoJSON(compartments)
     : testCompartments;
 
@@ -69,15 +63,6 @@ export default function ForestView({ forestId }: ForestViewProps) {
       </Suspense>
       <StandLayer map={map} compartments={geojson} />
       <StandLegend />
-
-      {/* Warning when using test data */}
-      {!hasGeoJSON && compartments.length > 0 && (
-        <div className="absolute top-4 left-4 z-10 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-xs text-amber-800 max-w-xs">
-          Showing sample data. Run migration{" "}
-          <code className="bg-amber-100 px-1 rounded">003_geojson_rpc.sql</code>{" "}
-          in Supabase SQL Editor to see real stands.
-        </div>
-      )}
 
       {compartmentsError && (
         <div className="absolute top-4 left-4 z-10 bg-red-50 border border-red-200 rounded-md px-3 py-2 text-xs text-red-700 max-w-xs">

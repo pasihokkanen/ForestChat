@@ -85,6 +85,56 @@ describe("compartmentsToGeoJSON", () => {
     const result = compartmentsToGeoJSON(compartments);
     expect(result.features).toHaveLength(0);
   });
+
+  it("reprojects EPSG:3067 coordinates to EPSG:4326", () => {
+    // EPSG:3067 coordinates near Ähtäri (~358600, 6943800)
+    const compartment = makeCompartment({
+      geometry: {
+        type: "MultiPolygon",
+        crs: {
+          type: "name",
+          properties: { name: "EPSG:3067" },
+        },
+        coordinates: [
+          [[
+            [358600, 6943800],
+            [358700, 6943800],
+            [358700, 6943900],
+            [358600, 6943900],
+            [358600, 6943800],
+          ]],
+        ],
+      },
+    });
+
+    const result = compartmentsToGeoJSON([compartment]);
+    const geom = result.features[0].geometry as Record<string, unknown>;
+
+    // CRS should be stripped
+    expect(geom.crs).toBeUndefined();
+
+    // Coordinates should now be in lat/lng degrees (roughly ~24°E, ~62.6°N)
+    const coords = geom.coordinates as number[][][][];
+    const [lng, lat] = coords[0][0][0];
+    expect(lng).toBeGreaterThan(20);
+    expect(lng).toBeLessThan(30);
+    expect(lat).toBeGreaterThan(60);
+    expect(lat).toBeLessThan(65);
+  });
+
+  it("leaves non-EPSG:3067 geometry untouched", () => {
+    const compartment = makeCompartment({
+      geometry: {
+        type: "MultiPolygon",
+        coordinates: [[[[24.0, 62.5], [24.5, 62.5], [24.5, 63.0], [24.0, 63.0], [24.0, 62.5]]]],
+      },
+    });
+
+    const result = compartmentsToGeoJSON([compartment]);
+    const geom = result.features[0].geometry as Record<string, unknown>;
+    const coords = geom.coordinates as number[][][][];
+    expect(coords[0][0][0]).toEqual([24.0, 62.5]);
+  });
 });
 
 // ── fitBoundsToFeatures ─────────────────────────
