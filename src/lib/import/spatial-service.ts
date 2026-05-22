@@ -8,10 +8,9 @@ const BUFFER_DEGREES = 0.0002; // ≈20 m at 62.6°N — small tolerance for edg
 /**
  * Intersect fetched WFS stands with the property boundary using turf.js.
  *
- * The property boundary is buffered by ~20 meters to handle edge precision
- * differences between MML cadastral data and Metsäkeskus forest inventory
- * geometry. Without this buffer, stands whose edges just touch the boundary
- * may be incorrectly excluded (or nearby fragments included).
+ * Checks EACH parcel individually — Hokkala has 4 non-contiguous parcels
+ * up to 5 km apart. If we buffered the whole MultiPolygon at once, turf
+ * would merge them into a single blob covering non-property land.
  *
  * Falls back to inserting all stands if spatial filtering fails.
  */
@@ -20,38 +19,62 @@ export async function filterStandsWithinProperty(
   stands: WfsStand[],
   forestId: string
 ): Promise<WfsStand[]> {
-  // 1. Prepare buffered boundary
-  let bufferedBoundary: GeoJSON.MultiPolygon;
+  // 1. Split boundary into individual parcels and buffer each
+  const bufferedParcels: GeoJSON.MultiPolygon[] = [];
   try {
-    // Strip CRS — turf doesn't use it and PostGIS tags confuse comparisons
     const clean = { ...boundaryGeometry };
     delete (clean as Record<string, unknown>).crs;
 
-    const buffered = buffer(
-      { type: "Feature" as const, geometry: clean, properties: {} },
-      BUFFER_DEGREES,
-      { units: "degrees" }
-    );
-    if (!buffered?.geometry) {
-      throw new Error("Turf buffer returned undefined");
+    for (const polygonCoords of clean.coordinates) {
+      const parcel: GeoJSON.MultiPolygon = {
+        type: "MultiPolygon",
+        coordinates: [polygonCoords],
+      };
+      try {
+        const buf = buffer(
+          {
+            type: "Feature" as const,
+            geometry: parcel,
+            properties: {},
+          },
+          BUFFER_DEGREES,
+          { units: "degrees" }
+        );
+        if (buf?.geometry) {
+          bufferedParcels.push(buf.geometry as GeoJSON.MultiPolygon);
+        }
+      } catch {
+        // If buffer fails for one parcel, use it unbuffered
+        bufferedParcels.push(parcel);
+      }
     }
-    bufferedBoundary = buffered.geometry as GeoJSON.MultiPolygon;
   } catch (err) {
     console.warn(
       "Turf buffer failed — using exact boundary:",
       err instanceof Error ? err.message : err
     );
-    bufferedBoundary = boundaryGeometry;
+    bufferedParcels.push(boundaryGeometry);
   }
 
-  // 2. Filter stands by spatial intersection
+  // 2. Filter stands: must intersect at least ONE buffered parcel
   let filteredStands: WfsStand[];
   try {
     filteredStands = stands.filter((stand) => {
       try {
-        return booleanIntersects(
-          { type: "Feature" as const, geometry: bufferedBoundary, properties: {} },
-          { type: "Feature" as const, geometry: stand.geometry, properties: {} }
+        const standFeature = {
+          type: "Feature" as const,
+          geometry: stand.geometry,
+          properties: {},
+        };
+        return bufferedParcels.some((parcel) =>
+          booleanIntersects(
+            {
+              type: "Feature" as const,
+              geometry: parcel,
+              properties: {},
+            },
+            standFeature
+          )
         );
       } catch {
         return true; // conservative: keep on individual errors
