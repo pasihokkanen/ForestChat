@@ -10,6 +10,11 @@ interface UseCompartmentsResult {
   error: string | null;
 }
 
+/**
+ * Fetches compartments for a forest from Supabase.
+ * Uses the `get_compartments_geojson` RPC to get geometry as
+ * GeoJSON (not WKB), so MapLibre can render it directly.
+ */
 export function useCompartments(
   forestId: string | null
 ): UseCompartmentsResult {
@@ -18,7 +23,6 @@ export function useCompartments(
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // If forestId is null, reset and don't fetch
     if (forestId === null) {
       setData([]);
       setLoading(false);
@@ -33,17 +37,29 @@ export function useCompartments(
     const fetchCompartments = async () => {
       try {
         const supabase = createClient();
-        const { data: result, error: fetchError } = await supabase
-          .from("compartments")
-          .select("*")
-          .eq("forest_id", forestId)
-          .order("stand_id");
+        const { data: result, error: fetchError } = await supabase.rpc(
+          "get_compartments_geojson",
+          { p_forest_id: forestId }
+        );
 
         if (cancelled) return;
 
         if (fetchError) {
-          setError(fetchError.message);
-          setData([]);
+          // Fall back to direct query if RPC not deployed yet
+          const { data: fallback, error: fbError } = await supabase
+            .from("compartments")
+            .select("*")
+            .eq("forest_id", forestId)
+            .order("stand_id");
+
+          if (cancelled) return;
+
+          if (fbError) {
+            setError(fbError.message);
+            setData([]);
+          } else {
+            setData((fallback as Compartment[]) ?? []);
+          }
         } else {
           setData((result as Compartment[]) ?? []);
         }

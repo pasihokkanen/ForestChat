@@ -4,9 +4,9 @@
  * Tests compartmentsToGeoJSON transformation.
  * Pure function — no Supabase, no React.
  */
-import { describe, it, expect } from "vitest";
-import { compartmentsToGeoJSON } from "@/lib/map/geojson";
-import type { Compartment } from "@/types/database";
+import { describe, it, expect, vi } from "vitest";
+import { compartmentsToGeoJSON, fitBoundsToFeatures } from "@/lib/map/geojson";
+import type { Compartment, CompartmentFeatureCollection } from "@/types/database";
 
 function makeCompartment(overrides: Partial<Compartment> = {}): Compartment {
   return {
@@ -84,5 +84,114 @@ describe("compartmentsToGeoJSON", () => {
     ];
     const result = compartmentsToGeoJSON(compartments);
     expect(result.features).toHaveLength(0);
+  });
+});
+
+// ── fitBoundsToFeatures ─────────────────────────
+
+function makeCollection(
+  features: Partial<CompartmentFeatureCollection["features"][number]>[] = []
+): CompartmentFeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: features.map((f, i) => ({
+      type: "Feature" as const,
+      geometry: f.geometry ?? { type: "MultiPolygon", coordinates: [] },
+      properties: f.properties ?? {},
+      ...f,
+    })),
+  } as CompartmentFeatureCollection;
+}
+
+describe("fitBoundsToFeatures", () => {
+  it("expands bounds for all features", () => {
+    const mockMap = {
+      fitBounds: vi.fn(),
+    };
+
+    const collection = makeCollection([
+      {
+        geometry: {
+          type: "MultiPolygon",
+          coordinates: [
+            [
+              [
+                [24.0, 62.0],
+                [24.5, 62.0],
+                [24.5, 62.5],
+                [24.0, 62.5],
+                [24.0, 62.0],
+              ],
+            ],
+          ],
+        },
+      },
+      {
+        geometry: {
+          type: "MultiPolygon",
+          coordinates: [
+            [
+              [
+                [24.2, 62.2],
+                [24.8, 62.2],
+                [24.8, 62.8],
+                [24.2, 62.8],
+                [24.2, 62.2],
+              ],
+            ],
+          ],
+        },
+      },
+    ]);
+
+    fitBoundsToFeatures(
+      mockMap as unknown as import("maplibre-gl").Map,
+      collection
+    );
+
+    expect(mockMap.fitBounds).toHaveBeenCalledTimes(1);
+    const [bounds, options] = mockMap.fitBounds.mock.calls[0];
+    expect(options.maxZoom).toBe(15);
+    expect(options.padding.top).toBeGreaterThan(0);
+    // The bounds should cover both features: SW(24.0,62.0), NE(24.8,62.8)
+    expect(bounds.getSouth()).toBeCloseTo(62.0, 1);
+    expect(bounds.getWest()).toBeCloseTo(24.0, 1);
+    expect(bounds.getNorth()).toBeCloseTo(62.8, 1);
+    expect(bounds.getEast()).toBeCloseTo(24.8, 1);
+  });
+
+  it("skips empty collections", () => {
+    const mockMap = {
+      fitBounds: vi.fn(),
+    };
+
+    fitBoundsToFeatures(
+      mockMap as unknown as import("maplibre-gl").Map,
+      { type: "FeatureCollection", features: [] } as CompartmentFeatureCollection
+    );
+
+    expect(mockMap.fitBounds).not.toHaveBeenCalled();
+  });
+
+  it("handles single-point geometry", () => {
+    const mockMap = {
+      fitBounds: vi.fn(),
+    };
+
+    const collection = makeCollection([
+      {
+        geometry: {
+          type: "MultiPolygon",
+          coordinates: [[[[24.5, 62.5], [24.51, 62.5], [24.51, 62.51], [24.5, 62.51], [24.5, 62.5]]]],
+        },
+      },
+    ]);
+
+    fitBoundsToFeatures(
+      mockMap as unknown as import("maplibre-gl").Map,
+      collection
+    );
+
+    expect(mockMap.fitBounds).toHaveBeenCalledTimes(1);
   });
 });

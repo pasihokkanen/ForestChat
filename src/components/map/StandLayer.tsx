@@ -5,6 +5,7 @@ import maplibregl from "maplibre-gl";
 import { createRoot } from "react-dom/client";
 import type { CompartmentFeatureCollection } from "@/types/database";
 import StandPopup from "./StandPopup";
+import { fitBoundsToFeatures } from "@/lib/map/geojson";
 
 // Finnish → English development class mapping
 const FI_TO_EN: Record<string, string> = {
@@ -37,6 +38,7 @@ export interface StandLayerProps {
  */
 export default function StandLayer({ map, compartments }: StandLayerProps) {
   const popupRef = useRef<maplibregl.Popup | null>(null);
+  const hasZoomed = useRef(false);
 
   const buildMatchExpression = useCallback((): maplibregl.Expression => {
     // Build a MapLibre match expression: ["match", ["get", "development_class"],
@@ -163,6 +165,29 @@ export default function StandLayer({ map, compartments }: StandLayerProps) {
     const source = map.getSource("stands") as maplibregl.GeoJSONSource | undefined;
     if (source?.setData) {
       source.setData(compartments);
+    }
+  }, [map, compartments]);
+
+  // Auto-zoom to fit stands on first load
+  useEffect(() => {
+    if (!map || hasZoomed.current) return;
+    if (!compartments.features || compartments.features.length === 0) return;
+
+    // Wait for style and source to be fully ready
+    const tryFit = () => {
+      const source = map.getSource("stands");
+      if (!source) return;
+      hasZoomed.current = true;
+      fitBoundsToFeatures(map, compartments);
+    };
+
+    if (map.isStyleLoaded() && map.getSource("stands")) {
+      tryFit();
+    } else {
+      map.once("style.load", () => {
+        // Small delay to let the source be added
+        setTimeout(tryFit, 100);
+      });
     }
   }, [map, compartments]);
 
