@@ -23,17 +23,20 @@
 
 **⚠️ Prerequisites to Verify Before Starting (CRITICAL):**
 
-- ⚠️ **MML API endpoint verification:** The MML API must return 200 for the property boundary endpoint before the import pipeline can work. The correct auth format is **HTTP Basic Authentication** with the API key as BOTH username and password (`-u "key:key"`). Header-based auth (`-H "api-key: ..."`) does NOT work. Verify the endpoint:
-
-```bash
-curl -sI -u "$MML_API_KEY:$MML_API_KEY" \
-  "https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/ogcapi/v1/collections"
-# Expected: HTTP 200 (not 401 or 404)
-# If 404: the endpoint path may have changed. Check MML documentation at:
-# https://www.maanmittauslaitos.fi/rajapinnat/ohjeita-rajapinta-avaimen-kayttoon
-```
-
-- ⚠️ **If the MML endpoint returns 404:** The MML API infrastructure may have been restructured. The base domain is confirmed working (bigip passes auth with 200-series response once the correct path is found). This prerequisite MUST be resolved before P2.5. Contact MML technical support at verkkopalvelut@maanmittauslaitos.fi if the documented endpoint is unreachable.
+- ✅ **MML API endpoint verified (2026-05-22):** The correct API is v3:
+  ```bash
+  # Test: should return HTTP 200 + JSON
+  curl -s -u "$MML_API_KEY:$MML_API_KEY" \
+    "https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/simple-features/v3/"
+  ```
+  **Key details (verified):**
+  - Auth: HTTP Basic Authentication — API key as both username AND password
+  - Base URL: `https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/simple-features/v3/`
+  - Property boundary collection: `PalstanSijaintitiedot` (Polygon geometries)
+  - Query parameter: `kiinteistotunnus=98940500010405` (14 digits, NO dashes!)
+  - Geometry CRS: **EPSG:4326** (lat/lon) — must be converted to EPSG:3067 for PostGIS
+  - Multiple plots per property (Hokkala: 4 polygons) — must combine into MultiPolygon
+  - The `KiinteistotunnuksenSijaintitiedot` collection returns Point (label position), NOT polygon
 
 - ⚠️ **Supabase Auth email provider:** Verify email auth is enabled in Supabase Dashboard → Authentication → Providers → Email (no "Confirm email" for development; enable for production).
 
@@ -445,7 +448,7 @@ export default function ForestLayout({ children }: { children: React.ReactNode }
 
 ## Track B: Import Backend (~4.5h)
 
-> **Note for subagents:** The MML API uses **HTTP Basic Authentication** — the API key is both the username AND password (`-u "key:key"`). Header-based auth (`-H "api-key: ..."`) does NOT work. The correct base URL must be verified first (see prerequisites). MML OmaTili API keys work immediately after creation — no service activation needed.
+> **Note for subagents:** The MML API uses **v3 simple-features** at `simple-features/v3/`. Auth is **HTTP Basic** (key as both username and password). Query via `?kiinteistotunnus=98940500010405` (14 digits, no dashes). Use collection `PalstanSijaintitiedot` for plot boundary polygons. CRS can be requested as EPSG:3067 via `?crs=...url`. Multiple plots per property — combine into MultiPolygon.
 
 ### P2.5 — MML API Client Utility (0.75h)
 
@@ -458,47 +461,61 @@ export default function ForestLayout({ children }: { children: React.ReactNode }
 
 | Item | Value |
 |---|---|
-| Base URL | `https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/ogcapi/v1/` (verify with prerequisite check) |
-| Collection | `kiinteistotunnukset` or `KiinteistotunnuksenSijaintitiedot` |
+| Base URL | `https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/simple-features/v3/` |
+| Collection | `PalstanSijaintitiedot` (plot boundaries — Polygon geometry) |
 | Auth | **HTTP Basic Auth**: username=`api-key-value`, password=`api-key-value` |
-| Filter | CQL2 or query parameter: `kiinteistotunnus=989-405-0001-0405` |
-| CRS | EPSG:3067 (ETRS-TM35FIN, matches PostGIS geometry columns) |
+| Query | `?kiinteistotunnus=98940500010405` (14 digits, NO dashes!) |
+| CRS (input) | EPSG:4326 (lat/lon) — **must convert to EPSG:3067 for PostGIS** |
+| CRS (output) | Request with `?crs=http://www.opengis.net/def/crs/EPSG/0/3067` or convert client-side |
+| Multi-plot | Properties have 1–N plots — combine all features into single MultiPolygon |
 | License | CC 4.0 |
 
-**⚠️ CQL2 filter note:** The MML OGC API may use a different property name than `kiinteistotunnus`. Common alternatives: `kiinteistotunnus`, `propertyidentifier`, or `kiinteistoTunnus`. The client should handle these gracefully.
+**⚠️ Key differences from documentation:**
+- The query parameter is `kiinteistotunnus` (NOT `filter=kiinteistotunnus='...'`)
+- The value MUST be 14 digits without dashes: `98940500010405` not `989-405-0001-0405`
+- The collection is `PalstanSijaintitiedot` (Polygon), NOT `KiinteistotunnuksenSijaintitiedot` (Point)
+- Default CRS is EPSG:4326 (lat/lon), not EPSG:3067
 
 ```typescript
 // src/lib/import/mml-client.ts
 
-const MML_BASE_URL = "https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/ogcapi/v1/";
-const MML_COLLECTION = "kiinteistotunnukset"; // Verify during prerequisite check
+const MML_BASE = "https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/simple-features/v3";
+const MML_COLLECTION = "PalstanSijaintitiedot"; // Plot boundary polygons
 
 export interface MmlPropertyBoundary {
   propertyId: string;
-  geometry: GeoJSON.MultiPolygon | GeoJSON.Polygon;
+  geometry: GeoJSON.MultiPolygon; // Combined from all plots, in EPSG:3067
   areaM2: number | null;
+  plotCount: number;
 }
 
 /**
- * Fetch a property boundary from MML by Finnish property ID.
- * Uses HTTP Basic Authentication: api-key as both username and password.
+ * Remove dashes from Finnish property ID: "989-405-0001-0405" → "98940500010405"
+ */
+function normalizePropertyId(id: string): string {
+  return id.replace(/-/g, "");
+}
+
+/**
+ * Fetch property boundary from MML v3 API by Finnish property ID.
+ * Combines all plots into a single MultiPolygon in EPSG:3067.
  * Returns null if the property is not found.
- * Throws on network/auth errors.
  */
 export async function fetchPropertyBoundary(
   propertyId: string,
   apiKey: string
 ): Promise<MmlPropertyBoundary | null> {
-  const url = new URL(`${MML_BASE_URL}collections/${MML_COLLECTION}/items`);
+  const normalized = normalizePropertyId(propertyId);
+  const url = new URL(`${MML_BASE}/collections/${MML_COLLECTION}/items`);
 
-  // CQL2 filter by property ID
-  url.searchParams.set("filter", `kiinteistotunnus='${propertyId}'`);
-  url.searchParams.set("limit", "1");
+  // Query by property ID (14 digits, no dashes)
+  url.searchParams.set("kiinteistotunnus", normalized);
+  url.searchParams.set("limit", "100"); // Max plots per property
+  // Request EPSG:3067 to match our PostGIS column
   url.searchParams.set("crs", "http://www.opengis.net/def/crs/EPSG/0/3067");
 
   const response = await fetch(url.toString(), {
     headers: {
-      // HTTP Basic Auth: api-key is both username and password
       Authorization: `Basic ${btoa(`${apiKey}:${apiKey}`)}`,
       Accept: "application/geo+json",
     },
@@ -519,22 +536,29 @@ export async function fetchPropertyBoundary(
     return null; // Property not found
   }
 
-  const feature = geojson.features[0];
+  const features = geojson.features;
+
+  // Combine all plots into a MultiPolygon
+  const polygons: GeoJSON.Polygon[] = features.map(
+    (f: GeoJSON.Feature) => f.geometry as GeoJSON.Polygon
+  );
+
+  const multiPolygon: GeoJSON.MultiPolygon = {
+    type: "MultiPolygon",
+    coordinates: polygons.map((p) => p.coordinates),
+  };
 
   return {
     propertyId,
-    geometry: feature.geometry as GeoJSON.MultiPolygon | GeoJSON.Polygon,
-    areaM2: feature.properties?.pinta_ala ?? feature.properties?.area ?? null,
+    geometry: multiPolygon,
+    areaM2: null, // Not directly available; compute from PostGIS later
+    plotCount: features.length,
   };
 }
 
-**Verification (MANUAL):**
-```bash
+/** Verification (tested):
 curl -s -u "$MML_API_KEY:$MML_API_KEY" \
-  "https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/ogcapi/v1/collections/kiinteistotunnukset/items?kiinteistotunnus=989-405-0001-0405&limit=1" \
-  | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Features: {len(d.get(\"features\",[]))}')"
-# Expected: Features: 1
-# If 404: the endpoint or collection name has changed. Contact MML support.```
+  "https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/simple-features/v3/collections/PalstanSijaintitiedot/items?kiinteistotunnus=98940500010405&limit=100"
 
 
 
@@ -570,13 +594,13 @@ export async function importPropertyBoundary(
   // Use admin client to bypass RLS (import runs server-side)
   const supabase = createAdminClient();
 
-  // Store boundary as PostGIS geometry
+  // Store boundary as PostGIS geometry (already MultiPolygon in EPSG:3067)
   const { error } = await supabase
     .from("property_boundaries")
     .upsert({
       forest_id: forestId,
       property_id: propertyId,
-      geometry: boundary.geometry, // PostGIS auto-handles GeoJSON insertion
+      geometry: boundary.geometry,
       fetched_at: new Date().toISOString(),
     });
 
@@ -723,7 +747,7 @@ export interface WfsStand {
 const WFS_URL = "https://avoin.metsakeskus.fi/geoserver/v1/ows";
 
 /** Bounding box from a GeoJSON Polygon or MultiPolygon. */
-function bboxFromGeometry(
+export function bboxFromGeometry(
   geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon
 ): [number, number, number, number] {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -972,7 +996,6 @@ $$;
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchPropertyBoundary } from "@/lib/import/mml-client";
-import { fetchStandsByBbox, bboxFromGeometry } from "@/lib/import/wfs-client";
 import { env } from "@/lib/env";
 import { NextResponse, type NextRequest } from "next/server";
 
@@ -1043,6 +1066,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 6. Fetch stands from Metsäkeskus WFS (using bounding box of property)
+    const { fetchStandsByBbox, bboxFromGeometry } = await import("@/lib/import/wfs-client");
     const bbox = bboxFromGeometry(boundary.geometry);
     const stands = await fetchStandsByBbox(bbox);
 
@@ -1057,7 +1081,6 @@ export async function POST(request: NextRequest) {
     }
 
     // 7. Bulk-insert stands and spatial filter in one step (uses P2.8 service)
-    const { createAdminClient } = await import("@/lib/supabase/admin");
     const { filterStandsWithinProperty } = await import("@/lib/import/spatial-service");
     const filteredStands = await filterStandsWithinProperty(
       boundary.geometry,
@@ -1085,8 +1108,9 @@ export async function POST(request: NextRequest) {
       property_id,
       total_area_ha: totalAreaHa,
       compartment_count: finalCount,
-      fetched_count: stands.length,
+      fetched_stands: stands.length,
       filtered_out: stands.length - finalCount,
+      plot_count: boundary.plotCount,
     });
   } catch (error) {
     console.error("Import error:", error);
@@ -1189,7 +1213,7 @@ export default function NewForestPage() {
               className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
             />
             <p className="mt-1 text-xs text-gray-500">
-              Format: XXX-XXX-XXXX-XXXX (e.g., 989-405-0001-0405)
+              Format: XXX-XXX-XXXX-XXXX (e.g., 989-405-0001-0405). Dashes are optional — the API auto-normalizes.
             </p>
           </div>
 
