@@ -1,3 +1,6 @@
+import UserMenu from "@/components/auth/UserMenu";
+import Link from "next/link";
+
 export default function ForestLayout({
   children,
 }: {
@@ -5,9 +8,14 @@ export default function ForestLayout({
 }) {
   return (
     <div className="flex flex-col h-screen">
-      <header className="h-12 border-b bg-white flex items-center px-4 shrink-0">
-        <h1 className="font-semibold text-gray-900">ForestChat</h1>
-        {/* Auth placeholder — Phase 2 */}
+      <header className="h-12 border-b bg-white flex items-center justify-between px-4 shrink-0">
+        <Link
+          href="/app/dashboard"
+          className="font-semibold text-gray-900 hover:text-green-700 transition-colors"
+        >
+          ForestChat
+        </Link>
+        <UserMenu />
       </header>
       <main className="flex-1 overflow-hidden">{children}</main>
     </div>

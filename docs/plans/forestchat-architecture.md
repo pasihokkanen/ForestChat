@@ -657,10 +657,10 @@ Used only if MML/WFS path fails (e.g., property ID not found, WFS down).
 - **T1** — Map component with MapLibre GL (5h)
 - **T2** — Database layer (Supabase client + types, 4h)
 
-### Phase 2: Auth & Import (3 tasks, ~11h)
-- **T3** — Supabase Auth integration (2h)
-- **T4** — MML integration + spatial import (6h)
-- **T5** — Import UI (3h)
+### Phase 2: Auth & Import (3 tasks, ~11h) ✅ (completed 2026-05-22)
+- **T3** — Supabase Auth integration (2h) ✅
+- **T4** — MML integration + spatial import (6h) ✅
+- **T5** — Import UI (3h) ✅
 
 ### Phase 3: AI Chat (4 tasks, ~23h)
 - **T6** — Chat API endpoint (4h)

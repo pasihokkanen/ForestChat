@@ -18,7 +18,7 @@ export default function Home() {
         </p>
         <div className="mt-8 flex gap-4">
           <Link
-            href="/forest/test-1"
+            href="/auth/register"
             className="rounded-full bg-green-700 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-green-800 transition-colors"
           >
             Get Started
