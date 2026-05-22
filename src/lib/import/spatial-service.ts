@@ -35,8 +35,18 @@ export async function filterStandsWithinProperty(
     attributes: stand.attributes,
   }));
 
+  // Deduplicate by (forest_id, stand_id) — WFS may return split polygons
+  // with the same stand_id. Keep the last occurrence (largest piece).
+  const seen = new Set<string>();
+  const deduped = compartmentRows.reverse().filter((row) => {
+    const key = `${row.forest_id}:${row.stand_id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).reverse();
+
   const { error } = await supabase.from("compartments").upsert(
-    compartmentRows,
+    deduped,
     { onConflict: "forest_id, stand_id" }
   );
 
