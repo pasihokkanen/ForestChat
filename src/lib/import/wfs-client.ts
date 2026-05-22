@@ -49,6 +49,17 @@ export function bboxFromGeometry(
   return [minX, minY, maxX, maxY];
 }
 
+/** Convert Polygon to MultiPolygon for PostGIS compatibility. */
+function toMultiPolygon(
+  geom: GeoJSON.Polygon | GeoJSON.MultiPolygon
+): GeoJSON.MultiPolygon {
+  if (geom.type === "MultiPolygon") return geom;
+  return {
+    type: "MultiPolygon",
+    coordinates: [geom.coordinates],
+  };
+}
+
 export async function fetchStandsByBbox(
   bbox: [number, number, number, number],
   srsName: string = "EPSG:3067"
@@ -100,7 +111,7 @@ export async function fetchStandsByBbox(
       avgDiameter: p.MEANDIAMETER ?? null,
       avgHeight: p.MEANHEIGHT ?? null,
       growthM3PerHa: p.VOLUMEGROWTH ?? null,
-      geometry: f.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon,
+      geometry: toMultiPolygon(f.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon),
       attributes: p,
     };
   });
