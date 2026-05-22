@@ -35,7 +35,7 @@ export default function UserMenu() {
         <span className="h-7 w-7 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-xs font-medium text-green-800 dark:text-green-300">
           {user.email?.charAt(0).toUpperCase()}
         </span>
-        <span className="text-gray-700 dark:text-gray-300 hidden sm:inline max-w-[140px] truncate">
+<span className="text-gray-700 dark:text-gray-300 hidden sm:inline max-w-[200px] truncate ml-2">
           {user.email}
         </span>
       </button>

@@ -34,3 +34,12 @@ body {
   align-items: center;
   justify-content: center;
 }
+
+@media (prefers-color-scheme: dark) {
+  .maplibregl-ctrl-zoom-to-property .maplibregl-ctrl-icon {
+    color: #e5e7eb;
+  }
+  .maplibregl-ctrl-zoom-to-property:hover .maplibregl-ctrl-icon {
+    color: #ffffff;
+  }
+}
