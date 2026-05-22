@@ -5,7 +5,7 @@
  * MapLibre GL itself uses WebGL — we mock the constructor to avoid
  * jsdom compatibility issues and test the React integration layer.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import MapView from "@/components/map/MapView";
 
@@ -16,6 +16,7 @@ vi.mock("maplibre-gl", () => {
     off: vi.fn().mockReturnThis(),
     remove: vi.fn(),
     resize: vi.fn(),
+    addControl: vi.fn(),
     addSource: vi.fn(),
     addLayer: vi.fn(),
     getSource: vi.fn(),
@@ -26,7 +27,7 @@ vi.mock("maplibre-gl", () => {
 
   return {
     default: {
-      Map: vi.fn(() => MockMap),
+      Map: vi.fn(function () { return MockMap; }),
       NavigationControl: vi.fn(),
       ScaleControl: vi.fn(),
       GeolocateControl: vi.fn(),

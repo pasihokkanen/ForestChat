@@ -1,12 +1,17 @@
 import Dexie, { type EntityTable } from "dexie";
+import type {
+  Compartment as SupabaseCompartment,
+  Operation as SupabaseOperation,
+  PlanMetadata as SupabasePlanMetadata,
+} from "@/types/database";
 
-// ── Types ──────────────────────────────────────────
+// ── IndexedDB types (camelCase mirrors for Dexie flat storage) ──
 
 export interface Compartment {
   id: string;
   forestId: string;
   standId: string;
-  areaHa: number;
+  areaHa: number | null;
   mainSpecies: string | null;
   developmentClass: string | null;
   siteType: string | null;
@@ -30,9 +35,9 @@ export interface Operation {
 export interface PlanMetadata {
   id: string;
   forestId: string;
-  name: string;
-  periodStart: number;
-  periodEnd: number;
+  name: string | null;
+  periodStart: number | null;
+  periodEnd: number | null;
   totalVolumeM3: number | null;
   stumpageValueEur: number | null;
   annualGrowthM3: number | null;

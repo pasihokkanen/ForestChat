@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 import withSerwist from "@serwist/next";
 
 const nextConfig: NextConfig = {
-  // Serwist handles the service worker — no manual sw config needed here.
+  turbopack: {},
 };
 
 export default withSerwist({

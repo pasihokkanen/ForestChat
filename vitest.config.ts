@@ -10,6 +10,10 @@ export default defineConfig({
     setupFiles: ["./src/__tests__/setup.ts"],
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     css: true,
+    env: {
+      NEXT_PUBLIC_SUPABASE_URL: "https://rqflvuldwgognmoanvcg.supabase.co",
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_985sljyV70oXhjHcfhGnug_5AIghW0L",
+    },
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],

@@ -54,7 +54,7 @@ export const handlers = [
       ],
     };
 
-    const key = `eq.${forestId}`;
+    const key = forestId;
     if (compartments[key as keyof typeof compartments]) {
       return HttpResponse.json(compartments[key as keyof typeof compartments]);
     }
