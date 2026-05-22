@@ -30,3 +30,35 @@ export async function getForestsByOwner(): Promise<Forest[]> {
 
   return (data as Forest[]) ?? [];
 }
+
+export async function deleteForestById(
+  id: string
+): Promise<{ deleted: boolean; forest?: Forest }> {
+  const supabase = await createServerSupabase();
+
+  // 1. Verify ownership
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Unauthorized");
+
+  const { data: forest } = await supabase
+    .from("forests")
+    .select("*")
+    .eq("id", id)
+    .eq("owner_id", user.id)
+    .single();
+
+  if (!forest) {
+    return { deleted: false };
+  }
+
+  // 2. Delete (cascades to compartments, boundaries, operations, plans, chats)
+  const { error } = await supabase.from("forests").delete().eq("id", id);
+
+  if (error) {
+    throw new Error(`Failed to delete forest: ${error.message}`);
+  }
+
+  return { deleted: true, forest: forest as Forest };
+}
