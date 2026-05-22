@@ -6,7 +6,7 @@
 
 **Architecture:** Phase 2 delivers two subsystems: (1) Supabase Auth integration with middleware session refresh, login/register pages, and auth-aware UI; (2) a property import pipeline that fetches boundaries from MML OGC API, intersects with Metsäkeskus WFS stand data, and stores everything in PostGIS — all exposed through a typed API route and a clean import UI.
 
-**Tech Stack:** Next.js 16.2 (App Router, middleware), TypeScript strict, Supabase Auth + `@supabase/ssr` 0.10, PostgreSQL + PostGIS, MML OGC API Features, Metsäkeskus WFS v1:stand, Tailwind CSS 4
+**Tech Stack:** Next.js 16.2 (App Router, middleware), TypeScript strict, Supabase Auth + `@supabase/ssr` 0.10, PostgreSQL + PostGIS, MML OGC API Features v3, Metsäkeskus WFS v1:stand, proj4 (CRS conversion), Tailwind CSS 4
 
 **Prerequisites (Phase 0+1 — DONE):**
 
@@ -465,19 +465,26 @@ export default function ForestLayout({ children }: { children: React.ReactNode }
 | Collection | `PalstanSijaintitiedot` (plot boundaries — Polygon geometry) |
 | Auth | **HTTP Basic Auth**: username=`api-key-value`, password=`api-key-value` |
 | Query | `?kiinteistotunnus=98940500010405` (14 digits, NO dashes!) |
-| CRS (input) | EPSG:4326 (lat/lon) — **must convert to EPSG:3067 for PostGIS** |
-| CRS (output) | Request with `?crs=http://www.opengis.net/def/crs/EPSG/0/3067` or convert client-side |
+| CRS (input) | EPSG:4326 (lat/lon) default — **must convert to EPSG:3067 client-side** |
+| CRS via API | Server-side `?crs=` parameter is unreliable (timeouts on complex geometries) |
+| CRS solution | Use **proj4** (`npm install proj4 @types/proj4`) for client-side WGS84→ETRS-TM35FIN conversion |
 | Multi-plot | Properties have 1–N plots — combine all features into single MultiPolygon |
 | License | CC 4.0 |
 
-**⚠️ Key differences from documentation:**
+**⚠️ Key findings (tested with Hokkala 989-405-0001-0405):**
 - The query parameter is `kiinteistotunnus` (NOT `filter=kiinteistotunnus='...'`)
-- The value MUST be 14 digits without dashes: `98940500010405` not `989-405-0001-0405`
-- The collection is `PalstanSijaintitiedot` (Polygon), NOT `KiinteistotunnuksenSijaintitiedot` (Point)
-- Default CRS is EPSG:4326 (lat/lon), not EPSG:3067
+- Value MUST be 14 digits without dashes: `98940500010405` not `989-405-0001-0405`
+- Collection is `PalstanSijaintitiedot` (Polygon), NOT `KiinteistotunnuksenSijaintitiedot` (Point)
+- Default CRS is EPSG:4326 (lat/lon) — server-side CRS conversion times out
+- **Must use proj4 for client-side EPSG:4326→EPSG:3067 conversion**
+- Hokkala has 4 plot polygons — query with `limit=100` works fine
 
 ```typescript
 // src/lib/import/mml-client.ts
+import proj4 from "proj4";
+
+// EPSG:3067 (ETRS-TM35FIN) definition for proj4
+const EPSG3067 = "+proj=utm +zone=35 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs +type=crs";
 
 const MML_BASE = "https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/simple-features/v3";
 const MML_COLLECTION = "PalstanSijaintitiedot"; // Plot boundary polygons
@@ -538,9 +545,16 @@ export async function fetchPropertyBoundary(
 
   const features = geojson.features;
 
-  // Combine all plots into a MultiPolygon
+  // Combine all plots into a MultiPolygon, converting EPSG:4326→EPSG:3067
   const polygons: GeoJSON.Polygon[] = features.map(
-    (f: GeoJSON.Feature) => f.geometry as GeoJSON.Polygon
+    (f: GeoJSON.Feature) => {
+      const geom = f.geometry as GeoJSON.Polygon;
+      // Convert each coordinate ring from WGS84 to ETRS-TM35FIN
+      const convertedCoords = geom.coordinates.map((ring) =>
+        ring.map(([lon, lat]) => proj4("EPSG:4326", EPSG3067, [lon, lat]))
+      );
+      return { type: "Polygon" as const, coordinates: convertedCoords };
+    }
   );
 
   const multiPolygon: GeoJSON.MultiPolygon = {
