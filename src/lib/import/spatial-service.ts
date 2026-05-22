@@ -1,37 +1,60 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { WfsStand } from "./wfs-client";
 import booleanIntersects from "@turf/boolean-intersects";
+import buffer from "@turf/buffer";
+
+const BUFFER_DEGREES = 0.0002; // ≈20 m at 62.6°N — small tolerance for edge precision
 
 /**
  * Intersect fetched WFS stands with the property boundary using turf.js.
  *
- * Strategy: filter stands client-side with booleanIntersects (turf.js),
- * then batch-insert only the matching stands. Falls back to inserting all
- * stands if the boundary is invalid.
+ * The property boundary is buffered by ~20 meters to handle edge precision
+ * differences between MML cadastral data and Metsäkeskus forest inventory
+ * geometry. Without this buffer, stands whose edges just touch the boundary
+ * may be incorrectly excluded (or nearby fragments included).
  *
- * Avoids the Supabase RPC `compartments_within_boundary` which fails
- * with "mixed SRID geometries" when the compartments table has a different
- * SRID than the property boundary.
+ * Falls back to inserting all stands if spatial filtering fails.
  */
 export async function filterStandsWithinProperty(
   boundaryGeometry: GeoJSON.MultiPolygon,
   stands: WfsStand[],
   forestId: string
 ): Promise<WfsStand[]> {
-  // 1. Filter stands by intersection with property boundary (turf.js)
+  // 1. Prepare buffered boundary
+  let bufferedBoundary: GeoJSON.MultiPolygon;
+  try {
+    // Strip CRS — turf doesn't use it and PostGIS tags confuse comparisons
+    const clean = { ...boundaryGeometry };
+    delete (clean as Record<string, unknown>).crs;
+
+    const buffered = buffer(
+      { type: "Feature" as const, geometry: clean, properties: {} },
+      BUFFER_DEGREES,
+      { units: "degrees" }
+    );
+    if (!buffered?.geometry) {
+      throw new Error("Turf buffer returned undefined");
+    }
+    bufferedBoundary = buffered.geometry as GeoJSON.MultiPolygon;
+  } catch (err) {
+    console.warn(
+      "Turf buffer failed — using exact boundary:",
+      err instanceof Error ? err.message : err
+    );
+    bufferedBoundary = boundaryGeometry;
+  }
+
+  // 2. Filter stands by spatial intersection
   let filteredStands: WfsStand[];
   try {
-    // Strip CRS from boundary — turf doesn't use it and PostGIS CRS
-    // tags can confuse the geometry comparison
-    const cleanBoundary = { ...boundaryGeometry };
-    delete (cleanBoundary as Record<string, unknown>).crs;
-
     filteredStands = stands.filter((stand) => {
       try {
-        return booleanIntersects(cleanBoundary, stand.geometry);
+        return booleanIntersects(
+          { type: "Feature" as const, geometry: bufferedBoundary, properties: {} },
+          { type: "Feature" as const, geometry: stand.geometry, properties: {} }
+        );
       } catch {
-        // If a single geometry fails, keep it (conservative)
-        return true;
+        return true; // conservative: keep on individual errors
       }
     });
   } catch (err) {
@@ -45,7 +68,7 @@ export async function filterStandsWithinProperty(
   try {
     const supabase = createAdminClient();
 
-    // 2. Build compartment rows (only filtered stands)
+    // 3. Build compartment rows (only filtered stands)
     const compartmentRows = filteredStands.map((stand) => ({
       forest_id: forestId,
       stand_id: stand.standId,
@@ -65,20 +88,22 @@ export async function filterStandsWithinProperty(
       attributes: stand.attributes,
     }));
 
-    // 3. Deduplicate by (forest_id, stand_id)
+    // 4. Deduplicate by (forest_id, stand_id)
     const seen = new Set<string>();
-    const deduped = compartmentRows.reverse().filter((row) => {
-      const key = `${row.forest_id}:${row.stand_id}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    }).reverse();
+    const deduped = compartmentRows
+      .reverse()
+      .filter((row) => {
+        const key = `${row.forest_id}:${row.stand_id}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .reverse();
 
-    // 4. Insert into compartments table
-    const { error } = await supabase.from("compartments").upsert(
-      deduped,
-      { onConflict: "forest_id, stand_id" }
-    );
+    // 5. Insert into compartments table
+    const { error } = await supabase.from("compartments").upsert(deduped, {
+      onConflict: "forest_id, stand_id",
+    });
 
     if (error) {
       throw new Error(`Failed to insert compartments: ${error.message}`);
@@ -89,8 +114,6 @@ export async function filterStandsWithinProperty(
     if (err instanceof Error && err.message.startsWith("Failed to insert")) {
       throw err;
     }
-    // If insert fails for other reasons, still return filtered list
-    // (the caller can retry)
     console.error("Compartment insert error:", err);
     return filteredStands;
   }
