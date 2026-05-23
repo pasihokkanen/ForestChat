@@ -21,13 +21,13 @@ interface ForestViewProps {
 }
 
 /** Zoom-to-property crosshair SVG icon — distinct from fullscreen (outward arrows). */
-const CROSSHAIR_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="18" height="18">
-  <circle cx="12" cy="12" r="10"/>
-  <line x1="12" y1="2" x2="12" y2="6"/>
-  <line x1="12" y1="18" x2="12" y2="22"/>
-  <line x1="2" y1="12" x2="6" y2="12"/>
-  <line x1="18" y1="12" x2="22" y2="12"/>
-  <circle cx="12" cy="12" r="2.5" fill="currentColor"/>
+const CROSSHAIR_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" width="20" height="20">
+  <circle cx="12" cy="12" r="8.5"/>
+  <line x1="12" y1="2.5" x2="12" y2="7"/>
+  <line x1="12" y1="17" x2="12" y2="21.5"/>
+  <line x1="2.5" y1="12" x2="7" y2="12"/>
+  <line x1="17" y1="12" x2="21.5" y2="12"/>
+  <circle cx="12" cy="12" r="3" fill="currentColor"/>
 </svg>`;
 
 /**

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
 import type { User, Session } from "@supabase/supabase-js";
 
 interface AuthState {
@@ -18,6 +19,7 @@ export function useAuth(): AuthState & {
     session: null,
     loading: true,
   });
+  const router = useRouter();
 
   useEffect(() => {
     const supabase = createClient();
@@ -46,7 +48,8 @@ export function useAuth(): AuthState & {
   const signOut = useCallback(async () => {
     const supabase = createClient();
     await supabase.auth.signOut();
-  }, []);
+    router.push("/");
+  }, [router]);
 
   return { ...state, signOut };
 }
