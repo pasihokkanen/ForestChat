@@ -35,9 +35,15 @@ body {
   justify-content: center;
 }
 
+/* Light mode: match MapLibre's default icon color (#333) */
+.maplibregl-ctrl-zoom-to-property .maplibregl-ctrl-icon {
+  color: #333;
+}
+
 @media (prefers-color-scheme: dark) {
+  /* Dark mode: lighter icon color on the default white button bg */
   .maplibregl-ctrl-zoom-to-property .maplibregl-ctrl-icon {
-    color: #e5e7eb;
+    color: #b0b0b0;
   }
   .maplibregl-ctrl-zoom-to-property:hover .maplibregl-ctrl-icon {
     color: #ffffff;

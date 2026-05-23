@@ -239,21 +239,31 @@ export default function StandLayer({ map, compartments }: StandLayerProps) {
     if (!map || hasZoomed.current) return;
     if (!compartments.features || compartments.features.length === 0) return;
 
-    // Wait for style and source to be fully ready
-    const tryFit = () => {
+    const tryFit = (): boolean => {
+      if (!map.isStyleLoaded()) return false;
       const source = map.getSource("stands");
-      if (!source) return;
+      if (!source) return false;
       hasZoomed.current = true;
       fitBoundsToFeatures(map, compartments);
+      return true;
     };
 
-    if (map.isStyleLoaded() && map.getSource("stands")) {
-      tryFit();
-    } else {
-      map.once("style.load", () => {
-        setTimeout(tryFit, 100);
-      });
-    }
+    // Try immediately — works when both style and source are ready
+    if (tryFit()) return;
+
+    // Poll until ready (every 200ms, up to ~5 seconds).
+    // Handles the edge case where style loaded but source wasn't added yet:
+    // the old approach used map.once("style.load", ...) which never fires
+    // if the style already loaded.
+    let attempts = 0;
+    const interval = setInterval(() => {
+      attempts++;
+      if (tryFit() || attempts > 25) {
+        clearInterval(interval);
+      }
+    }, 200);
+
+    return () => clearInterval(interval);
   }, [map, compartments]);
 
   return null; // No DOM — pure map-side effect
