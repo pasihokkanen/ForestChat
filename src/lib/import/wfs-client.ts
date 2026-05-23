@@ -115,7 +115,9 @@ export async function fetchStandsByBbox(
     const p = f.properties ?? {};
     const rawGeom = f.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
     return {
-      standId: String(p.STANDNUMBER ?? "?"),
+      standId: p.STANDNUMBEREXTENSION != null
+        ? `${String(p.STANDNUMBER ?? "?")}.${String(p.STANDNUMBEREXTENSION)}`
+        : String(p.STANDNUMBER ?? "?"),
       areaHa: p.AREA ?? null,
       mainSpecies: mapWfsNumericCode(MAINGROUP_MAP, p.MAINGROUP),
       developmentClass: mapWfsCode(DEVELOPMENTCLASS_MAP, p.DEVELOPMENTCLASS),

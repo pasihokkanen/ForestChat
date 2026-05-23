@@ -62,13 +62,13 @@ P2.0 Supabase Middleware ──┬──► Track A: Auth UI ──────�
                                                           P2.13 E2E Integration
 ```
 
-**P2.0** must run first — middleware is the foundation for all auth-protected routes. After P2.0, Track A (auth UI) and Track B (import backend) can run in parallel — the import backend utilities (MML/WFS clients, spatial services) have no auth dependency. P2.9 merges both tracks: the import API route needs auth middleware (to get `auth.uid()`) AND the backend utilities (to fetch/store data).
+**P2.0** ✅ (2026-05-23) must run first — middleware is the foundation for all auth-protected routes. After P2.0, Track A (auth UI) and Track B (import backend) can run in parallel — the import backend utilities (MML/WFS clients, spatial services) have no auth dependency. P2.9 merges both tracks: the import API route needs auth middleware (to get `auth.uid()`) AND the backend utilities (to fetch/store data).
 
 ---
 
 ## Track A: Auth UI (~3h)
 
-### P2.0 — Supabase Auth Proxy (0.5h) **[BLOCKS ALL TRACKS]**
+### P2.0 ✅ — Supabase Auth Proxy (0.5h) **[BLOCKS ALL TRACKS]**
 
 **Objective:** Set up Next.js proxy that refreshes the Supabase session on every request and protects `/app/*` routes from unauthenticated access.
 
@@ -135,7 +135,7 @@ export const config = {
 
 ---
 
-### P2.1 — Auth Callback Route (0.25h)
+### P2.1 ✅ — Auth Callback Route (0.25h)
 
 **Objective:** Handle the OAuth/email confirmation callback from Supabase. Exchanges the `code` in the URL for a session cookie.
 
@@ -190,7 +190,7 @@ export async function GET(request: NextRequest) {
 
 ---
 
-### P2.2 — Login & Register Pages (0.75h)
+### P2.2 ✅ — Login & Register Pages (0.75h)
 
 **Objective:** Create login and registration pages with email+password auth. Redirects to `/app/dashboard` on success.
 
@@ -274,7 +274,7 @@ const { error: authError } = await supabase.auth.signUp({
 
 ---
 
-### P2.3 — Auth Hook & User Context (0.5h)
+### P2.3 ✅ — Auth Hook & User Context (0.5h)
 
 **Objective:** Create a React hook that provides the current user and auth state to any client component. Handles loading, signed-in, and signed-out states.
 
@@ -346,7 +346,7 @@ export function useAuth(): AuthState & {
 
 ---
 
-### P2.4 — Auth-Aware Header (0.5h)
+### P2.4 ✅ — Auth-Aware Header (0.5h)
 
 **Objective:** Replace the placeholder header with a real auth-aware header showing the user's email and a sign-out button.
 
@@ -450,7 +450,7 @@ export default function ForestLayout({ children }: { children: React.ReactNode }
 
 > **Note for subagents:** The MML API uses **v3 simple-features** at `simple-features/v3/`. Auth is **HTTP Basic** (key as both username and password). Query via `?kiinteistotunnus=98940500010405` (14 digits, no dashes). Use collection `PalstanSijaintitiedot` for plot boundary polygons. CRS can be requested as EPSG:3067 via `?crs=...url`. Multiple plots per property — combine into MultiPolygon.
 
-### P2.5 — MML API Client Utility (0.75h)
+### P2.5 ✅ — MML API Client Utility (0.75h)
 
 **Objective:** Create a typed client for the MML OGC API Features endpoint that fetches property boundary geometry by Finnish property ID (kiinteistötunnus).
 
@@ -578,7 +578,7 @@ curl -s -u "$MML_API_KEY:$MML_API_KEY" \
 
 ---
 
-### P2.6 — Property Boundary Store Service (0.5h)
+### P2.6 ✅ — Property Boundary Store Service (0.5h)
 
 **Objective:** Create a service that fetches a boundary from MML and stores it in the `property_boundaries` table (PostGIS geometry).
 
@@ -632,7 +632,7 @@ export async function importPropertyBoundary(
 
 ---
 
-### P2.7 — Metsäkeskus WFS Client (1h)
+### P2.7 ✅ — Metsäkeskus WFS Client (1h)
 
 **Objective:** Create a client for Metsäkeskus WFS that fetches stand (kuvio) polygons and attributes by bounding box.
 
@@ -842,7 +842,7 @@ curl -s "https://avoin.metsakeskus.fi/geoserver/v1/ows?service=WFS&version=2.0.0
 
 ---
 
-### P2.8 — Spatial Intersection Service (1h)
+### P2.8 ✅ — Spatial Intersection Service (1h)
 
 **Objective:** Create a service that spatially filters stands to only those within the property boundary using PostGIS `ST_Within`.
 
@@ -969,7 +969,7 @@ $$;
 
 ---
 
-### P2.9 — Import Orchestrator API Route (1.25h)
+### P2.9 ✅ — Import Orchestrator API Route (1.25h)
 
 **Objective:** Create the `POST /api/import/property` API route that orchestrates the full import pipeline: validate input, create forest record, fetch boundary → fetch stands → spatial filter → return result.
 
@@ -1147,7 +1147,7 @@ export async function POST(request: NextRequest) {
 
 ## Merge Point: Import UI (~3h)
 
-### P2.10 — Import Form Page (0.75h)
+### P2.10 ✅ — Import Form Page (0.75h)
 
 **Objective:** Create the "New Forest" page with a form to enter the Finnish property ID and forest name. Validates input format and calls the import API.
 
@@ -1272,7 +1272,7 @@ export default function NewForestPage() {
 
 ---
 
-### P2.11 — Import Progress UI & Loading States (0.75h)
+### P2.11 ✅ — Import Progress UI & Loading States (0.75h)
 
 **Objective:** Show a meaningful loading/progress state during import and handle edge cases (no stands found, import error).
 
@@ -1349,7 +1349,7 @@ export default function ImportProgress({ stage, message }: ImportProgressProps) 
 
 ---
 
-### P2.12 — Dashboard / Forest List Page (0.75h)
+### P2.12 ✅ — Dashboard / Forest List Page (0.75h)
 
 **Objective:** Replace the empty `/app/dashboard` with a list of the user's forests. Each forest links to its map view.
 
@@ -1505,7 +1505,7 @@ export default function ForestList() {
 
 ---
 
-### P2.13 — End-to-End Integration Test (0.75h)
+### P2.13 ✅ — End-to-End Integration Test (0.75h)
 
 **Objective:** Verify the full Phase 2 pipeline works end-to-end: register → login → import → map view.
 
