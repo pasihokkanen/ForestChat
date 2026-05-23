@@ -336,7 +336,9 @@ The agent loop runs on the server. When OpenRouter returns a `tool_calls` delta,
 // - Error handling for API failures and timeouts
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const MODEL = "deepseek/deepseek-v4-flash"; // or configured model
+// ⚠️ Should be configured via env var OPENROUTER_MODEL for flexibility
+// Default: deepseek/deepseek-v4-flash (verified tool calling support)
+const MODEL = process.env.OPENROUTER_MODEL ?? "deepseek/deepseek-v4-flash";
 
 interface OpenRouterRequest {
   messages: Array<{ role: string; content: string }>;
@@ -352,8 +354,7 @@ interface AccumulatedToolCall {
 
 export type StreamChunk =
   | { type: "text"; content: string }
-  | { type: "tool_call"; name: string; arguments: Record<string, unknown> }
-  | { type: "done" };
+  | { type: "tool_call"; name: string; arguments: Record<string, unknown> };
 
 export async function* streamChat(
   request: OpenRouterRequest,
@@ -394,7 +395,20 @@ export async function* streamChat(
       if (!line.startsWith("data: ")) continue;
       const data = line.slice(6).trim();
       if (data === "[DONE]") {
-        yield { type: "done" };
+        // Flush any pending tool calls before closing
+        // (some models don't set finish_reason on the last delta chunk)
+        for (const [_, tc] of pendingToolCalls) {
+          try {
+            yield {
+              type: "tool_call" as const,
+              name: tc.name,
+              arguments: tc.arguments ? JSON.parse(tc.arguments) : {},
+            };
+          } catch {
+            yield { type: "tool_call" as const, name: tc.name, arguments: {} };
+          }
+        }
+        pendingToolCalls.clear();
         return;
       }
 
