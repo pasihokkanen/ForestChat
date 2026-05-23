@@ -24,8 +24,8 @@
 - ✅ Environment variables: `OPENROUTER_API_KEY` set
 
 **⚠️ New prerequisite (Phase 3):**
-- [ ] New migration: `003_add_chat_model.sql` — adds `model TEXT` column to `chat_sessions` for per-session model selection
-- [ ] New env var: `OPENROUTER_MODEL` (optional, default: `deepseek/deepseek-v4-flash` if unset)
+- ✅ New migration: `003_add_chat_model.sql` — adds `model TEXT` column to `chat_sessions` for per-session model selection (2026-05-23)
+- ✅ New env var: `OPENROUTER_MODEL` (optional, default: `deepseek/deepseek-v4-flash` if unset)
 
 **⚠️ Next.js 16 notes:**
 - `params` in route handlers is `Promise<{ id: string }>` — must `await params`

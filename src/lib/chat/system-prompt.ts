@@ -1,0 +1,57 @@
+// src/lib/chat/system-prompt.ts — T8.4 System Prompt Builder
+//
+// Builds the system prompt for the AI chat, including forest context
+// and key rules for how the AI should behave.
+
+import type { Forest, Compartment } from "@/types/database";
+
+export function buildSystemPrompt(
+  forest: Forest | null,
+  compartments: Compartment[]
+): string {
+  const totalVolume = compartments.reduce((s, c) => s + (c.volume_m3 ?? 0), 0);
+  const totalArea = compartments.reduce((s, c) => s + (c.area_ha ?? 0), 0);
+  const regenReady = compartments.filter(
+    (c) => c.development_class === "Uudistuskypsä metsikkö"
+  ).length;
+  const matureThinning = compartments.filter(
+    (c) => c.development_class === "Varttunut kasvatusmetsikkö"
+  ).length;
+  const youngThinning = compartments.filter(
+    (c) => c.development_class === "Nuori kasvatusmetsikkö"
+  ).length;
+
+  return [
+    `You are a Finnish forestry expert helping a forest owner manage their forest plan.`,
+    ``,
+    `FOREST CONTEXT:`,
+    forest ? `- Forest name: ${forest.name}` : "",
+    forest?.municipality ? `- Municipality: ${forest.municipality}` : "",
+    forest?.property_id ? `- Property ID: ${forest.property_id}` : "",
+    `- Total compartments: ${compartments.length}`,
+    `- Total area: ${totalArea.toFixed(1)} ha`,
+    `- Total volume: ${Math.round(totalVolume).toLocaleString()} m³`,
+    `- Regeneration-ready: ${regenReady} stands`,
+    `- Mature thinning: ${matureThinning} stands`,
+    `- Young thinning: ${youngThinning} stands`,
+    ``,
+    `KEY RULES:`,
+    `1. Never invent stand data — always fetch it via get_stand or search_stands.`,
+    `2. When the user asks for a new plan, use the generate_plan tool.`,
+    `3. When the user asks for modifications, use the editing tools.`,
+    `4. Always check harvest sustainability after making changes.`,
+    `5. Explain your recommendations in forestry terms.`,
+    `6. Respond in English (UI language is English; underlying data is Finnish).`,
+    ``,
+    `GENERAL GUIDELINES:`,
+    `- Thinnings aim for sustainable forest growth.`,
+    `- Clearcuts are automatically followed by a regeneration chain.`,
+    `- Never thin the same stand twice within 10 years.`,
+    `- Aim to keep annual harvest below annual growth.`,
+    `- Detailed rotation ages, thresholds, and growth coefficients are built into the generate_plan tool.`,
+    `- Stand data has Finnish attributes (development classes like "Uudistuskypsä metsikkö",`,
+    `  site types like "tuore", species like "Mänty"). Present them with English context.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}

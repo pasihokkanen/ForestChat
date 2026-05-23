@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import type { Operation } from "@/types/database";
 import { createClient } from "@/lib/supabase/client";
+import { useForestStore } from "@/lib/store";
 
 interface UseOperationsResult {
   data: Operation[];
@@ -16,6 +17,7 @@ export function useOperations(
   const [data, setData] = useState<Operation[]>([]);
   const [loading, setLoading] = useState<boolean>(forestId !== null);
   const [error, setError] = useState<string | null>(null);
+  const refetchCounter = useForestStore((s) => s.refetchCounter);
 
   useEffect(() => {
     if (forestId === null) {
@@ -63,7 +65,7 @@ export function useOperations(
     return () => {
       cancelled = true;
     };
-  }, [forestId]);
+  }, [forestId, refetchCounter]);
 
   return { data, loading, error };
 }

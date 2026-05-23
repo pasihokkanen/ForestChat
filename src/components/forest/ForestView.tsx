@@ -9,6 +9,7 @@ import { useEffect, useState, useRef, Suspense } from "react";
 import dynamic from "next/dynamic";
 import StandLayer from "@/components/map/StandLayer";
 import StandLegend from "@/components/map/StandLegend";
+import ChatPanel from "@/components/chat/ChatPanel";
 import { testCompartments } from "@/lib/test-data";
 import type maplibregl from "maplibre-gl";
 
@@ -125,24 +126,29 @@ export default function ForestView({ forestId }: ForestViewProps) {
   }, [map, geojson]);
 
   return (
-    <div className="relative w-full h-full">
-      <Suspense
-        fallback={
-          <div className="w-full h-full flex items-center justify-center text-gray-500">
-            Loading map...
-          </div>
-        }
-      >
-        <MapView onMapReady={setMap} />
-      </Suspense>
-      <StandLayer map={map} compartments={geojson} />
-      <StandLegend />
+    <div className="flex h-full">
+      <div className="flex-1 relative min-w-0">
+        <Suspense
+          fallback={
+            <div className="w-full h-full flex items-center justify-center text-gray-500">
+              Loading map...
+            </div>
+          }
+        >
+          <MapView onMapReady={setMap} />
+        </Suspense>
+        <StandLayer map={map} compartments={geojson} />
+        <StandLegend />
 
-      {compartmentsError && (
-        <div className="absolute top-4 left-4 z-10 bg-red-50 border border-red-200 rounded-md px-3 py-2 text-xs text-red-700 max-w-xs">
-          {compartmentsError}
-        </div>
-      )}
+        {compartmentsError && (
+          <div className="absolute top-4 left-4 z-10 bg-red-50 border border-red-200 rounded-md px-3 py-2 text-xs text-red-700 max-w-xs">
+            {compartmentsError}
+          </div>
+        )}
+      </div>
+      <div className="w-[400px] border-l border-gray-200 bg-white flex flex-col shrink-0">
+        <ChatPanel forestId={forestId} />
+      </div>
     </div>
   );
 }

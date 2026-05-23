@@ -1,0 +1,78 @@
+// src/lib/chat/sse-client.ts — Browser-side SSE parser
+
+export type SseEventType = "chunk" | "tool_start" | "tool_end" | "done" | "error";
+
+interface SseCallbacks {
+  onChunk?: (text: string) => void;
+  onToolStart?: (name: string, args: Record<string, unknown>) => void;
+  onToolEnd?: (name: string, result: string) => void;
+  onDone?: (messageId: string, sessionId: string, model?: string | null) => void;
+  onError?: (error: string) => void;
+}
+
+export async function streamChat(
+  message: string,
+  forestId: string,
+  sessionId: string | null,
+  callbacks: SseCallbacks
+): Promise<void> {
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, forest_id: forestId, session_id: sessionId }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    callbacks.onError?.(text);
+    return;
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    callbacks.onError?.("No response body");
+    return;
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    let currentEvent = "";
+    for (const line of lines) {
+      if (line.startsWith("event: ")) {
+        currentEvent = line.slice(7).trim();
+      } else if (line.startsWith("data: ")) {
+        try {
+          const data = JSON.parse(line.slice(6));
+          switch (currentEvent) {
+            case "chunk":
+              callbacks.onChunk?.(data.content);
+              break;
+            case "tool_start":
+              callbacks.onToolStart?.(data.name, data.args);
+              break;
+            case "tool_end":
+              callbacks.onToolEnd?.(data.name, data.result);
+              break;
+            case "done":
+              callbacks.onDone?.(data.message_id, data.session_id, data.model);
+              break;
+            case "error":
+              callbacks.onError?.(data.error);
+              break;
+          }
+        } catch {
+          // skip unparseable JSON
+        }
+      }
+    }
+  }
+}

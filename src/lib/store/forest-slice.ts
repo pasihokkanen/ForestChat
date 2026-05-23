@@ -16,6 +16,7 @@ export interface ForestSlice {
   isLoadingForest: boolean;
   isLoadingCompartments: boolean;
   forestError: string | null;
+  refetchCounter: number;
 
   setForest: (forest: Forest) => void;
   setCompartments: (compartments: Compartment[]) => void;
@@ -24,6 +25,7 @@ export interface ForestSlice {
   setLoading: (key: LoadingKey, value: boolean) => void;
   setError: (error: string | null) => void;
   clearForestData: () => void;
+  triggerRefetch: () => void;
 }
 
 const initialState = {
@@ -34,6 +36,7 @@ const initialState = {
   isLoadingForest: false,
   isLoadingCompartments: false,
   forestError: null as string | null,
+  refetchCounter: 0,
 };
 
 export const createForestSlice: StateCreator<ForestSlice> = (set) => ({
@@ -57,4 +60,7 @@ export const createForestSlice: StateCreator<ForestSlice> = (set) => ({
   setError: (error) => set({ forestError: error }),
 
   clearForestData: () => set(initialState),
+
+  triggerRefetch: () =>
+    set((state) => ({ refetchCounter: state.refetchCounter + 1 })),
 });

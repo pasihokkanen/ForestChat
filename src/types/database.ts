@@ -69,6 +69,7 @@ export interface ChatSession {
   forest_id: string;
   user_id: string;
   title: string | null;
+  model: string | null;  // Per-session model override (set by /model command)
   created_at: string;
 }
 
