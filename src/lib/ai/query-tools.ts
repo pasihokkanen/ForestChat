@@ -6,7 +6,6 @@
 import type { Compartment, Operation, PlanMetadata } from "@/types/database";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getCompartmentsByForest } from "@/lib/repos/compartments";
-import { getOperationsByForest, getOperationsByYear } from "@/lib/repos/operations";
 import { getPlanMetadataByForest } from "@/lib/repos/plan-metadata";
 
 // ── Species alias mapping for English→Finnish auto-translation ──
@@ -21,14 +20,10 @@ const SPECIES_ALIASES: Record<string, string[]> = {
 };
 
 const SITE_MAP: Record<string, string> = {
-  tuore: "tuore",
-  mesic: "tuore",
-  lehtomainen: "lehtomainen",
-  "herb-rich": "lehtomainen",
-  kuivahko: "kuivahko",
-  "sub-xeric": "kuivahko",
-  kuiva: "kuiva",
-  xeric: "kuiva",
+  tuore: "tuore", mesic: "tuore",
+  lehtomainen: "lehtomainen", "herb-rich": "lehtomainen", "herb-rich heath": "lehtomainen",
+  kuivahko: "kuivahko", "sub-xeric": "kuivahko",
+  kuiva: "kuiva", xeric: "kuiva",
 };
 
 // ── get_stand ──
@@ -114,10 +109,7 @@ export async function searchStands(
   const lines = stands.map((s) =>
     `  Stand ${s.stand_id}: ${s.main_species ?? "?"}, ${s.development_class ?? "?"}, ${s.area_ha?.toFixed(1)} ha, ${s.age_years ?? "?"} y, ${s.volume_m3?.toFixed(0)} m³`
   );
-  return {
-    success: true,
-    result: `Found ${stands.length} stand(s):\n${lines.join("\n")}`,
-  };
+  return { success: true, result: `Found ${stands.length} stand(s):\n${lines.join("\n")}` };
 }
 
 // ── plan_summary ──
@@ -126,43 +118,35 @@ export async function planSummary(
   forestId: string
 ): Promise<{ success: boolean; result: string; error?: string }> {
   try {
-    const metadata = await getPlanMetadataByForest(forestId);
-    const operations = await getOperationsByForest(forestId);
+    const supabase = await createServerSupabase();
+    const { data: opsData } = await supabase
+      .from("operations")
+      .select("*")
+      .eq("forest_id", forestId);
+    const operations = (opsData as Operation[]) ?? [];
     const compartments = await getCompartmentsByForest(forestId);
 
     const totalArea = compartments.reduce((s, c) => s + (c.area_ha ?? 0), 0);
     const totalVolume = compartments.reduce((s, c) => s + (c.volume_m3 ?? 0), 0);
     const annualGrowth = compartments.reduce((s, c) => s + ((c.growth_m3_per_ha ?? 0) * (c.area_ha ?? 0)), 0);
 
-    // Group operations by period
     const p1Ops = operations.filter((o) => o.year >= 2026 && o.year <= 2035);
     const p2Ops = operations.filter((o) => o.year >= 2036 && o.year <= 2045);
-    const p1Harvest = p1Ops.filter((o) => o.type === "Päätehakkuu" || o.type === "Harvennus");
-    const p2Harvest = p2Ops.filter((o) => o.type === "Päätehakkuu" || o.type === "Harvennus");
     const p1Income = p1Ops.reduce((s, o) => s + (o.income_eur ?? 0), 0);
     const p1Cost = p1Ops.reduce((s, o) => s + (o.cost_eur ?? 0), 0);
     const p2Income = p2Ops.reduce((s, o) => s + (o.income_eur ?? 0), 0);
     const p2Cost = p2Ops.reduce((s, o) => s + (o.cost_eur ?? 0), 0);
-    const p1AvgHarvest = p1Harvest.length > 0 ? Math.round(p1Harvest.reduce((s, o) => s + (o.removal_pct ?? 0), 0) / 10) : 0;
-    const p2AvgHarvest = p2Harvest.length > 0 ? Math.round(p2Harvest.reduce((s, o) => s + (o.removal_pct ?? 0), 0) / 10) : 0;
 
     const lines = [
       `📊 Plan Summary for ${totalArea.toFixed(1)} ha forest`,
       ``,
       `🌲 Total volume: ${Math.round(totalVolume).toLocaleString()} m³`,
       `📈 Annual growth: ${Math.round(annualGrowth).toLocaleString()} m³/v`,
-      ...(metadata?.stumpage_value_eur
-        ? [`💰 Stumpage value: ${Math.round(metadata.stumpage_value_eur).toLocaleString()} €`]
-        : []),
-      ...(metadata?.total_volume_m3
-        ? [`📦 Plan total volume: ${Math.round(metadata.total_volume_m3).toLocaleString()} m³`]
-        : []),
       ``,
       `Period 1 (2026-2035):`,
       `  Clearcuts: ${p1Ops.filter((o) => o.type === "Päätehakkuu").length}`,
       `  Thinnings: ${p1Ops.filter((o) => o.type === "Harvennus" || o.type === "Ensiharvennus").length}`,
       `  Regeneration: ${p1Ops.filter((o) => o.type === "Laikkumätästys" || o.type === "Istutus").length}`,
-      `  Avg harvest: ${p1AvgHarvest} m³/v`,
       `  Income: ${Math.round(p1Income).toLocaleString()} €`,
       `  Costs: ${Math.round(p1Cost).toLocaleString()} €`,
       `  Net: ${Math.round(p1Income - p1Cost).toLocaleString()} €`,
@@ -170,7 +154,6 @@ export async function planSummary(
       `Period 2 (2036-2045):`,
       `  Clearcuts: ${p2Ops.filter((o) => o.type === "Päätehakkuu").length}`,
       `  Thinnings: ${p2Ops.filter((o) => o.type === "Harvennus" || o.type === "Ensiharvennus").length}`,
-      `  Avg harvest: ${p2AvgHarvest} m³/v`,
       `  Income: ${Math.round(p2Income).toLocaleString()} €`,
       `  Costs: ${Math.round(p2Cost).toLocaleString()} €`,
       `  Net: ${Math.round(p2Income - p2Cost).toLocaleString()} €`,
@@ -195,7 +178,13 @@ export async function yearOperations(
   year: number
 ): Promise<{ success: boolean; result: string; error?: string }> {
   try {
-    const ops = await getOperationsByYear(forestId, year);
+    const supabase = await createServerSupabase();
+    const { data: opsData } = await supabase
+      .from("operations")
+      .select("*")
+      .eq("forest_id", forestId)
+      .eq("year", year);
+    const ops = (opsData as Operation[]) ?? [];
 
     if (ops.length === 0) {
       return { success: true, result: `No operations planned for ${year}.` };

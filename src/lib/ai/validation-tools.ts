@@ -7,7 +7,6 @@
 import type { Compartment, Operation, PlanMetadata } from "@/types/database";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getCompartmentsByForest } from "@/lib/repos/compartments";
-import { getOperationsByForest } from "@/lib/repos/operations";
 import { getPlanMetadataByForest } from "@/lib/repos/plan-metadata";
 
 // ── check_harvest_sustainability ──
@@ -19,11 +18,9 @@ export async function checkSustainability(
   try {
     const supabase = await createServerSupabase();
 
-    // Get plan metadata for annual growth
     const metadata = await getPlanMetadataByForest(forestId);
     const annualGrowth = metadata?.annual_growth_m3 ?? 0;
 
-    // Fall back to compartment-level growth if no plan metadata
     let growthRate = annualGrowth;
     if (growthRate === 0) {
       const compartments = await getCompartmentsByForest(forestId);
@@ -33,7 +30,6 @@ export async function checkSustainability(
       );
     }
 
-    // Get operations
     let opsQuery = supabase.from("operations").select("*").eq("forest_id", forestId);
     if (year) opsQuery = opsQuery.eq("year", year);
 
@@ -49,7 +45,6 @@ export async function checkSustainability(
       };
     }
 
-    // Calculate harvest volume (use removal_pct * volume from compartments)
     const standIds = [...new Set(operations.map((o) => o.compartment_id))];
     const { data: compartments } = await supabase
       .from("compartments")
@@ -84,9 +79,7 @@ export async function checkSustainability(
     const lines = [
       `📊 Harvest Sustainability Check`,
       ``,
-      year
-        ? `Year: ${year}`
-        : `Period: all planned years`,
+      year ? `Year: ${year}` : `Period: all planned years`,
       `Annual growth: ${Math.round(growthRate).toLocaleString()} m³/v`,
       `Total harvest: ${Math.round(totalHarvestM3).toLocaleString()} m³${year ? "" : " (total)"}`,
       `Harvest vs growth: ${harvestVsGrowth}%`,
@@ -122,16 +115,21 @@ export async function validatePlan(
   forestId: string
 ): Promise<{ success: boolean; result: string; error?: string }> {
   try {
+    const supabase = await createServerSupabase();
     const issues: ValidationIssue[] = [];
     const compartments = await getCompartmentsByForest(forestId);
-    const operations = await getOperationsByForest(forestId);
+    const { data: opsData } = await supabase
+      .from("operations")
+      .select("*")
+      .eq("forest_id", forestId)
+      .order("year", { ascending: true });
+    const operations = (opsData as Operation[]) ?? [];
     const metadata = await getPlanMetadataByForest(forestId);
 
     if (operations.length === 0) {
       return { success: true, result: "No operations in plan. Generate a plan first." };
     }
 
-    // Build compartment lookup
     const compMap = new Map<string, Compartment>();
     for (const c of compartments) {
       compMap.set(c.id, c);
@@ -139,8 +137,8 @@ export async function validatePlan(
 
     const currentYear = new Date().getFullYear();
 
-    // ── Check 1: No clearcuts on non-regeneration-ready stands ──
-    const regenReadyClasses = ["Uudistuskypsä metsikkö", "Siemenpuumetsikkö"];
+    // Check 1: No clearcuts on non-regeneration-ready stands
+    const regenReadyClasses = ["regeneration_ready"];
     const clearcuts = operations.filter((o) => o.type === "Päätehakkuu");
     for (const op of clearcuts) {
       const comp = compMap.get(op.compartment_id);
@@ -154,7 +152,7 @@ export async function validatePlan(
       }
     }
 
-    // ── Check 2: No thinnings within 10 years of previous thinning ──
+    // Check 2: No thinnings within 10 years of previous thinning
     const thinnings = operations
       .filter((o) => o.type === "Harvennus" || o.type === "Ensiharvennus")
       .sort((a, b) => a.year - b.year);
@@ -173,7 +171,7 @@ export async function validatePlan(
       }
     }
 
-    // ── Check 3: Regeneration chain follows each clearcut ──
+    // Check 3: Regeneration chain follows each clearcut
     const regenTypes = [
       "Laikkumätästys", "Ojitusmätästys", "Laikutus",
       "Istutus", "Kuusen istutus", "Männyn istutus",
@@ -198,11 +196,10 @@ export async function validatePlan(
       }
     }
 
-    // ── Check 4: Annual harvest doesn't exceed annual growth ──
+    // Check 4: Annual harvest doesn't exceed annual growth
     const annualGrowth = metadata?.annual_growth_m3 ??
       compartments.reduce((s, c) => s + ((c.growth_m3_per_ha ?? 0) * (c.area_ha ?? 0)), 0);
 
-    // Group harvest by year
     const harvestByYear = new Map<number, number>();
     for (const op of operations) {
       if (["Päätehakkuu", "Harvennus", "Ensiharvennus", "Poimintahakkuu"].includes(op.type)) {
@@ -224,7 +221,7 @@ export async function validatePlan(
       }
     }
 
-    // ── Check 5: No duplicate operations on same stand+year ──
+    // Check 5: No duplicate operations on same stand+year
     const seen = new Set<string>();
     for (const op of operations) {
       const key = `${op.compartment_id}:${op.year}:${op.type}`;
@@ -240,7 +237,7 @@ export async function validatePlan(
       seen.add(key);
     }
 
-    // ── Check 6: Operations have valid years (within plan period) ──
+    // Check 6: Operations have valid years
     const planStart = metadata?.period_start ?? currentYear;
     const planEnd = metadata?.period_end ?? currentYear + 20;
     for (const op of operations) {
@@ -264,7 +261,6 @@ export async function validatePlan(
       }
     }
 
-    // ── Build report ──
     const errors = issues.filter((i) => i.severity === "error");
     const warnings = issues.filter((i) => i.severity === "warning");
 
@@ -295,12 +291,6 @@ export async function validatePlan(
       for (const issue of warnings) {
         lines.push(`  • ${issue.message}`);
       }
-    }
-
-    if (errors.length > 0) {
-      lines.push(`\n❌ Plan has errors that need fixing before it can be used.`);
-    } else if (warnings.length > 0) {
-      lines.push(`\n⚠️ Plan has warnings (recommendations for improvement) but no critical errors.`);
     }
 
     return { success: true, result: lines.join("\n") };

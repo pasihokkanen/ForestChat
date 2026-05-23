@@ -6,7 +6,6 @@
 
 import type { Compartment } from "@/types/database";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { getOperationsByYear } from "@/lib/repos/operations";
 
 // ── Validation helpers (rules from architecture 5.2) ──
@@ -210,8 +209,8 @@ export async function addOperation(
   }
 
   // Insert operation
-  const admin = createAdminClient();
-  const { error } = await admin.from("operations").insert({
+  const supabase2 = await createServerSupabase();
+  const { error } = await supabase2.from("operations").insert({
     compartment_id: comp.id,
     forest_id: forestId,
     type,
@@ -251,8 +250,8 @@ export async function removeOperation(
   }
 
   // Find and delete operations for this stand+year
-  const admin = createAdminClient();
-  const { data: deleted, error } = await admin
+  const supabase3 = await createServerSupabase();
+  const { data: deleted, error } = await supabase3
     .from("operations")
     .delete()
     .eq("compartment_id", compartment.id)

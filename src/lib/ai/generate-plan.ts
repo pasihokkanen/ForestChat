@@ -1,7 +1,7 @@
 // src/lib/ai/generate-plan.ts
 
 import { getCompartmentsByForest } from "@/lib/repos/compartments";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createServerSupabase } from "@/lib/supabase/server";
 import { classifyAndValueStands } from "./classify";
 import { schedulePlan } from "./schedule";
 import type { YearPlan } from "./types";
@@ -30,8 +30,8 @@ export async function generatePlan(
     // 3. Schedule
     const { p1, p2, summary } = schedulePlan(forestKuviot, operations, args.startYear ?? new Date().getFullYear());
 
-    // 4. Store operations in Supabase (admin client bypasses RLS)
-    const admin = createAdminClient();
+    // 4. Store operations in Supabase
+    const admin = await createServerSupabase();
     const allPlanOps: Array<{
       compartment_id: string;
       forest_id: string;
