@@ -255,8 +255,8 @@ export function classifyAndValueStands(
       continue;
     }
 
-    // === UUDISTUSKYPSÄ → PÄÄTEHAKKUU ===
-    if (kl.includes("Uudistuskypsä")) {
+    // === REGENERATION_READY → PÄÄTEHAKKUU ===
+    if (kl.includes("regeneration_ready")) {
       const [optMin, optMax] = getOptimalAge(pp, site);
       operations.push({
         kuvio: k,
@@ -318,9 +318,8 @@ export function classifyAndValueStands(
       continue;
     }
 
-    // === TAIMIKKO ===
-    if (kl.includes("Taimikko alle")) {
-      if (age >= 3 && age <= 12) {
+    // === TAIMIKKO / SEEDLING (alle 1,3 m) ===
+    if (kl.includes("seedling") && age >= 3 && age <= 12) {
         operations.push({
           kuvio: k,
           type: "Taimikon varhaishoito",
@@ -330,12 +329,11 @@ export function classifyAndValueStands(
           removal_m3: 0,
           notes: `Ikä ${age.toFixed(0)}v`,
         });
-      }
       continue;
     }
 
-    if (kl.includes("Taimikko yli")) {
-      if (age >= 10 && age <= 25) {
+    // === TAIMIKKO / SEEDLING (yli 1,3 m) ===
+    if (kl.includes("seedling") && age >= 10 && age <= 25) {
         operations.push({
           kuvio: k,
           type: "Taimikonhoito",
@@ -345,12 +343,11 @@ export function classifyAndValueStands(
           removal_m3: 0,
           notes: `Ikä ${age.toFixed(0)}v`,
         });
-      }
       continue;
     }
 
-    // === NUORI KASVATUSMETSIKKÖ → ENSIHARVENNUS ===
-    if (kl.includes("Nuori kasvatusmetsikkö")) {
+    // === YOUNG_THINNING → ENSIHARVENNUS ===
+    if (kl.includes("young_thinning")) {
       const thresh = THINNING_BA["ensiharvennus"]?.[pp] ?? 18;
       const minAge = MIN_AGE_ENSIHARVENNUS?.[pp] ?? 30;
       if (ba >= thresh && age >= minAge) {
@@ -373,8 +370,8 @@ export function classifyAndValueStands(
       continue;
     }
 
-    // === VARTTUNUT KASVATUSMETSIKKÖ → HARVENNUS ===
-    if (kl.includes("Varttunut kasvatusmetsikkö")) {
+    // === MATURE_THINNING → HARVENNUS ===
+    if (kl.includes("mature_thinning")) {
       const thresh = THINNING_BA["harvennus"]?.[pp] ?? 22;
       const minAge = MIN_AGE_HARVENNUS?.[pp] ?? 40;
       if (ba >= thresh && age >= minAge) {

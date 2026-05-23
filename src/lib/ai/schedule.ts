@@ -341,7 +341,7 @@ export function schedulePlan(
   for (const k of forestKuviot) {
     const kl = k.kehitysluokka;
     const age = k.ikä;
-    if (kl.includes("Taimikko alle") && age < 3) {
+    if (kl.includes("seedling") && age < 3) {
       const target = startYear + Math.floor(10 - age);
       if (target >= yearsP2[0] && target <= yearsP2[yearsP2.length - 1]) {
         getP2(target).taimik.push({
@@ -382,7 +382,7 @@ export function schedulePlan(
 
     const [optMin] = getOptimalAge(pp, site);
 
-    if (kl.includes("Varttunut") || kl.includes("Nuori kasvatusmetsikkö") || kl.includes("Uudistuskypsä")) {
+    if (kl.includes("mature_thinning") || kl.includes("young_thinning") || kl.includes("regeneration_ready")) {
       const yearsToOpt = Math.max(0, optMin - age);
       const targetYr = startYear + Math.floor(yearsToOpt);
       if (targetYr <= yearsP2[yearsP2.length - 1] && targetYr >= yearsP2[0]) {

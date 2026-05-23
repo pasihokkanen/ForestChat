@@ -94,10 +94,10 @@ export const GROWTH_PEATLAND: Record<string, number> = {
 // ─── Site classification mapping ───
 export function classifySite(kasvupaikka: string): string {
   const kp = kasvupaikka.toLowerCase();
-  if (kp.includes("lehto") || kp.includes("lehtomainen") || kp.includes("ruoho")) return "lehtomainen";
-  if (kp.includes("tuore") || kp.includes("mustikka")) return "tuore";
-  if (kp.includes("kuivahko") || kp.includes("puolukka")) return "kuivahko";
-  if (kp.includes("kuiva") || kp.includes("varpu") || kp.includes("karu")) return "kuiva";
+  if (kp.includes("herb-rich") || kp.includes("lehto") || kp.includes("lehtomainen") || kp.includes("ruoho")) return "lehtomainen";
+  if (kp.includes("mesic") || kp.includes("tuore") || kp.includes("mustikka")) return "tuore";
+  if (kp.includes("sub-xeric") || kp.includes("kuivahko") || kp.includes("puolukka")) return "kuivahko";
+  if (kp.includes("xeric") || kp.includes("kuiva") || kp.includes("varpu") || kp.includes("karu")) return "kuiva";
   return "kuivahko";
 }
 

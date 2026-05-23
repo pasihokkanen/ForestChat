@@ -38,9 +38,9 @@ describe("classifyAndValueStands", () => {
     expect(result.forestKuviot[0].numero).toBe("2");
   });
 
-  it("classifies uudistuskypsä as päätehakkuu", () => {
+  it("classifies regeneration_ready as päätehakkuu", () => {
     const compartments = [
-      makeCompartment({ stand_id: "3", development_class: "Uudistuskypsä metsikkö", age_years: 85 }),
+      makeCompartment({ stand_id: "3", development_class: "regeneration_ready", age_years: 85 }),
     ];
     const result = classifyAndValueStands(compartments);
     expect(result.operations.length).toBeGreaterThan(0);
@@ -77,9 +77,9 @@ describe("classifyAndValueStands", () => {
     expect(result.forestKuviot[0].site_class).toBe("lehtomainen");
   });
 
-  it("classifies taimikko alle as early tending", () => {
+  it("classifies seedling as early tending", () => {
     const compartments = [
-      makeCompartment({ stand_id: "6", development_class: "Taimikko alle 1,3 m", age_years: 8 }),
+      makeCompartment({ stand_id: "6", development_class: "seedling", age_years: 8 }),
     ];
     const result = classifyAndValueStands(compartments);
     const hasTending = result.operations.some(
