@@ -23,6 +23,10 @@
 - ✅ Python reference script: `~/Metsa/build_plan_v3_fixed.py` (1091 lines)
 - ✅ Environment variables: `OPENROUTER_API_KEY` set
 
+**⚠️ New prerequisite (Phase 3):**
+- [ ] New migration: `003_add_chat_model.sql` — adds `model TEXT` column to `chat_sessions` for per-session model selection
+- [ ] New env var: `OPENROUTER_MODEL` (optional, default: `deepseek/deepseek-v4-flash` if unset)
+
 **⚠️ Next.js 16 notes:**
 - `params` in route handlers is `Promise<{ id: string }>` — must `await params`
 - Route handlers use default exports (no named exports for `GET`/`POST` unless legacy pattern)
@@ -35,10 +39,10 @@
 
 ```
 Track A: Chat Backend Infrastructure
-  T6.1 → Chat session & message repos (0.75h)
+  T6.1 → Chat session & message repos (0.75h) [+ createSession, updateSessionModel]
   T6.2 → SSE streaming utility (0.5h)
                                     ↓ (wait for T8.4)
-  T6.3 → Streaming chat API route (3h)
+  T6.3 → Streaming chat API route (3h) [+ /new, /model commands, dynamic model]
 
 Track B: Forestry Engine (port from Python)
   T7.1 → Forestry config & types (1h)
@@ -53,17 +57,17 @@ Track C: Editing & Query Tools
   T8.4 → Tool registration & system prompt (1.5h) ──────► T6.3
 
 Track D: Chat UI
-  T9.1 → Zustand chat slice + SSE client (1h)
-  T9.2 → ChatPanel component (1.5h)
+  T9.1 → Zustand chat slice + SSE client (1h) [+ activeModel, commandsOpen]
+  T9.2 → ChatPanel component (1.5h) [+ CommandsMenu, model display]
   T9.3 → ChatMessages + ChatInput (2h)
   T9.4 → Integrate into ForestView (1h)
 
 Track E: Tests
   T10.1 → Forestry engine unit tests (1h)
-  T10.2 → Chat API integration tests (1h)
+  T10.2 → Chat API integration tests (1h) [+ chat-commands.test.ts]
   T10.3 → Chat UI component tests (1h)
 
-Total: ~23h
+Total: ~23h (+0.5h for DB migration + command plumbing)
 ```
 
 ### Dependency Graph
@@ -152,6 +156,41 @@ export async function getSessionById(
   }
   return data as ChatSession;
 }
+
+/** Create a fresh session (used by /new command) */
+export async function createSession(
+  forestId: string,
+  userId: string,
+  title?: string,
+  model?: string
+): Promise<ChatSession> {
+  const supabase = await createServerSupabase();
+  const { data, error } = await supabase
+    .from("chat_sessions")
+    .insert({
+      forest_id: forestId,
+      user_id: userId,
+      title: title ?? "Forest Plan Chat",
+      model: model ?? null,
+    })
+    .select()
+    .single();
+  if (error) throw new Error(`Failed to create session: ${error.message}`);
+  return data as ChatSession;
+}
+
+/** Update the model for a session (used by /model command) */
+export async function updateSessionModel(
+  sessionId: string,
+  model: string
+): Promise<void> {
+  const supabase = await createServerSupabase();
+  const { error } = await supabase
+    .from("chat_sessions")
+    .update({ model })
+    .eq("id", sessionId);
+  if (error) throw new Error(`Failed to update model: ${error.message}`);
+}
 ```
 
 **Chat messages repo (`src/lib/repos/chat-messages.ts`):**
@@ -197,7 +236,26 @@ export async function addMessage(
 }
 ```
 
-**Verification:** `npm run build` passes (no TS errors). Write a quick integration test that creates a session and adds messages.
+**⚠️ Prerequisite: Run migration `003_add_chat_model.sql`** before testing:
+
+```sql
+-- supabase/migrations/003_add_chat_model.sql
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS model TEXT;
+```
+
+Run in Supabase SQL Editor. Then update `ChatSession` type in `src/types/database.ts`:
+```typescript
+export interface ChatSession {
+  id: string;
+  forest_id: string;
+  user_id: string;
+  title: string | null;
+  model: string | null;  // ← ADD THIS
+  created_at: string;
+}
+```
+
+**Verification:** `npm run build` passes (no TS errors). Write a quick integration test that creates a session, adds messages, and updates the model.
 
 ---
 
@@ -215,16 +273,26 @@ export async function addMessage(
 
 /**
  * SSE event names used by the chat API:
- * - chunk: text delta from the AI response
- * - tool_start: AI requested a tool — { name: string }
+ * - chunk: text delta from the AI response — { content: string }
+ * - tool_start: AI requested a tool — { name: string, args: object }
  * - tool_end: tool execution complete — { name: string, result: string }
- * - done: entire response complete — { message_id: string }
+ * - done: entire response complete — { message_id: string, session_id: string, model?: string }
+ *       (/new returns new session_id; /model returns updated model)
  * - error: an error occurred — { error: string }
  */
 
 export interface SseEvent {
   event: "chunk" | "tool_start" | "tool_end" | "done" | "error";
-  data: unknown;
+  data: {
+    content?: string;
+    name?: string;
+    args?: unknown;
+    result?: string;
+    message_id?: string;
+    session_id?: string;
+    model?: string | null;
+    error?: string;
+  };
 }
 
 export function createSseStream(): {
@@ -336,13 +404,16 @@ The agent loop runs on the server. When OpenRouter returns a `tool_calls` delta,
 // - Error handling for API failures and timeouts
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-// ⚠️ Should be configured via env var OPENROUTER_MODEL for flexibility
-// Default: deepseek/deepseek-v4-flash (verified tool calling support)
-const MODEL = process.env.OPENROUTER_MODEL ?? "deepseek/deepseek-v4-flash";
+// Model selection priority: session.model > OPENROUTER_MODEL env > default
+const DEFAULT_MODEL = "deepseek/deepseek-v4-flash"; // verified tool calling support
+function resolveModel(sessionModel?: string | null): string {
+  return sessionModel ?? process.env.OPENROUTER_MODEL ?? DEFAULT_MODEL;
+}
 
 interface OpenRouterRequest {
   messages: Array<{ role: string; content: string }>;
   tools?: ToolDefinition[];
+  model?: string | null;  // per-request model override
   stream: boolean;
 }
 
@@ -368,7 +439,7 @@ export async function* streamChat(
       "HTTP-Referer": "https://forestchat.app",
       "X-Title": "ForestChat",
     },
-    body: JSON.stringify({ ...request, model: MODEL }),
+    body: JSON.stringify({ ...request, model: request.model ?? DEFAULT_MODEL }),
   });
 
   if (!response.ok) {
@@ -578,6 +649,32 @@ export async function POST(request: NextRequest) {
       // 3. Get/create session
       const session = await getOrCreateSession(forest_id, user.id);
 
+      // ── Command handling (before AI agent loop) ──
+      // /new — Start a fresh conversation (creates new session)
+      if (message === "/new") {
+        const newSession = await createSession(forest_id, user.id, undefined, session.model);
+        send({ event: "chunk", data: { content: "🆕 Started a new conversation. How can I help with your forest?" } });
+        send({ event: "done", data: { message_id: "", session_id: newSession.id, model: newSession.model } });
+        close();
+        return;
+      }
+
+      // /model <name> — Switch AI model for this session
+      if (message.startsWith("/model ")) {
+        const modelName = message.slice(7).trim();
+        if (!modelName) {
+          send({ event: "error", data: { error: "Usage: /model <name> (e.g., /model claude-sonnet-4)" } });
+          close();
+          return;
+        }
+        await updateSessionModel(session.id, modelName);
+        send({ event: "chunk", data: { content: `✅ Model switched to \\`${modelName}\\` for this conversation.` } });
+        send({ event: "done", data: { message_id: "", session_id: session.id, model: modelName } });
+        close();
+        return;
+      }
+      // ── End command handling ──
+
       // 4. Load context
       const forest = await getForestById(forest_id);
       const compartments = await getCompartmentsByForest(forest_id);
@@ -586,7 +683,10 @@ export async function POST(request: NextRequest) {
       // 5. Store user message
       const userMsg = await addMessage(session.id, "user", message);
 
-      // 6. Build messages array for OpenRouter
+      // 6. Resolve model: session-specific > env var > default
+      const activeModel = resolveModel(session.model);
+
+      // 7. Build messages array for OpenRouter
       const systemPrompt = buildSystemPrompt(forest, compartments);
       const tools = getTools();
 
@@ -599,7 +699,7 @@ export async function POST(request: NextRequest) {
         { role: "user", content: message },
       ];
 
-      // 7. Agent loop
+      // 8. Agent loop
       let finalContent = "";
       const maxIterations = 10; // prevent infinite loops (editing flow: modify→check→validate→explain = 4-6)
 
@@ -611,6 +711,7 @@ export async function POST(request: NextRequest) {
           {
             messages: openRouterMessages,
             tools: tools.length > 0 ? tools : undefined,
+            model: activeModel,
             stream: true,
           },
           env.openRouterApiKey
@@ -650,7 +751,7 @@ export async function POST(request: NextRequest) {
       const assistantMsg = await addMessage(session.id, "assistant", finalContent);
 
       // 9. Signal complete
-      send({ event: "done", data: { message_id: assistantMsg.id, session_id: session.id } });
+      send({ event: "done", data: { message_id: assistantMsg.id, session_id: session.id, model: session.model } });
     } catch (err) {
       send({ event: "error", data: { error: err instanceof Error ? err.message : "Unknown error" } });
     } finally {
@@ -668,7 +769,12 @@ export async function POST(request: NextRequest) {
 }
 ```
 
-**Verification:** Send a test POST to `/api/chat` with `{ message: "Hello", forest_id: "test-id" }` — should get SSE response. Use curl with `--no-buffer` to observe streaming.
+**Verification:** 
+1. Run migration `003_add_chat_model.sql` in Supabase SQL Editor
+2. Test `/api/chat` with `{ message: "/new", forest_id: "test-id" }` — returns new session_id
+3. Test with `{ message: "/model claude-sonnet-4", forest_id: "test-id" }` — confirms model change
+4. Test normal message — uses resolved model (session.model > env var > default)
+5. Send test POST with `{ message: "Hello", forest_id: "test-id" }` — streams SSE response
 
 ---
 
@@ -1530,6 +1636,8 @@ export interface ChatSlice {
   streamingContent: string;
   toolCallStatus: { name: string; status: "running" | "done" | "error"; result?: string } | null;
   sessionId: string | null;
+  activeModel: string;        // Currently active LLM model shown in header
+  commandsOpen: boolean;       // Toggle for commands menu dropdown
   error: string | null;
 
   addMessage: (msg: ChatMessage) => void;
@@ -1539,6 +1647,8 @@ export interface ChatSlice {
   clearStream: () => void;
   setToolCall: (status: ChatSlice["toolCallStatus"]) => void;
   setSessionId: (id: string) => void;
+  setActiveModel: (model: string) => void;
+  toggleCommands: () => void;
   setError: (err: string | null) => void;
   clearChat: () => void;
 }
@@ -1555,7 +1665,7 @@ interface SseCallbacks {
   onChunk?: (text: string) => void;
   onToolStart?: (name: string, args: Record<string, unknown>) => void;
   onToolEnd?: (name: string, result: string) => void;
-  onDone?: (messageId: string, sessionId: string) => void;
+  onDone?: (messageId: string, sessionId: string, model?: string | null) => void;
   onError?: (error: string) => void;
 }
 
@@ -1601,7 +1711,7 @@ export async function streamChat(
           case "chunk": callbacks.onChunk?.(data.content); break;
           case "tool_start": callbacks.onToolStart?.(data.name, data.args); break;
           case "tool_end": callbacks.onToolEnd?.(data.name, data.result); break;
-          case "done": callbacks.onDone?.(data.message_id, data.session_id); break;
+          case "done": callbacks.onDone?.(data.message_id, data.session_id, data.model); break;
           case "error": callbacks.onError?.(data.error); break;
         }
       }
@@ -1625,18 +1735,19 @@ export async function streamChat(
 **ChatPanel layout:**
 
 ```
-┌─────────────────────┐
-│ ChatPanel           │  ← ChatHeader (title, clear button)
-├─────────────────────┤
-│                     │
-│  ChatMessages       │  ← scrollable area
-│  (streaming)        │
-│                     │
-│  [Tool call card]   │  ← visible during tool execution
-│                     │
-├─────────────────────┤
-│ [Input] [Send]      │  ← ChatInput
-└─────────────────────┘
+┌─────────────────────────────────┐
+│ ForestChat · deepseek-v4-flash  │  ← ChatHeader (title + model + ☰ menu)
+│ [📋 Commands]                   │  ← dropdown: /new, /model <name>
+├─────────────────────────────────┤
+│                                 │
+│  ChatMessages                   │  ← scrollable area
+│  (streaming)                    │
+│                                 │
+│  [Tool call card]               │  ← visible during tool execution
+│                                 │
+├─────────────────────────────────┤
+│ [/model claude...] [Input] [Send]│  ← ChatInput (command auto-detect)
+└─────────────────────────────────┘
 ```
 
 **ChatPanel** wraps the chat area. It uses a `ResizablePanelGroup` (or a simple CSS grid) alongside the map. The panel can be toggled visible/hidden with a button.
@@ -1653,7 +1764,22 @@ For MVP, the simplest approach: the forest view gets a sidebar that's always vis
 </div>
 ```
 
-**Verification:** ChatPanel renders with header and empty message area. No functionality yet — just layout.
+**ChatHeader component details:**
+- Shows title "ForestChat" plus active model name (e.g., "· deepseek/deepseek-v4-flash") in the header bar
+- Has a ☰ (menu) button that toggles a commands dropdown
+- **Commands dropdown** lists available slash commands:
+  ```
+  📋 Chat Commands
+  ─────────────────
+  /new              Start a new conversation
+  /model <name>     Change AI model
+                    Current: deepseek/deepseek-v4-flash
+  ```
+- Selecting `/model` from the menu auto-fills the ChatInput with "/model " so the user types the model name
+- Selecting `/new` immediately executes it (clears chat, creates new session)
+- The dropdown closes on click outside
+
+**Verification:** ChatPanel renders with header showing model name. Menu button opens dropdown with both commands. Clicking `/new` clears the chat. Clicking `/model` auto-fills the input.
 
 ---
 
@@ -1798,6 +1924,7 @@ Uses MSW to mock:
 ## Files Created (Summary)
 
 ```
+supabase/migrations/003_add_chat_model.sql      ← New: adds model TEXT to chat_sessions
 src/lib/ai/config.ts                          ← T7.1 Constants (prices, growth rates, ages, costs)
 src/lib/ai/types.ts                           ← T7.1 Internal types (KuviotData, PlannedOperation)
 src/lib/ai/classify.ts                        ← T7.2 Stand classification & value calculation
@@ -1811,27 +1938,30 @@ src/lib/chat/system-prompt.ts                 ← T8.4 System prompt builder
 src/lib/chat/sse.ts                           ← T6.2 Server-side SSE streaming utility
 src/lib/chat/openrouter.ts                    ← T6.3 OpenRouter client (streaming, function calling)
 src/lib/chat/tool-executor.ts                 ← T6.3 Tool call dispatcher
-src/lib/repos/chat-sessions.ts                ← T6.1 Chat session repo
+src/lib/repos/chat-sessions.ts                ← T6.1 Chat session repo (add: createSession, updateSessionModel)
 src/lib/repos/chat-messages.ts                ← T6.1 Chat message repo
-src/app/api/chat/route.ts                     ← T6.3 Streaming chat API endpoint
-src/lib/store/chat-slice.ts                   ← T9.1 Zustand chat slice
-src/lib/chat/sse-client.ts                    ← T9.1 Browser SSE client
+src/app/api/chat/route.ts                     ← T6.3 Streaming chat API endpoint (+ /new, /model commands)
+src/lib/store/chat-slice.ts                   ← T9.1 Zustand chat slice (+ activeModel, commandsOpen)
+src/lib/chat/sse-client.ts                    ← T9.1 Browser SSE client (+ model in onDone)
 src/components/chat/ChatPanel.tsx             ← T9.2 Chat panel container
-src/components/chat/ChatHeader.tsx            ← T9.2 Chat header
+src/components/chat/ChatHeader.tsx            ← T9.2 Chat header (+ model display, commands Menu button)
 src/components/chat/ChatMessages.tsx          ← T9.3 Message list (scrollable)
 src/components/chat/ChatMessage.tsx           ← T9.3 Individual message bubble
 src/components/chat/ChatInput.tsx             ← T9.3 Input + send
+src/components/chat/CommandsMenu.tsx          ← T9.2 Commands dropdown component
 src/components/chat/ToolCallCard.tsx          ← T9.3 Tool execution progress card
 src/__tests__/unit/forestry-config.test.ts    ← T10.1 Config tests
 src/__tests__/unit/forestry-classify.test.ts  ← T10.1 Classify tests
 src/__tests__/unit/forestry-schedule.test.ts  ← T10.1 Schedule tests
 src/__tests__/integration/chat-api.test.ts    ← T10.2 Chat API integration tests
+src/__tests__/unit/chat-commands.test.ts      ← T10.2 Command parsing tests
 src/__tests__/components/ChatPanel.test.tsx   ← T10.3 Chat UI component tests
 ```
 
 ## Files Modified
 
 ```
+src/types/database.ts                         ← Add model?: string to ChatSession interface
 src/lib/store/index.ts                        ← T9.1 Add ChatSlice to combined store
 src/components/forest/ForestView.tsx          ← T9.4 Add ChatPanel, wire up SSE client
 ```
