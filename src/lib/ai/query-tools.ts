@@ -2,22 +2,10 @@
 //
 // Read-only tools: get_stand, search_stands, plan_summary, year_operations
 // All tools return { success, result, error? } for the tool executor.
+// All accept an authenticated supabase client to avoid creating their own.
 
-import type { Compartment, Operation, PlanMetadata } from "@/types/database";
-import { createServerSupabase } from "@/lib/supabase/server";
-import { getCompartmentsByForest } from "@/lib/repos/compartments";
-import { getPlanMetadataByForest } from "@/lib/repos/plan-metadata";
-
-// ── Species alias mapping for English→Finnish auto-translation ──
-
-const SPECIES_ALIASES: Record<string, string[]> = {
-  Mänty: ["Mänty", "Pine", "mänty", "pine"],
-  Kuusi: ["Kuusi", "Spruce", "kuusi", "spruce"],
-  Rauduskoivu: ["Rauduskoivu", "Birch", "rauduskoivu", "birch", "Koivu", "koivu"],
-  Hieskoivu: ["Hieskoivu", "hieskoivu"],
-  Lehtikuusi: ["Lehtikuusi", "Larch", "lehtikuusi", "larch"],
-  Harmaaleppä: ["Harmaaleppä", "Alder", "harmaaleppä", "alder"],
-};
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Compartment, Operation } from "@/types/database";
 
 const SITE_MAP: Record<string, string> = {
   tuore: "tuore", mesic: "tuore",
@@ -29,10 +17,10 @@ const SITE_MAP: Record<string, string> = {
 // ── get_stand ──
 
 export async function getStand(
+  supabase: SupabaseClient,
   forestId: string,
   standId: string
 ): Promise<{ success: boolean; result: string; error?: string }> {
-  const supabase = await createServerSupabase();
   const { data, error } = await supabase
     .from("compartments")
     .select("*")
@@ -65,25 +53,24 @@ export async function getStand(
 // ── search_stands ──
 
 export async function searchStands(
+  supabase: SupabaseClient,
   forestId: string,
   filters: Record<string, unknown>
 ): Promise<{ success: boolean; result: string; error?: string }> {
-  const supabase = await createServerSupabase();
   let query = supabase.from("compartments").select("*").eq("forest_id", forestId);
 
-  // Translate species: accept both Finnish and English
   if (filters.species) {
-    const input = String(filters.species);
-    let finnishName: string | null = null;
-    for (const [fi, aliases] of Object.entries(SPECIES_ALIASES)) {
-      if (aliases.some((a) => a.toLowerCase() === input.toLowerCase())) {
-        finnishName = fi;
-        break;
-      }
-    }
-    if (finnishName) {
-      query = query.eq("main_species", finnishName);
-    }
+    const input = String(filters.species).toLowerCase();
+    const speciesMap: Record<string, string> = {
+      mänty: "Mänty", pine: "Mänty",
+      kuusi: "Kuusi", spruce: "Kuusi",
+      rauduskoivu: "Rauduskoivu", birch: "Rauduskoivu", koivu: "Rauduskoivu",
+      hieskoivu: "Hieskoivu",
+      lehtikuusi: "Lehtikuusi", larch: "Lehtikuusi",
+      harmaaleppä: "Harmaaleppä", alder: "Harmaaleppä",
+    };
+    const finnish = speciesMap[input];
+    if (finnish) query = query.eq("main_species", finnish);
   }
 
   if (filters.site_type) {
@@ -115,16 +102,21 @@ export async function searchStands(
 // ── plan_summary ──
 
 export async function planSummary(
+  supabase: SupabaseClient,
   forestId: string
 ): Promise<{ success: boolean; result: string; error?: string }> {
   try {
-    const supabase = await createServerSupabase();
     const { data: opsData } = await supabase
       .from("operations")
       .select("*")
       .eq("forest_id", forestId);
     const operations = (opsData as Operation[]) ?? [];
-    const compartments = await getCompartmentsByForest(forestId);
+
+    const { data: compData } = await supabase
+      .from("compartments")
+      .select("area_ha, volume_m3, growth_m3_per_ha")
+      .eq("forest_id", forestId);
+    const compartments = (compData as Array<{ area_ha: number | null; volume_m3: number | null; growth_m3_per_ha: number | null }>) ?? [];
 
     const totalArea = compartments.reduce((s, c) => s + (c.area_ha ?? 0), 0);
     const totalVolume = compartments.reduce((s, c) => s + (c.volume_m3 ?? 0), 0);
@@ -174,11 +166,11 @@ export async function planSummary(
 // ── year_operations ──
 
 export async function yearOperations(
+  supabase: SupabaseClient,
   forestId: string,
   year: number
 ): Promise<{ success: boolean; result: string; error?: string }> {
   try {
-    const supabase = await createServerSupabase();
     const { data: opsData } = await supabase
       .from("operations")
       .select("*")
@@ -192,7 +184,6 @@ export async function yearOperations(
 
     const clearcuts = ops.filter((o) => o.type === "Päätehakkuu");
     const thinnings = ops.filter((o) => o.type === "Harvennus" || o.type === "Ensiharvennus");
-    const selectionCuts = ops.filter((o) => o.type === "Poimintahakkuu");
     const regeneration = ops.filter((o) =>
       ["Laikkumätästys", "Ojitusmätästys", "Laikutus", "Istutus", "Kuusen istutus", "Männyn istutus"].includes(o.type)
     );
@@ -204,45 +195,26 @@ export async function yearOperations(
 
     if (clearcuts.length > 0) {
       lines.push(`\n🪓 Clearcuts (${clearcuts.length}):`);
-      for (const o of clearcuts) {
-        lines.push(`  Stand — removal ${o.removal_pct}%, income ${o.income_eur ?? 0}€`);
-      }
+      for (const o of clearcuts) lines.push(`  Stand — removal ${o.removal_pct}%, income ${o.income_eur ?? 0}€`);
     }
-
     if (thinnings.length > 0) {
       lines.push(`\n🌲 Thinnings (${thinnings.length}):`);
-      for (const o of thinnings) {
-        lines.push(`  Stand — removal ${o.removal_pct}%, income ${o.income_eur ?? 0}€`);
-      }
+      for (const o of thinnings) lines.push(`  Stand — removal ${o.removal_pct}%, income ${o.income_eur ?? 0}€`);
     }
-
-    if (selectionCuts.length > 0) {
-      lines.push(`\n🌳 Selection cuts (${selectionCuts.length}):`);
-      for (const o of selectionCuts) {
-        lines.push(`  Stand — removal ${o.removal_pct}%, income ${o.income_eur ?? 0}€`);
-      }
-    }
-
     if (regeneration.length > 0) {
       lines.push(`\n🌱 Regeneration (${regeneration.length}):`);
-      for (const o of regeneration) {
-        lines.push(`  ${o.type} — cost ${o.cost_eur ?? 0}€`);
-      }
+      for (const o of regeneration) lines.push(`  ${o.type} — cost ${o.cost_eur ?? 0}€`);
     }
-
     if (tending.length > 0) {
       lines.push(`\n🌿 Tending (${tending.length}):`);
-      for (const o of tending) {
-        lines.push(`  ${o.type} — cost ${o.cost_eur ?? 0}€`);
-      }
+      for (const o of tending) lines.push(`  ${o.type} — cost ${o.cost_eur ?? 0}€`);
     }
 
     const totalIncome = ops.reduce((s, o) => s + (o.income_eur ?? 0), 0);
     const totalCost = ops.reduce((s, o) => s + (o.cost_eur ?? 0), 0);
-    const net = totalIncome - totalCost;
     lines.push(`\n💰 Total income: ${Math.round(totalIncome).toLocaleString()} €`);
     lines.push(`💰 Total costs: ${Math.round(totalCost).toLocaleString()} €`);
-    lines.push(`💰 Net: ${Math.round(net).toLocaleString()} €`);
+    lines.push(`💰 Net: ${Math.round(totalIncome - totalCost).toLocaleString()} €`);
 
     return { success: true, result: lines.join("\n") };
   } catch (err) {

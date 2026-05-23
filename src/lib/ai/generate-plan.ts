@@ -1,7 +1,7 @@
 // src/lib/ai/generate-plan.ts
 
-import { getCompartmentsByForest } from "@/lib/repos/compartments";
-import { createServerSupabase } from "@/lib/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Compartment } from "@/types/database";
 import { classifyAndValueStands } from "./classify";
 import { schedulePlan } from "./schedule";
 import type { YearPlan } from "./types";
@@ -12,13 +12,19 @@ interface GeneratePlanArgs {
 }
 
 export async function generatePlan(
+  supabase: SupabaseClient,
   forestId: string,
   userId: string,
   args: GeneratePlanArgs
 ): Promise<{ success: boolean; result: string; error?: string }> {
   try {
-    // 1. Fetch compartments
-    const compartments = await getCompartmentsByForest(forestId);
+    // 1. Fetch compartments via passed auth client
+    const { data: comps } = await supabase
+      .from("compartments")
+      .select("*")
+      .eq("forest_id", forestId);
+    const compartments = (comps as Compartment[]) ?? [];
+
     if (compartments.length === 0) {
       return { success: true, result: "No compartments found for this forest." };
     }
@@ -30,8 +36,12 @@ export async function generatePlan(
     // 3. Schedule
     const { p1, p2, summary } = schedulePlan(forestKuviot, operations, args.startYear ?? new Date().getFullYear());
 
-    // 4. Store operations in Supabase
-    const admin = await createServerSupabase();
+    // 4. Build plan operations array
+    const kuvioToCompartment = new Map<string, { id: string; stand_id: string }>();
+    for (const c of compartments) {
+      kuvioToCompartment.set(c.stand_id, { id: c.id, stand_id: c.stand_id });
+    }
+
     const allPlanOps: Array<{
       compartment_id: string;
       forest_id: string;
@@ -44,21 +54,12 @@ export async function generatePlan(
       created_by: string;
     }> = [];
 
-    // Map kuvio numbers to compartment IDs
-    const kuvioToCompartment = new Map<string, { id: string; stand_id: string }>();
-    for (const c of compartments) {
-      kuvioToCompartment.set(c.stand_id, { id: c.id, stand_id: c.stand_id });
-    }
-
     const addPlanOps = (yearPlan: YearPlan[]) => {
       for (const yp of yearPlan) {
         for (const op of [...yp.paate, ...yp.harvennus, ...yp.taimik, ...yp.uudist]) {
-          // Find by stand_id string
           const standId = op.kuvio.numero;
-          // Try exact match first, then try numeric comparison
           let comp = kuvioToCompartment.get(standId);
           if (!comp) {
-            // Try parsing as number
             const numVal = parseFloat(standId.replace(",", "."));
             for (const [key, val] of kuvioToCompartment.entries()) {
               const keyNum = parseFloat(key.replace(",", "."));
@@ -85,14 +86,13 @@ export async function generatePlan(
       }
     };
 
-    // Store BOTH periods in the ops array
     addPlanOps(p1);
     addPlanOps(p2);
 
     // 5. Upsert plan_metadata
     const periodYears = args.periodYears ?? 20;
     const startYear = args.startYear ?? new Date().getFullYear();
-    await admin.from("plan_metadata").upsert({
+    const { error: metaError } = await supabase.from("plan_metadata").upsert({
       forest_id: forestId,
       name: `Forest Plan ${startYear}-${startYear + periodYears - 1}`,
       period_start: startYear,
@@ -100,17 +100,19 @@ export async function generatePlan(
       total_volume_m3: totalVolume,
       stumpage_value_eur: totalValue,
       annual_growth_m3: totalGrowth,
-      owner_stated_value_eur: null, // user sets manually
+      owner_stated_value_eur: null,
     }, { onConflict: "forest_id" });
+    if (metaError) {
+      // Non-critical — metadata is optional
+      console.warn("Failed to upsert plan_metadata:", metaError.message);
+    }
 
-    // 6. Insert new operations FIRST, then delete old ones only on success
-    //    This prevents data loss if the insert fails partway through.
+    // 6. Insert new operations FIRST, then delete old ones
     if (allPlanOps.length > 0) {
-      const { error: insertError } = await admin.from("operations").insert(allPlanOps);
+      const { error: insertError } = await supabase.from("operations").insert(allPlanOps);
       if (insertError) throw new Error(`Failed to insert operations: ${insertError.message}`);
     }
-    // Only delete old AI operations AFTER successful insert
-    await admin.from("operations").delete().eq("forest_id", forestId).eq("created_by", "ai");
+    await supabase.from("operations").delete().eq("forest_id", forestId).eq("created_by", "ai");
 
     // 7. Return summary
     const result = [
@@ -129,7 +131,6 @@ export async function generatePlan(
     ].join("\n");
 
     return { success: true, result };
-
   } catch (err) {
     return { success: false, result: "", error: err instanceof Error ? err.message : "Plan generation failed" };
   }

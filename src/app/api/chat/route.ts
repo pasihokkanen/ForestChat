@@ -116,6 +116,7 @@ export async function POST(request: NextRequest) {
             const result = await executeTool(chunk.name, chunk.arguments, {
               forestId: forest_id,
               userId: user.id,
+              supabase,
             });
 
             send({ event: "tool_end", data: { name: chunk.name, result: result.result } });

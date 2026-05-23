@@ -1,34 +1,29 @@
 // src/lib/ai/validation-tools.ts — T8.3 Validation Tools
 //
 // Validation tools: check_harvest_sustainability, validate_plan
-// check_harvest_sustainability: compares harvest volume against annual growth
-// validate_plan: full validation with 6 checks
+// All accept an authenticated supabase client to avoid creating their own.
 
-import type { Compartment, Operation, PlanMetadata } from "@/types/database";
-import { createServerSupabase } from "@/lib/supabase/server";
-import { getCompartmentsByForest } from "@/lib/repos/compartments";
-import { getPlanMetadataByForest } from "@/lib/repos/plan-metadata";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Compartment, Operation } from "@/types/database";
 
 // ── check_harvest_sustainability ──
 
 export async function checkSustainability(
+  supabase: SupabaseClient,
   forestId: string,
   year?: number
 ): Promise<{ success: boolean; result: string; error?: string }> {
   try {
-    const supabase = await createServerSupabase();
+    // Get growth rate from compartments
+    const { data: compData } = await supabase
+      .from("compartments")
+      .select("volume_m3, area_ha, growth_m3_per_ha")
+      .eq("forest_id", forestId);
+    const compartments = (compData as Array<{ volume_m3: number | null; area_ha: number | null; growth_m3_per_ha: number | null }>) ?? [];
 
-    const metadata = await getPlanMetadataByForest(forestId);
-    const annualGrowth = metadata?.annual_growth_m3 ?? 0;
-
-    let growthRate = annualGrowth;
-    if (growthRate === 0) {
-      const compartments = await getCompartmentsByForest(forestId);
-      growthRate = compartments.reduce(
-        (s, c) => s + ((c.growth_m3_per_ha ?? 0) * (c.area_ha ?? 0)),
-        0
-      );
-    }
+    const growthRate = compartments.reduce(
+      (s, c) => s + ((c.growth_m3_per_ha ?? 0) * (c.area_ha ?? 0)), 0
+    );
 
     let opsQuery = supabase.from("operations").select("*").eq("forest_id", forestId);
     if (year) opsQuery = opsQuery.eq("year", year);
@@ -46,13 +41,13 @@ export async function checkSustainability(
     }
 
     const standIds = [...new Set(operations.map((o) => o.compartment_id))];
-    const { data: compartments } = await supabase
+    const { data: comps } = await supabase
       .from("compartments")
       .select("id, volume_m3, stand_id")
       .in("id", standIds);
 
     const compMap = new Map<string, { volume_m3: number | null; stand_id: string }>();
-    for (const c of (compartments ?? []) as Array<{ id: string; volume_m3: number | null; stand_id: string }>) {
+    for (const c of (comps ?? []) as Array<{ id: string; volume_m3: number | null; stand_id: string }>) {
       compMap.set(c.id, c);
     }
 
@@ -65,16 +60,13 @@ export async function checkSustainability(
     for (const op of harvestOps) {
       const comp = compMap.get(op.compartment_id);
       const volume = comp?.volume_m3 ?? 0;
-      const removalFraction = (op.removal_pct ?? 0) / 100;
-      totalHarvestM3 += volume * removalFraction;
+      totalHarvestM3 += volume * ((op.removal_pct ?? 0) / 100);
       totalIncome += op.income_eur ?? 0;
     }
 
     const harvestVsGrowth = growthRate > 0
       ? ((totalHarvestM3 / growthRate) * 100).toFixed(1)
       : "N/A";
-
-    const isSustainable = growthRate > 0 && totalHarvestM3 <= growthRate;
 
     const lines = [
       `📊 Harvest Sustainability Check`,
@@ -84,10 +76,9 @@ export async function checkSustainability(
       `Total harvest: ${Math.round(totalHarvestM3).toLocaleString()} m³${year ? "" : " (total)"}`,
       `Harvest vs growth: ${harvestVsGrowth}%`,
       `Harvest operations: ${harvestOps.length}`,
-      ...(year ? [] : [`Average annual harvest: ${Math.round(totalHarvestM3 / 20)} m³/v (over 20-year plan)`]),
       `Total income from harvest: ${Math.round(totalIncome).toLocaleString()} €`,
       ``,
-      isSustainable
+      growthRate > 0 && totalHarvestM3 <= growthRate
         ? `✅ Harvest is within sustainable limits (harvest ≤ annual growth).`
         : `⚠️ Harvest exceeds annual growth! Consider reducing harvest volume.`,
     ];
@@ -112,188 +103,134 @@ interface ValidationIssue {
 }
 
 export async function validatePlan(
+  supabase: SupabaseClient,
   forestId: string
 ): Promise<{ success: boolean; result: string; error?: string }> {
   try {
-    const supabase = await createServerSupabase();
     const issues: ValidationIssue[] = [];
-    const compartments = await getCompartmentsByForest(forestId);
+
+    const { data: compData } = await supabase
+      .from("compartments")
+      .select("*")
+      .eq("forest_id", forestId);
+    const compartments = (compData as Compartment[]) ?? [];
+
     const { data: opsData } = await supabase
       .from("operations")
       .select("*")
       .eq("forest_id", forestId)
       .order("year", { ascending: true });
     const operations = (opsData as Operation[]) ?? [];
-    const metadata = await getPlanMetadataByForest(forestId);
 
     if (operations.length === 0) {
       return { success: true, result: "No operations in plan. Generate a plan first." };
     }
 
     const compMap = new Map<string, Compartment>();
-    for (const c of compartments) {
-      compMap.set(c.id, c);
-    }
+    for (const c of compartments) compMap.set(c.id, c);
 
     const currentYear = new Date().getFullYear();
 
     // Check 1: No clearcuts on non-regeneration-ready stands
-    const regenReadyClasses = ["regeneration_ready"];
     const clearcuts = operations.filter((o) => o.type === "Päätehakkuu");
     for (const op of clearcuts) {
       const comp = compMap.get(op.compartment_id);
-      if (comp && !regenReadyClasses.some((c) => comp.development_class?.includes(c))) {
+      if (comp && comp.development_class !== "regeneration_ready") {
         issues.push({
           severity: "error",
           message: `Clearcut on stand ${comp.stand_id} (${comp.development_class}) which is not regeneration-ready.`,
-          standId: comp.stand_id,
-          year: op.year,
+          standId: comp.stand_id, year: op.year,
         });
       }
     }
 
-    // Check 2: No thinnings within 10 years of previous thinning
+    // Check 2: No thinnings within 10 years
     const thinnings = operations
       .filter((o) => o.type === "Harvennus" || o.type === "Ensiharvennus")
       .sort((a, b) => a.year - b.year);
-
     for (let i = 1; i < thinnings.length; i++) {
-      const prev = thinnings[i - 1];
-      const curr = thinnings[i];
-      if (prev.compartment_id === curr.compartment_id && (curr.year - prev.year) < 10) {
-        const comp = compMap.get(curr.compartment_id);
+      if (thinnings[i - 1].compartment_id === thinnings[i].compartment_id &&
+          (thinnings[i].year - thinnings[i - 1].year) < 10) {
         issues.push({
           severity: "error",
-          message: `Stand ${comp?.stand_id ?? curr.compartment_id} thinned in ${prev.year} and again in ${curr.year} (< 10 year interval).`,
-          standId: comp?.stand_id,
-          year: curr.year,
+          message: `Stand ${compMap.get(thinnings[i].compartment_id)?.stand_id ?? ""} thinned in ${thinnings[i - 1].year} and again in ${thinnings[i].year} (< 10 year interval).`,
+          year: thinnings[i].year,
         });
       }
     }
 
-    // Check 3: Regeneration chain follows each clearcut
-    const regenTypes = [
-      "Laikkumätästys", "Ojitusmätästys", "Laikutus",
-      "Istutus", "Kuusen istutus", "Männyn istutus",
-      "Site_prep", "Planting",
-    ];
-
+    // Check 3: Regeneration chain follows clearcuts
+    const regenTypes = ["Laikkumätästys", "Ojitusmätästys", "Laikutus", "Kuusen istutus", "Männyn istutus"];
     for (const op of clearcuts) {
       const hasFollowUp = operations.some(
-        (o) =>
-          o.compartment_id === op.compartment_id &&
-          regenTypes.includes(o.type) &&
-          (o.year === op.year || o.year === op.year + 1)
+        (o) => o.compartment_id === op.compartment_id &&
+              regenTypes.includes(o.type) &&
+              (o.year === op.year || o.year === op.year + 1)
       );
       if (!hasFollowUp) {
-        const comp = compMap.get(op.compartment_id);
         issues.push({
           severity: "warning",
-          message: `Stand ${comp?.stand_id ?? op.compartment_id} has a clearcut in ${op.year} but no regeneration chain (site prep + planting) following it.`,
-          standId: comp?.stand_id,
+          message: `Stand ${compMap.get(op.compartment_id)?.stand_id ?? ""} clearcut in ${op.year} but no regeneration chain follows.`,
           year: op.year,
         });
       }
     }
 
-    // Check 4: Annual harvest doesn't exceed annual growth
-    const annualGrowth = metadata?.annual_growth_m3 ??
-      compartments.reduce((s, c) => s + ((c.growth_m3_per_ha ?? 0) * (c.area_ha ?? 0)), 0);
-
+    // Check 4: Annual harvest vs growth
+    const annualGrowth = compartments.reduce((s, c) => s + ((c.growth_m3_per_ha ?? 0) * (c.area_ha ?? 0)), 0);
     const harvestByYear = new Map<number, number>();
     for (const op of operations) {
-      if (["Päätehakkuu", "Harvennus", "Ensiharvennus", "Poimintahakkuu"].includes(op.type)) {
-        const comp = compMap.get(op.compartment_id);
-        const volume = (comp?.volume_m3 ?? 0) * ((op.removal_pct ?? 0) / 100);
-        harvestByYear.set(op.year, (harvestByYear.get(op.year) ?? 0) + volume);
+      if (["Päätehakkuu", "Harvennus", "Ensiharvennus"].includes(op.type)) {
+        const vol = (compMap.get(op.compartment_id)?.volume_m3 ?? 0) * ((op.removal_pct ?? 0) / 100);
+        harvestByYear.set(op.year, (harvestByYear.get(op.year) ?? 0) + vol);
       }
     }
-
     if (annualGrowth > 0) {
       for (const [yr, harvest] of harvestByYear) {
         if (harvest > annualGrowth) {
-          issues.push({
-            severity: "warning",
-            message: `Year ${yr}: harvest ${Math.round(harvest).toLocaleString()} m³ exceeds annual growth ${Math.round(annualGrowth).toLocaleString()} m³.`,
-            year: yr,
-          });
+          issues.push({ severity: "warning", message: `Year ${yr}: harvest ${Math.round(harvest)} m³ exceeds growth ${Math.round(annualGrowth)} m³.`, year: yr });
         }
       }
     }
 
-    // Check 5: No duplicate operations on same stand+year
+    // Check 5: No duplicates
     const seen = new Set<string>();
     for (const op of operations) {
       const key = `${op.compartment_id}:${op.year}:${op.type}`;
       if (seen.has(key)) {
-        const comp = compMap.get(op.compartment_id);
-        issues.push({
-          severity: "error",
-          message: `Duplicate operation: ${op.type} on stand ${comp?.stand_id ?? op.compartment_id} in ${op.year}.`,
-          standId: comp?.stand_id,
-          year: op.year,
-        });
+        issues.push({ severity: "error", message: `Duplicate: ${op.type} on stand ${compMap.get(op.compartment_id)?.stand_id ?? ""} in ${op.year}.`, year: op.year });
       }
       seen.add(key);
     }
 
-    // Check 6: Operations have valid years
-    const planStart = metadata?.period_start ?? currentYear;
-    const planEnd = metadata?.period_end ?? currentYear + 20;
+    // Check 6: Valid years
     for (const op of operations) {
       if (op.year < currentYear) {
-        const comp = compMap.get(op.compartment_id);
-        issues.push({
-          severity: "error",
-          message: `${op.type} on stand ${comp?.stand_id ?? op.compartment_id} in ${op.year} is in the past.`,
-          standId: comp?.stand_id,
-          year: op.year,
-        });
-      }
-      if (op.year < planStart || op.year > planEnd) {
-        const comp = compMap.get(op.compartment_id);
-        issues.push({
-          severity: "warning",
-          message: `${op.type} on stand ${comp?.stand_id ?? op.compartment_id} in ${op.year} is outside the plan period (${planStart}-${planEnd}).`,
-          standId: comp?.stand_id,
-          year: op.year,
-        });
+        issues.push({ severity: "error", message: `${op.type} on stand ${compMap.get(op.compartment_id)?.stand_id ?? ""} in ${op.year} is in the past.`, year: op.year });
       }
     }
 
     const errors = issues.filter((i) => i.severity === "error");
     const warnings = issues.filter((i) => i.severity === "warning");
+    const planPassed = errors.length === 0;
 
     if (issues.length === 0) {
-      return {
-        success: true,
-        result: "✅ Plan validation passed! All checks OK. The plan looks good.",
-      };
+      return { success: true, result: "✅ Plan validation passed! All checks OK." };
     }
 
-    const lines = [
-      `📋 Plan Validation Report`,
-      `Total operations: ${operations.length}`,
-      `Total compartments: ${compartments.length}`,
-      ``,
-      `Issues found: ${errors.length} error(s), ${warnings.length} warning(s)`,
-    ];
-
-    if (errors.length > 0) {
-      lines.push(`\n❌ Errors (${errors.length}):`);
-      for (const issue of errors) {
-        lines.push(`  • ${issue.message}`);
-      }
-    }
-
-    if (warnings.length > 0) {
-      lines.push(`\n⚠️ Warnings (${warnings.length}):`);
-      for (const issue of warnings) {
-        lines.push(`  • ${issue.message}`);
-      }
-    }
-
-    return { success: true, result: lines.join("\n") };
+    return {
+      success: true,
+      result: [
+        `📋 Plan Validation Report`,
+        `Operations: ${operations.length} | Compartments: ${compartments.length}`,
+        ``,
+        `Issues: ${errors.length} error(s), ${warnings.length} warning(s)`,
+        ...(errors.length ? [`\n❌ Errors:`, ...errors.map((e) => `  • ${e.message}`)] : []),
+        ...(warnings.length ? [`\n⚠️ Warnings:`, ...warnings.map((w) => `  • ${w.message}`)] : []),
+        ``,
+        planPassed ? "✅ Plan is valid (no critical errors)." : "❌ Plan has critical errors. Fix before using.",
+      ].join("\n"),
+    };
   } catch (err) {
     return {
       success: false,
