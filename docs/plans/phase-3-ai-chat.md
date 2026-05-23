@@ -330,6 +330,8 @@ The agent loop runs on the server. When OpenRouter returns a `tool_calls` delta,
 // Key design decisions:
 // - Uses standard OpenAI-compatible fetch API
 // - Streams response via SSE parsing
+// ⚠️ OpenRouter streams tool_call arguments as incremental JSON fragments.
+// This parser accumulates argument deltas until finish_reason="tool_calls".
 // - Handles both text deltas and tool_call deltas
 // - Error handling for API failures and timeouts
 
@@ -342,10 +344,21 @@ interface OpenRouterRequest {
   stream: boolean;
 }
 
+interface AccumulatedToolCall {
+  index: number;
+  name: string;
+  arguments: string;
+}
+
+export type StreamChunk =
+  | { type: "text"; content: string }
+  | { type: "tool_call"; name: string; arguments: Record<string, unknown> }
+  | { type: "done" };
+
 export async function* streamChat(
   request: OpenRouterRequest,
   apiKey: string
-): AsyncGenerator<{ type: "text"; content: string } | { type: "tool_call"; name: string; arguments: Record<string, unknown> }> {
+): AsyncGenerator<StreamChunk> {
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
     headers: {
@@ -366,6 +379,8 @@ export async function* streamChat(
 
   const decoder = new TextDecoder();
   let buffer = "";
+  // Accumulate tool_calls across deltas — arguments arrive as JSON fragments
+  const pendingToolCalls: Map<number, AccumulatedToolCall> = new Map();
 
   while (true) {
     const { done, value } = await reader.read();
@@ -378,27 +393,71 @@ export async function* streamChat(
     for (const line of lines) {
       if (!line.startsWith("data: ")) continue;
       const data = line.slice(6).trim();
-      if (data === "[DONE]") return;
+      if (data === "[DONE]") {
+        yield { type: "done" };
+        return;
+      }
 
       try {
         const parsed = JSON.parse(data);
-        const delta = parsed.choices?.[0]?.delta;
+        const choice = parsed.choices?.[0];
+        const delta = choice?.delta;
         if (!delta) continue;
 
+        // Accumulate text
         if (delta.content) {
           yield { type: "text" as const, content: delta.content };
         }
 
+        // Accumulate tool_call arguments across deltas
         if (delta.tool_calls) {
           for (const tc of delta.tool_calls) {
+            const idx = tc.index ?? 0;
+
+            // Name arrives in the first delta for this tool_call index
             if (tc.function?.name) {
+              pendingToolCalls.set(idx, {
+                index: idx,
+                name: tc.function.name,
+                arguments: tc.function?.arguments ?? "",
+              });
+            } else {
+              // Subsequent deltas: append argument fragment
+              const existing = pendingToolCalls.get(idx);
+              if (existing) {
+                existing.arguments += tc.function?.arguments ?? "";
+              } else {
+                // First delta without name — rare but handle it
+                pendingToolCalls.set(idx, {
+                  index: idx,
+                  name: "",
+                  arguments: tc.function?.arguments ?? "",
+                });
+              }
+            }
+          }
+        }
+
+        // When the response signals done, flush accumulated tool calls
+        if (choice?.finish_reason === "tool_calls") {
+          for (const [_, tc] of pendingToolCalls) {
+            try {
+              const args = tc.arguments ? JSON.parse(tc.arguments) : {};
               yield {
                 type: "tool_call" as const,
-                name: tc.function.name,
-                arguments: JSON.parse(tc.function.arguments || "{}"),
+                name: tc.name,
+                arguments: args,
+              };
+            } catch {
+              // If arguments JSON is malformed, yield with empty args
+              yield {
+                type: "tool_call" as const,
+                name: tc.name,
+                arguments: {},
               };
             }
           }
+          pendingToolCalls.clear();
         }
       } catch {
         // skip unparseable lines
@@ -470,7 +529,7 @@ import { addMessage } from "@/lib/repos/chat-messages";
 import { createSseStream } from "@/lib/chat/sse";
 import { streamChat } from "@/lib/chat/openrouter";
 import { executeTool } from "@/lib/chat/tool-executor";
-import { getForestsById } from "@/lib/repos/forests";
+import { getForestById } from "@/lib/repos/forests";
 import { env } from "@/lib/env";
 import { buildSystemPrompt } from "@/lib/chat/system-prompt"; // T8.4
 import { getTools } from "@/lib/chat/tools"; // T8.4
@@ -506,7 +565,7 @@ export async function POST(request: NextRequest) {
       const session = await getOrCreateSession(forest_id, user.id);
 
       // 4. Load context
-      const forest = await getForestsById(forest_id);
+      const forest = await getForestById(forest_id);
       const compartments = await getCompartmentsByForest(forest_id);
       const prevMessages = await getMessagesBySession(session.id);
 
@@ -528,7 +587,7 @@ export async function POST(request: NextRequest) {
 
       // 7. Agent loop
       let finalContent = "";
-      const maxIterations = 5; // prevent infinite loops
+      const maxIterations = 10; // prevent infinite loops (editing flow: modify→check→validate→explain = 4-6)
 
       for (let iteration = 0; iteration < maxIterations; iteration++) {
         const toolResults: Array<{ role: string; content: string }> = [];
@@ -540,7 +599,7 @@ export async function POST(request: NextRequest) {
             tools: tools.length > 0 ? tools : undefined,
             stream: true,
           },
-          env.openrouterApiKey
+          env.openRouterApiKey
         )) {
           if (chunk.type === "text") {
             finalContent += chunk.content;
@@ -977,7 +1036,9 @@ export async function generatePlan(
       }
     };
 
+    // Store BOTH periods in the ops array
     addPlanOps(p1, 1);
+    addPlanOps(p2, 2);
 
     // 5. Upsert plan_metadata
     await admin.from("plan_metadata").upsert({
@@ -991,12 +1052,14 @@ export async function generatePlan(
       owner_stated_value_eur: null, // user sets manually
     }, { onConflict: "forest_id" });
 
-    // 6. Delete existing AI-generated operations for this forest and replace
-    await admin.from("operations").delete().eq("forest_id", forestId).eq("created_by", "ai");
+    // 6. Insert new operations FIRST, then delete old ones only on success
+    //    This prevents data loss if the insert fails partway through.
     if (allPlanOps.length > 0) {
       const { error: insertError } = await admin.from("operations").insert(allPlanOps);
       if (insertError) throw new Error(`Failed to insert operations: ${insertError.message}`);
     }
+    // Only delete old AI operations AFTER successful insert
+    await admin.from("operations").delete().eq("forest_id", forestId).eq("created_by", "ai");
 
     // 7. Return summary
     const result = [
@@ -1022,7 +1085,10 @@ export async function generatePlan(
 }
 ```
 
-**⚠️ Important:** When deleting existing AI operations, use `created_by = "ai"` filter so user-manually-added operations or history entries are preserved.
+**⚠️ Important:** 
+- Use `created_by = "ai"` filter when deleting/clearing old operations so user-manually-added operations or history entries are preserved.
+- **Insert new operations FIRST, then delete old ones** — this prevents total data loss if the insert fails mid-way.
+- Both P1 (2026-2035) and P2 (2036-2045) operations MUST be stored to match the Python script's two-period output.
 
 **Verification:** Call `generatePlan` with a test forest ID in a route handler test. Verify operations appear in Supabase and summary is returned. Compare metrics against Python output.
 
@@ -1075,13 +1141,81 @@ export async function getStand(
 }
 ```
 
-**`search_stands(filters)`**: Search compartments by species, site_type, development_class, age range, area range. Returns matching stand IDs and key attributes.
+**`search_stands(filters)`**: Search compartments by species, site_type, development_class, age range, area range. Returns matching stand IDs and key attributes. Accepts Finnish OR English parameter values and translates automatically.
+
+```typescript
+// Name-to-Finnish mapping for automatic translation
+const SPECIES_ALIASES: Record<string, string[]> = {
+  Mänty: ["Mänty", "Pine", "mänty", "pine"],
+  Kuusi: ["Kuusi", "Spruce", "kuusi", "spruce"],
+  Rauduskoivu: ["Rauduskoivu", "Birch", "rauduskoivu", "birch", "Koivu", "koivu"],
+  Hieskoivu: ["Hieskoivu", "hieskoivu"],
+  Lehtikuusi: ["Lehtikuusi", "Larch", "lehtikuusi", "larch"],
+  Harmaaleppä: ["Harmaaleppä", "Alder", "harmaaleppä", "alder"],
+};
+
+export async function searchStands(
+  forestId: string,
+  filters: Record<string, unknown>
+): Promise<{ success: boolean; result: string; error?: string }> {
+  const supabase = await createServerSupabase();
+  let query = supabase.from("compartments").select("*").eq("forest_id", forestId);
+
+  // Translate species: accept both Finnish and English
+  if (filters.species) {
+    const input = String(filters.species);
+    let finnishName: string | null = null;
+    for (const [fi, aliases] of Object.entries(SPECIES_ALIASES)) {
+      if (aliases.some((a) => a.toLowerCase() === input.toLowerCase())) {
+        finnishName = fi;
+        break;
+      }
+    }
+    if (finnishName) {
+      query = query.eq("main_species", finnishName);
+    }
+  }
+
+  if (filters.site_type) {
+    // Translate site type: tuore/lehtomainen/kuivahko/kuiva + English equivalents
+    const siteMap: Record<string, string> = {
+      tuore: "tuore", mesic: "tuore",
+      lehtomainen: "lehtomainen", "herb-rich": "lehtomainen",
+      kuivahko: "kuivahko", "sub-xeric": "kuivahko",
+      kuiva: "kuiva", xeric: "kuiva",
+    };
+    const mapped = siteMap[String(filters.site_type).toLowerCase()];
+    if (mapped) query = query.eq("site_type", mapped);
+  }
+
+  if (filters.development_class) {
+    query = query.ilike("development_class", `%${filters.development_class}%`);
+  }
+  if (filters.min_age) query = query.gte("age_years", Number(filters.min_age));
+  if (filters.max_age) query = query.lte("age_years", Number(filters.max_age));
+  if (filters.min_area) query = query.gte("area_ha", Number(filters.min_area));
+
+  const { data, error } = await query.order("stand_id").limit(50);
+  if (error) return { success: false, result: "", error: error.message };
+
+  const stands = (data as Compartment[]) ?? [];
+  if (stands.length === 0) {
+    return { success: true, result: "No matching stands found." };
+  }
+
+  const lines = stands.map((s) =>
+    `  Stand ${s.stand_id}: ${s.main_species ?? "?"}, ${s.development_class ?? "?"}, ${s.area_ha?.toFixed(1)} ha, ${s.age_years ?? "?"} y, ${s.volume_m3?.toFixed(0)} m³`
+  );
+  return { success: true, result: `Found ${stands.length} stand(s):
+${lines.join("\n")}` };
+}
+```
 
 **`plan_summary()`**: Calculate and return key metrics: total volume, annual growth, stumpage value, average harvest m³/v, net return.
 
 **`year_operations(year)`**: List all planned operations for a given year from the operations table. Organized by type.
 
-**Verification:** Test each tool with known forest data. Verify `search_stands` returns correct filters.
+**Verification:** Test each tool with known forest data. Verify `search_stands` returns correct filters with both Finnish and English parameter values.
 
 ---
 
@@ -1286,9 +1420,9 @@ Returns: operations per stand, key metrics.`,
         parameters: {
           type: "object",
           properties: {
-            species: { type: "string", enum: ["Pine", "Spruce", "Birch", ...] },
-            site_type: { type: "string", enum: ["herb-rich", "mesic", "sub-xeric", "xeric"] },
-            development_class: { type: "string", ... },
+            species: { type: "string", description: "Finnish name (Mänty, Kuusi, Rauduskoivu, Hieskoivu, Lehtikuusi, Harmaaleppä) or English (Pine, Spruce, Birch, etc.) — handler translates automatically" },
+            site_type: { type: "string", description: "Finnish (tuore, lehtomainen, kuivahko, kuiva) or English (mesic, herb-rich, sub-xeric, xeric)" },
+            development_class: { type: "string", description: "Finnish kehitysluokka: Uudistuskypsä metsikkö, Varttunut kasvatusmetsikkö, Nuori kasvatusmetsikkö, Taimikko, Aukea, Siemenpuumetsikkö" },
             min_age: { type: "number" },
             max_age: { type: "number" },
             min_area: { type: "number" },
@@ -1553,21 +1687,45 @@ For MVP, the simplest approach: the forest view gets a sidebar that's always vis
 **Changes to ForestView:**
 1. Add ChatPanel on the right side (400px, border-left)
 2. Map fills the remaining left space
-3. When a plan is generated, refresh compartments and operations data
+3. When a plan is generated, refresh operations data (compartments don't change during planning)
 4. Handle auth state — chat requires user to be logged in
 
-For refresh after plan generation: the chat API signals `event: done` → client checks if a "plan" tool was called → triggers a `useEffect` that re-fetches `useCompartments` and `useOperations` data.
+**⚠️ Existing hooks limitation:** `useCompartments()` and `useOperations()` currently don't expose a `refetch` function — they auto-fetch on mount via `useEffect([forestId])`. To support post-chat refresh:
+
+**Option A (recommended for MVP):** Add a `refetchCounter: number` to the Zustand store's `ForestSlice`. The SSE client increments it on `event: done`. `useOperations` adds `refetchCounter` to its dependency array. This triggers a re-fetch without modifying the hook API.
 
 ```typescript
-// In ForestView, after chat done event:
-const handleChatDone = useCallback((messageId: string) => {
-  // Re-fetch compartments and operations if plan was generated
-  // The tool_call_status from the session tells us if generate_plan was called
-  // For simplicity: always re-fetch after any chat message
-  refetchCompartments();
-  refetchOperations();
-}, []);
+// In forest-slice.ts, add:
+//   refetchCounter: number;
+//   triggerRefetch: () => void;
+// In useOperations(), add to deps:
+//   const refetchCounter = useForestStore((s) => s.refetchCounter);
+//   }, [forestId, refetchCounter]);
 ```
+
+**Option B:** Modify `useOperations()` to return a `refetch` function by extracting the fetch logic into a standalone async function and exposing it.
+
+```typescript
+// Modified useOperations.ts pattern:
+export function useOperations(forestId: string | null) {
+  const [data, setData] = useState<Operation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const refetchCounter = useForestStore((s) => s.refetchCounter);
+
+  const fetchOps = useCallback(async () => {
+    if (!forestId) return;
+    setLoading(true);
+    // ... fetch logic
+  }, [forestId]);
+
+  useEffect(() => { fetchOps(); }, [fetchOps, refetchCounter]);
+
+  return { data, loading, error, refetch: fetchOps };
+}
+```
+
+**In ForestView**, when the chat SSE client fires `onDone`, call `useForestStore.getState().triggerRefetch()` to increment the counter, causing the hooks to re-run.
 
 **Verification:** Full flow: open forest → chat panel visible → type "Generate a plan" → see streaming response → plan appears in DB → map+operations update.
 
@@ -1672,10 +1830,12 @@ src/components/forest/ForestView.tsx          ← T9.4 Add ChatPanel, wire up SS
 |---|---|---|---|
 | OpenRouter streaming format changes | Low | High | Abstract streaming parser; test against real API before deploy |
 | Python→TS port has subtle algorithm differences | Medium | Medium | Write comparison tests against known Python output values |
-| generate_plan exceeds Vercel 10s timeout | Medium | High | Consider Supabase Edge Function for generation; route handler streams progress during execution |
-| Tool call loop exceeds max iterations | Low | Medium | Hard limit of 5 iterations; return partial result with warning |
-| AI hallucinates stand data | Medium | Medium | `get_stand` and `search_stands` tools always fetch real data; AI cannot fabricate values |
-| SSE connection drops mid-stream | Low | Medium | Client auto-retries on error; final message is stored in DB so user sees it on reload |
+|| generate_plan exceeds Vercel 10s timeout | Medium | High | Consider running generation outside the SSE stream (kick off, close SSE with "generating..." status, poll for completion) or use Supabase Edge Function |
+|| Tool call loop exceeds max iterations | Low | Medium | Hard limit of 10 iterations; return partial result with warning |
+|| AI hallucinates stand data | Medium | Medium | `get_stand` and `search_stands` tools always fetch real data; AI cannot fabricate values |
+| AI calls search_stands with English species names | Medium | Low | Tool handler auto-translates English→Finnish species, site types, and development classes |
+|| SSE connection drops mid-stream | Low | Medium | Client auto-retries on error; final message is stored in DB so user sees it on reload |
+| Insert-then-delete race condition | Low | High | Two concurrent plan generations could temporarily duplicate operations. Mitigation: debounce or disable button during generation |
 | Chat messages not loaded on page refresh | Low | Low | Load previous messages from DB on session resume |
 | Chat panes breaks on mobile | Low | Low | Collapse chat to bottom sheet on mobile; full-screen chat when open |
 
@@ -1694,6 +1854,30 @@ src/components/forest/ForestView.tsx          ← T9.4 Add ChatPanel, wire up SS
 
 ---
 
-*Plan version: 1.0 — Created 2026-05-23*
+*Plan version: 2.0 — Created 2026-05-23, Reviewed 2026-05-23*
 *Derived from: `docs/plans/forestchat-architecture.md` v3.0, sections 5, 6.2, 6.3, and Phase 3 tasks (T6-T9).*
-*Reference: `~/Metsa/build_plan_v3_fixed.py` — the Python algorithm being ported.*
+*Reference: `~/Metsa/build_plan_v3_fixed.py` — the Python algorithm being ported.
+
+---
+
+## Changelog
+
+### v2.0 (2026-05-23) — Architecture review fixes
+
+#### 🔴 Critical fixes
+- **`getForestsById` → `getForestById`**: Fixed function name mismatch (actual repo exports singular name)
+- **`env.openrouterApiKey` → `env.openRouterApiKey`**: Fixed env property casing (active `env.ts` uses capital R)
+- **Period 2 operations now stored**: `addPlanOps(p2, 2)` added alongside `p1` — both periods persisted to DB
+- **SSE tool_call delta accumulation**: Rewrote streaming parser to accumulate argument fragments across multiple SSE deltas, flushing only on `finish_reason: "tool_calls"`
+- **Safe insert-then-delete**: Reversed operation replacement order — insert new ops first, delete old ones only on success (prevents total data loss on failure)
+
+#### 🟡 Significant fixes
+- **search_stands accepts both English/Finnish**: Tool definition uses free-text descriptions instead of English enums; handler includes auto-translation from English species/site/class names to Finnish database values
+- **Agent loop limit**: Raised from 5 to 10 iterations (editing flow needs 4-6)
+- **Vercel timeout risk noted**: Added stronger mitigation note about running generation outside SSE stream
+- **Refetch mechanism spec**: Added concrete implementation guidance (Zustand refetchCounter pattern) since existing hooks don't expose refetch functions
+
+#### 🟢 Minor fixes
+- **search_stands implementation**: Added full TypeScript code example with species alias translation
+- **Risk table**: Updated iteration limit, added English/Finnish mismatch risk, added insert-then-delete race condition risk
+- **Added changelog section** for plan traceability*
