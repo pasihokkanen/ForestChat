@@ -1,6 +1,8 @@
 # ForestChat — Phase 3: AI Chat System
 
 > **For Hermes:** Load subagent-driven-development skill before implementing. Use OpenCode CLI for coding subagents. Update this plan file to mark tasks as ✅ upon completion.
+>
+> **Phase 3b sub-plan:** [phase-3b-generalized-query-tools.md](./phase-3b-generalized-query-tools.md) — upgrades search_stands, replaces year_operations with query_operations, adds batch_update_operations. Read before implementing T8.1 and T8.2.
 
 **Goal:** Build the AI-powered forest management chat — the core interaction model where users generate forest plans, ask questions about stands, and request plan modifications through natural language conversation.
 
