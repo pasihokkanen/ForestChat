@@ -271,7 +271,7 @@ export function classifyAndValueStands(
     }
 
     // === SIEMENPUUMETSIKKÖ → UUDISTAMINEN ===
-    if (kl.includes("Siemenpuu")) {
+    if (kl.includes("shelterwood")) {
       operations.push({
         kuvio: k,
         type: "Laikkumätästys",
@@ -294,7 +294,7 @@ export function classifyAndValueStands(
     }
 
     // === AUKEA → UUDISTAMINEN (jos ei puita) ===
-    if (kl.includes("Aukea") && m3 < 5) {
+    if (kl.includes("open_area") && m3 < 5) {
       operations.push({
         kuvio: k,
         type: "Laikkumätästys",

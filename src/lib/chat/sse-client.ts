@@ -5,7 +5,7 @@ export type SseEventType = "chunk" | "tool_start" | "tool_end" | "done" | "error
 interface SseCallbacks {
   onChunk?: (text: string) => void;
   onToolStart?: (name: string, args: Record<string, unknown>) => void;
-  onToolEnd?: (name: string, result: string) => void;
+  onToolEnd?: (name: string, result: string, error?: string) => void;
   onDone?: (messageId: string, sessionId: string, model?: string | null) => void;
   onError?: (error: string) => void;
 }
@@ -60,7 +60,7 @@ export async function streamChat(
               callbacks.onToolStart?.(data.name, data.args);
               break;
             case "tool_end":
-              callbacks.onToolEnd?.(data.name, data.result);
+              callbacks.onToolEnd?.(data.name, data.result, data.error);
               break;
             case "done":
               callbacks.onDone?.(data.message_id, data.session_id, data.model);

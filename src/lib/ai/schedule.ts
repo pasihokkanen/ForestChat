@@ -382,7 +382,7 @@ export function schedulePlan(
 
     const [optMin] = getOptimalAge(pp, site);
 
-    if (kl.includes("mature_thinning") || kl.includes("young_thinning") || kl.includes("regeneration_ready")) {
+    if (kl.includes("regeneration_ready") || (kl.includes("mature_thinning") && age + (yearsP2[0] - startYear) >= optMin)) {
       const yearsToOpt = Math.max(0, optMin - age);
       const targetYr = startYear + Math.floor(yearsToOpt);
       if (targetYr <= yearsP2[yearsP2.length - 1] && targetYr >= yearsP2[0]) {

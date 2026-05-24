@@ -119,12 +119,16 @@ export async function POST(request: NextRequest) {
               supabase,
             });
 
-            send({ event: "tool_end", data: { name: chunk.name, result: result.result } });
+            send({ event: "tool_end", data: { name: chunk.name, result: result.result, error: result.error } });
 
+            const toolContent = result.success ? result.result : `Error: ${result.error}`;
             toolResults.push({
               role: "tool",
-              content: result.success ? result.result : `Error: ${result.error}`,
+              content: toolContent,
             });
+
+            // Persist tool result message so it survives page reloads
+            await addMessage(session.id, "tool", toolContent);
           }
         }
 

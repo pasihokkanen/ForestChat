@@ -63,8 +63,8 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
         onToolStart: (name, args) => {
           setToolCall({ name, status: "running" });
         },
-        onToolEnd: (name, result) => {
-          setToolCall({ name, status: "done", result });
+        onToolEnd: (name, result, error) => {
+          setToolCall({ name, status: error ? "error" : "done", result: error || result });
         },
         onDone: (messageId, newSessionId, model) => {
           // Finalize streaming content as a proper message

@@ -107,12 +107,12 @@ export async function generatePlan(
       console.warn("Failed to upsert plan_metadata:", metaError.message);
     }
 
-    // 6. Insert new operations FIRST, then delete old ones
+    // 6. Delete old AI-generated operations FIRST, then insert new ones
+    await supabase.from("operations").delete().eq("forest_id", forestId).eq("created_by", "ai");
     if (allPlanOps.length > 0) {
       const { error: insertError } = await supabase.from("operations").insert(allPlanOps);
       if (insertError) throw new Error(`Failed to insert operations: ${insertError.message}`);
     }
-    await supabase.from("operations").delete().eq("forest_id", forestId).eq("created_by", "ai");
 
     // 7. Return summary
     const result = [

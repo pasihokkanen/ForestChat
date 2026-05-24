@@ -131,11 +131,12 @@ export async function validatePlan(
 
     const currentYear = new Date().getFullYear();
 
-    // Check 1: No clearcuts on non-regeneration-ready stands
+    // Check 1: No clearcuts on non-regeneration-ready stands (Period 1 only — P2 is forward-looking)
     const clearcuts = operations.filter((o) => o.type === "Päätehakkuu");
     for (const op of clearcuts) {
       const comp = compMap.get(op.compartment_id);
-      if (comp && comp.development_class !== "regeneration_ready") {
+      // Only flag P1 clearcuts — P2 clearcuts are projected based on future maturity
+      if (comp && comp.development_class !== "regeneration_ready" && op.year <= new Date().getFullYear() + 5) {
         issues.push({
           severity: "error",
           message: `Clearcut on stand ${comp.stand_id} (${comp.development_class}) which is not regeneration-ready.`,
