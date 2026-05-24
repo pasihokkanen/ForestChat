@@ -1,8 +1,9 @@
-// src/lib/ai/edit-tools.ts — T8.2 Mutation Tools
+// src/lib/ai/edit-tools.ts — T8.2b Mutation Tools
 //
-// Editing tools: add_operation, remove_operation
+// Editing tools: add_operation, remove_operation, batch_update_operations
 // add_operation validates against silvicultural rules from architecture plan 5.2.
 // remove_operation deletes a planned operation by stand + year.
+// batch_update_operations bulk-updates operations matching a filter.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Compartment, Operation } from "@/types/database";
@@ -28,6 +29,24 @@ function normalizeType(type: string): string {
   };
   return map[type.toLowerCase()] || type;
 }
+
+// ── Species & site maps (reused from query-tools for batch_update filtering) ──
+
+const SPECIES_MAP: Record<string, string> = {
+  mänty: "Mänty", pine: "Mänty",
+  kuusi: "Kuusi", spruce: "Kuusi",
+  rauduskoivu: "Rauduskoivu", birch: "Rauduskoivu", koivu: "Rauduskoivu",
+  hieskoivu: "Hieskoivu",
+  lehtikuusi: "Lehtikuusi", larch: "Lehtikuusi",
+  harmaaleppä: "Harmaaleppä", alder: "Harmaaleppä",
+};
+
+const SITE_MAP: Record<string, string> = {
+  tuore: "tuore", mesic: "tuore",
+  lehtomainen: "lehtomainen", "herb-rich": "lehtomainen", "herb-rich heath": "lehtomainen",
+  kuivahko: "kuivahko", "sub-xeric": "kuivahko",
+  kuiva: "kuiva", xeric: "kuiva",
+};
 
 export async function addOperation(
   supabase: SupabaseClient,
@@ -117,4 +136,209 @@ export async function removeOperation(
   const count = (deleted as Operation[] | null)?.length ?? 0;
   if (count === 0) return { success: true, result: `No operations found for stand ${standId} in ${year}.` };
   return { success: true, result: `✅ Removed ${count} operation(s) from stand ${standId} in ${year}.` };
+}
+
+// ── batch_update_operations ──
+
+export interface BatchUpdateFilter {
+  years?: number[];
+  types?: string[];
+  stand_ids?: string[];
+  species?: string[];
+  development_classes?: string[];
+  site_types?: string[];
+  income_min?: number;
+  income_max?: number;
+  removal_m3_min?: number;
+  removal_m3_max?: number;
+  removal_pct_min?: number;
+  removal_pct_max?: number;
+  cost_min?: number;
+  cost_max?: number;
+  stand_age_min?: number;
+  stand_age_max?: number;
+  stand_area_min?: number;
+  stand_area_max?: number;
+}
+
+export interface BatchUpdatePayload {
+  year?: number;
+  removal_pct?: number;
+  notes?: string;
+}
+
+const ALLOWED_UPDATE_FIELDS = new Set(["year", "removal_pct", "notes"]);
+const MAX_BATCH_SIZE = 500;
+
+/**
+ * Batch-update operations matching a filter.
+ * Only whitelisted fields can be updated (year, removal_pct, notes).
+ * The `.update()` call is atomic at the DB level (single SQL UPDATE).
+ * Maximum 500 operations per call (safety limit).
+ */
+export async function batchUpdateOperations(
+  supabase: SupabaseClient,
+  forestId: string,
+  filter: BatchUpdateFilter,
+  update: BatchUpdatePayload
+): Promise<{ success: boolean; result: string; error?: string }> {
+  try {
+    // Validate update payload — reject any field not in whitelist
+    for (const key of Object.keys(update)) {
+      if (!ALLOWED_UPDATE_FIELDS.has(key)) {
+        return {
+          success: false,
+          result: "",
+          error: `Cannot update field "${key}". Allowed fields: year, removal_pct, notes`,
+        };
+      }
+    }
+
+    // Year validation — prevent setting year to the past
+    if (update.year !== undefined && update.year < 2025) {
+      return {
+        success: false,
+        result: "",
+        error: `Cannot set year to ${update.year}. Year must be >= 2025.`,
+      };
+    }
+
+    // Step 1: Find matching operation IDs
+    // We query operations with a JOIN to compartments so we can filter on stand-level fields
+    let query = supabase
+      .from("operations")
+      .select("id, year, type, removal_pct, income_eur, cost_eur, compartments!inner(stand_id, main_species, development_class, site_type, area_ha, age_years, volume_m3)")
+      .eq("forest_id", forestId);
+
+    // Operation-level filters
+    if (filter.years?.length) query = query.in("year", filter.years);
+    if (filter.types?.length) query = query.in("type", filter.types);
+    if (filter.income_min !== undefined) query = query.gte("income_eur", filter.income_min);
+    if (filter.income_max !== undefined) query = query.lte("income_eur", filter.income_max);
+    if (filter.removal_pct_min !== undefined) query = query.gte("removal_pct", filter.removal_pct_min);
+    if (filter.removal_pct_max !== undefined) query = query.lte("removal_pct", filter.removal_pct_max);
+    if (filter.cost_min !== undefined) query = query.gte("cost_eur", filter.cost_min);
+    if (filter.cost_max !== undefined) query = query.lte("cost_eur", filter.cost_max);
+
+    const { data, error } = await query.limit(MAX_BATCH_SIZE + 1); // Fetch one extra to detect overflow
+    if (error) throw new Error(error.message);
+
+    if (!data || data.length === 0) {
+      return { success: true, result: "No matching operations found." };
+    }
+
+    // Post-filter on stand-level fields
+    // Supabase returns the joined compartment as a single embedded object (not array)
+    // for many-to-one foreign key relationships
+    let results = (data as unknown) as Array<{
+      id: string;
+      year: number;
+      type: string;
+      removal_pct: number;
+      income_eur: number | null;
+      cost_eur: number | null;
+      compartments: {
+        stand_id: string;
+        main_species: string | null;
+        development_class: string | null;
+        site_type: string | null;
+        area_ha: number | null;
+        age_years: number | null;
+        volume_m3: number | null;
+      };
+    }>;
+
+    if (filter.stand_ids?.length) {
+      results = results.filter(r => filter.stand_ids!.includes(r.compartments.stand_id));
+    }
+    if (filter.species?.length) {
+      const translated = filter.species.map(s => SPECIES_MAP[s.toLowerCase()] ?? s);
+      results = results.filter(r => translated.includes(r.compartments.main_species ?? ""));
+    }
+    if (filter.development_classes?.length) {
+      results = results.filter(r => filter.development_classes!.includes(r.compartments.development_class ?? ""));
+    }
+    if (filter.site_types?.length) {
+      const translated = filter.site_types.map(s => SITE_MAP[s.toLowerCase()] ?? s);
+      results = results.filter(r => translated.includes(r.compartments.site_type ?? ""));
+    }
+    if (filter.stand_age_min !== undefined) {
+      results = results.filter(r => (r.compartments.age_years ?? 0) >= filter.stand_age_min!);
+    }
+    if (filter.stand_age_max !== undefined) {
+      results = results.filter(r => (r.compartments.age_years ?? 0) <= filter.stand_age_max!);
+    }
+    if (filter.stand_area_min !== undefined) {
+      results = results.filter(r => (r.compartments.area_ha ?? 0) >= filter.stand_area_min!);
+    }
+    if (filter.stand_area_max !== undefined) {
+      results = results.filter(r => (r.compartments.area_ha ?? 0) <= filter.stand_area_max!);
+    }
+
+    // removal_m3 post-filter (computed)
+    if (filter.removal_m3_min !== undefined || filter.removal_m3_max !== undefined) {
+      results = results.filter(r => {
+        const vol = r.compartments.volume_m3 ?? 0;
+        const pct = r.removal_pct ?? 0;
+        const m3 = Math.round(vol * pct / 100);
+        if (filter.removal_m3_min !== undefined && m3 < filter.removal_m3_min) return false;
+        if (filter.removal_m3_max !== undefined && m3 > filter.removal_m3_max) return false;
+        return true;
+      });
+    }
+
+    // Enforce limit
+    if (results.length > MAX_BATCH_SIZE) {
+      return {
+        success: false,
+        result: "",
+        error: `Too many operations (${results.length}). Maximum is ${MAX_BATCH_SIZE}. Narrow your filter (e.g., specify a single year or type).`,
+      };
+    }
+
+    if (results.length === 0) {
+      return { success: true, result: "No matching operations found after filtering." };
+    }
+
+    // Step 2: Build a summary of what's being changed (for the response message)
+    const yearsAffected = new Set(results.map(r => r.year));
+    const typesAffected = new Set(results.map(r => r.type));
+    const summaryParts: string[] = [];
+    if (update.year !== undefined) {
+      summaryParts.push(`moved to ${update.year}`);
+    }
+    if (update.removal_pct !== undefined) {
+      summaryParts.push(`removal_pct → ${update.removal_pct}%`);
+    }
+    if (update.notes !== undefined) {
+      summaryParts.push("notes updated");
+    }
+
+    // Step 3: Execute the atomic update with forest_id defense-in-depth
+    const ids = results.map(r => r.id);
+    const updatePayload: Record<string, unknown> = {};
+    if (update.year !== undefined) updatePayload.year = update.year;
+    if (update.removal_pct !== undefined) updatePayload.removal_pct = update.removal_pct;
+    if (update.notes !== undefined) updatePayload.notes = update.notes;
+
+    const { error: updateError } = await supabase
+      .from("operations")
+      .update(updatePayload)
+      .in("id", ids)
+      .eq("forest_id", forestId);
+
+    if (updateError) throw new Error(updateError.message);
+
+    const summary = summaryParts.length > 0 ? ` (${summaryParts.join(", ")})` : "";
+    return {
+      success: true,
+      result: `✅ Updated ${results.length} operation(s) from ${yearsAffected.size} year(s), ${typesAffected.size} type(s)${summary}.`,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      result: "",
+      error: err instanceof Error ? err.message : "Failed to batch update operations",
+    };
+  }
 }

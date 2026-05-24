@@ -50,7 +50,7 @@ Without stand IDs, the AI resorts to calling `get_stand` in a loop (O(n) queries
 
 ## Tasks
 
-### T8.1b — Upgrade `query-tools.ts`: expand search_stands, add query_operations, remove year_operations (1.5h)
+### ✅ T8.1b — Upgrade `query-tools.ts`: expand search_stands, add query_operations, remove year_operations (1.5h) ✅ 2026-05-24
 
 **Objective:** Rewrite `src/lib/ai/query-tools.ts` to:
 1. Upgrade `search_stands` with comprehensive filters + `fields` parameter (DB-level column selection)
@@ -521,7 +521,7 @@ import { getStand, searchStands, planSummary, queryOperations } from "../ai/quer
 
 ---
 
-### T8.2b — Upgrade `edit-tools.ts`: add `batchUpdateOperations` (1.5h)
+### ✅ T8.2b — Upgrade `edit-tools.ts`: add `batchUpdateOperations` (1.5h)
 
 **Objective:** Add a `batchUpdateOperations` function that filters operations then applies an update. Keep `addOperation` and `removeOperation` as-is.
 
@@ -637,7 +637,7 @@ export async function batchUpdateOperations(...) // new
 
 ---
 
-### T8.4b — Update tool definitions in `tools.ts` + executor (0.75h)
+### ✅ T8.4b — Update tool definitions in `tools.ts` + executor (0.75h)
 
 **Objective:** Update `src/lib/chat/tools.ts` to:
 1. Remove `year_operations` tool definition
@@ -783,7 +783,7 @@ const toolHandlers = {
 
 ---
 
-### T10.1b — Tests (0.75h)
+### ✅ T10.1b — Tests (0.75h)
 
 **Objective:** Write unit tests for the three upgraded/new tools.
 

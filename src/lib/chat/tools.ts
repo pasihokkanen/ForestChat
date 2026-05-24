@@ -1,10 +1,10 @@
-// src/lib/chat/tools.ts — T8.4 Tool Definitions
+// src/lib/chat/tools.ts — T8.4b Tool Definitions
 //
 // OpenRouter/OpenAI function-calling tool definitions.
 // Each tool has name, description, and JSON Schema parameters.
-// Returns all 9 tool definitions: generate_plan, get_stand, search_stands,
-// plan_summary, year_operations, add_operation, remove_operation,
-// check_harvest_sustainability, validate_plan.
+// Returns all 10 tool definitions: generate_plan, get_stand, search_stands,
+// plan_summary, query_operations, batch_update_operations, add_operation,
+// remove_operation, check_harvest_sustainability, validate_plan.
 
 export interface ToolDefinition {
   type: "function";
@@ -57,16 +57,25 @@ Returns: operations per stand, key metrics.`,
       type: "function",
       function: {
         name: "search_stands",
-        description: "Search stands by criteria. All parameters optional.",
+        description: "Search compartments (kuviot) by any combination of criteria. All parameters optional — omit to get all stands (useful for overview). Filter values can be in Finnish OR English (e.g. 'Mänty' or 'Pine', 'tuore' or 'mesic') — handler auto-translates. The fields parameter only returns the requested columns from the database, reducing response size.",
         parameters: {
           type: "object",
           properties: {
-            species: { type: "string", description: "Finnish name (Mänty, Kuusi, Rauduskoivu, Hieskoivu, Lehtikuusi, Harmaaleppä) or English (Pine, Spruce, Birch, etc.) — handler translates automatically" },
-            site_type: { type: "string", description: "Finnish (tuore, lehtomainen, kuivahko, kuiva) or English (mesic, herb-rich, sub-xeric, xeric)" },
-            development_class: { type: "string", description: "Finnish kehitysluokka: Uudistuskypsä metsikkö, Varttunut kasvatusmetsikkö, Nuori kasvatusmetsikkö, Taimikko, Aukea, Siemenpuumetsikkö" },
-            min_age: { type: "number" },
-            max_age: { type: "number" },
-            min_area: { type: "number" },
+            stand_ids: { type: "array", items: { type: "string" }, description: "List of specific stand IDs, e.g. ['5', '12', '89.1']" },
+            species: { type: "array", items: { type: "string" }, description: "Main tree species in Finnish or English, e.g. ['Mänty', 'Kuusi']" },
+            development_classes: { type: "array", items: { type: "string" }, description: "e.g. ['Uudistuskypsä metsikkö', 'Varttunut kasvatusmetsikkö', 'Nuori kasvatusmetsikkö', 'Taimikko']" },
+            site_types: { type: "array", items: { type: "string" }, description: "e.g. ['tuore', 'lehtomainen', 'kuivahko', 'kuiva']" },
+            age_min: { type: "number" }, age_max: { type: "number" },
+            area_min: { type: "number" }, area_max: { type: "number" },
+            volume_min: { type: "number" }, volume_max: { type: "number" },
+            basal_area_min: { type: "number" }, basal_area_max: { type: "number" },
+            height_min: { type: "number" }, height_max: { type: "number" },
+            diameter_min: { type: "number" }, diameter_max: { type: "number" },
+            growth_min: { type: "number" }, growth_max: { type: "number" },
+            fields: {
+              type: "array", items: { type: "string", enum: ["stand_id", "species", "development_class", "site_type", "area_ha", "age_years", "volume_m3", "basal_area", "avg_height", "avg_diameter", "growth_m3_per_ha", "soil_type", "drainage_status"] },
+              description: "Which fields to return. Also limits the database query to only these columns. Omit for all fields. Example: ['stand_id', 'species', 'age_years']"
+            },
           },
         },
       },
@@ -85,14 +94,68 @@ Returns: operations per stand, key metrics.`,
     {
       type: "function",
       function: {
-        name: "year_operations",
-        description: "List all planned operations for a given year, organized by type (clearcuts, thinnings, regeneration, tending).",
+        name: "query_operations",
+        description: "Search planned operations by any combination of criteria. Returns each operation with full stand data (species, age, development class, etc.) via a single JOINed query. All parameters optional — omit years to search all years. Filter values in Finnish OR English — auto-translated. The fields parameter limits database columns AND response text for efficiency.",
         parameters: {
           type: "object",
           properties: {
-            year: { type: "number", description: "Year to query (e.g., 2026)" },
+            years: { type: "array", items: { type: "number" }, description: "List of specific years, e.g. [2026, 2028]. Returns operations in ANY of these years." },
+            types: { type: "array", items: { type: "string" }, description: "Operation types, e.g. ['Päätehakkuu', 'Harvennus', 'Ensiharvennus', 'Taimikonhoito', 'Laikkumätästys']" },
+            stand_ids: { type: "array", items: { type: "string" }, description: "Filter by stand IDs, e.g. ['5', '12']" },
+            species: { type: "array", items: { type: "string" }, description: "Filter by main tree species" },
+            development_classes: { type: "array", items: { type: "string" }, description: "Filter by development class" },
+            site_types: { type: "array", items: { type: "string" }, description: "Filter by site type" },
+            income_min: { type: "number" }, income_max: { type: "number" },
+            removal_m3_min: { type: "number", description: "Minimum harvested volume in m³" }, removal_m3_max: { type: "number" },
+            removal_pct_min: { type: "number" }, removal_pct_max: { type: "number" },
+            cost_min: { type: "number" }, cost_max: { type: "number" },
+            stand_age_min: { type: "number" }, stand_age_max: { type: "number" },
+            stand_area_min: { type: "number" }, stand_area_max: { type: "number" },
+            fields: {
+              type: "array", items: { type: "string", enum: ["stand_id", "species", "development_class", "site_type", "stand_area_ha", "stand_age_years", "year", "type", "removal_pct", "removal_m3", "income_eur", "cost_eur"] },
+              description: "Which fields to include in output. Also limits the database query to only these columns. Omit for all fields. Example: ['stand_id', 'year', 'type', 'income_eur']"
+            },
           },
-          required: ["year"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "batch_update_operations",
+        description: "Update multiple operations at once. Filter selects which operations to modify, update specifies what to change. Use this for bulk modifications like 'move all 2026 thinnings to 2028'. Each `.update()` call is atomic at the DB level. Max 500 operations per call.",
+        parameters: {
+          type: "object",
+          properties: {
+            filter: {
+              type: "object",
+              description: "Filter criteria matching the same structure as query_operations (years, types, stand_ids, etc.)",
+              properties: {
+                years: { type: "array", items: { type: "number" } },
+                types: { type: "array", items: { type: "string" } },
+                stand_ids: { type: "array", items: { type: "string" } },
+                species: { type: "array", items: { type: "string" } },
+                development_classes: { type: "array", items: { type: "string" } },
+                site_types: { type: "array", items: { type: "string" } },
+                income_min: { type: "number" }, income_max: { type: "number" },
+                removal_m3_min: { type: "number" }, removal_m3_max: { type: "number" },
+                removal_pct_min: { type: "number" }, removal_pct_max: { type: "number" },
+                cost_min: { type: "number" }, cost_max: { type: "number" },
+                stand_age_min: { type: "number" }, stand_age_max: { type: "number" },
+                stand_area_min: { type: "number" }, stand_area_max: { type: "number" },
+              },
+            },
+            update: {
+              type: "object",
+              description: "What to change. Only whitelisted fields: year, removal_pct, notes.",
+              properties: {
+                year: { type: "number", description: "New year for the operations (e.g., 2028)" },
+                removal_pct: { type: "number", description: "New removal percentage (e.g., 28 for thinning)" },
+                notes: { type: "string", description: "Update notes field" },
+              },
+            },
+          },
+          required: ["filter", "update"],
         },
       },
     },

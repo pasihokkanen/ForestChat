@@ -1,10 +1,12 @@
 // src/lib/chat/tool-executor.ts
+//
+// Maps tool names to handler functions. Executes a named tool with args + context.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ToolDefinition } from "./tools";
 import { generatePlan } from "../ai/generate-plan";
-import { getStand, searchStands, planSummary, yearOperations } from "../ai/query-tools";
-import { addOperation, removeOperation } from "../ai/edit-tools";
+import { getStand, searchStands, planSummary, queryOperations } from "../ai/query-tools";
+import { addOperation, removeOperation, batchUpdateOperations } from "../ai/edit-tools";
 import { checkSustainability, validatePlan } from "../ai/validation-tools";
 
 export interface ToolResult {
@@ -32,9 +34,10 @@ const toolHandlers: Record<string, ToolHandler> = {
     });
   },
   get_stand: async (args, ctx) => getStand(ctx.supabase, ctx.forestId, args.stand_id as string),
-  search_stands: async (args, ctx) => searchStands(ctx.supabase, ctx.forestId, args),
+  search_stands: async (args, ctx) => searchStands(ctx.supabase, ctx.forestId, args as any),
   plan_summary: async (_args, ctx) => planSummary(ctx.supabase, ctx.forestId),
-  year_operations: async (args, ctx) => yearOperations(ctx.supabase, ctx.forestId, args.year as number),
+  query_operations: async (args, ctx) => queryOperations(ctx.supabase, ctx.forestId, args as any),
+  batch_update_operations: async (args, ctx) => batchUpdateOperations(ctx.supabase, ctx.forestId, (args.filter || {}) as any, (args.update || {}) as any),
   add_operation: async (args, ctx) => addOperation(ctx.supabase, ctx.forestId, ctx.userId, args),
   remove_operation: async (args, ctx) => removeOperation(ctx.supabase, ctx.forestId, args.stand_id as string, args.year as number),
   check_harvest_sustainability: async (args, ctx) => checkSustainability(ctx.supabase, ctx.forestId, args.year as number | undefined),
