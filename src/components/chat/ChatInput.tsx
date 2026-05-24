@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useRef, useCallback, KeyboardEvent } from "react";
+import { useForestStore } from "@/lib/store";
+import CommandsMenu from "./CommandsMenu";
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -9,7 +11,9 @@ interface ChatInputProps {
 
 export default function ChatInput({ onSend, disabled }: ChatInputProps) {
   const [value, setValue] = useState("");
+  const { commandsOpen, toggleCommands } = useForestStore();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const cmdBtnRef = useRef<HTMLDivElement>(null);
 
   // Auto-grow textarea up to 4 lines
   const adjustHeight = useCallback(() => {
@@ -47,9 +51,56 @@ export default function ChatInput({ onSend, disabled }: ChatInputProps) {
     [handleSend]
   );
 
+  const handleInsertCommand = useCallback((text: string) => {
+    setValue(text);
+    // Focus the textarea and put cursor at end
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (el) {
+        el.focus();
+        const len = text.length;
+        el.setSelectionRange(len, len);
+        // Trigger height adjust for the new content
+        adjustHeight();
+      }
+    });
+  }, [adjustHeight]);
+
   return (
     <div className="border-t border-gray-200 px-3 py-3 bg-white shrink-0">
       <div className="flex items-end gap-2">
+        {/* Commands button — left side */}
+        <div ref={cmdBtnRef} className="relative shrink-0">
+          <button
+            onClick={toggleCommands}
+            className="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
+            title="Commands"
+            aria-label="Toggle commands menu"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          </button>
+
+          {/* Commands dropdown — above the button */}
+          {commandsOpen && (
+            <div className="absolute bottom-full left-0 mb-2">
+              <CommandsMenu onInsertCommand={handleInsertCommand} />
+            </div>
+          )}
+        </div>
+
         <textarea
           ref={textareaRef}
           data-chat-input

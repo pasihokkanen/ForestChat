@@ -2,31 +2,26 @@
 
 import { useForestStore } from "@/lib/store";
 
-export default function CommandsMenu() {
+interface CommandsMenuProps {
+  /** Called when user clicks a command — inserts text into the chat input */
+  onInsertCommand?: (text: string) => void;
+}
+
+export default function CommandsMenu({ onInsertCommand }: CommandsMenuProps) {
   const { activeModel } = useForestStore();
 
   const handleNew = () => {
-    useForestStore.getState().clearChat();
+    onInsertCommand?.("/new ");
     useForestStore.getState().toggleCommands();
   };
 
   const handleModel = () => {
-    // Auto-fill the input with "/model " — find the input element
-    const input = document.querySelector<HTMLTextAreaElement>(
-      'textarea[data-chat-input]'
-    );
-    if (input) {
-      input.value = "/model ";
-      input.focus();
-      // Set cursor at end
-      const len = input.value.length;
-      input.setSelectionRange(len, len);
-    }
+    onInsertCommand?.("/model ");
     useForestStore.getState().toggleCommands();
   };
 
   return (
-    <div className="absolute top-full right-2 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+    <div className="w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
       <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider border-b border-gray-100">
         📋 Chat Commands
       </div>
