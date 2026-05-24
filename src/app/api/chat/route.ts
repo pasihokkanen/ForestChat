@@ -14,6 +14,41 @@ import { getCompartmentsByForest } from "@/lib/repos/compartments";
 
 export const runtime = "nodejs";
 
+/**
+ * GET /api/chat?forest_id=X
+ * Returns the existing session + messages for a forest (if any).
+ * Used on page load to restore the conversation history.
+ */
+export async function GET(request: NextRequest) {
+  try {
+    const supabase = await createServerSupabase();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const forestId = searchParams.get("forest_id");
+    if (!forestId) {
+      return NextResponse.json({ error: "forest_id required" }, { status: 400 });
+    }
+
+    const session = await getOrCreateSession(forestId, user.id);
+    const messages = await getChatMessages(session.id);
+
+    return NextResponse.json({
+      session_id: session.id,
+      model: session.model,
+      messages,
+    });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Unknown error" },
+      { status: 500 }
+    );
+  }
+}
+
 export async function POST(request: NextRequest) {
   const { send, close, stream } = createSseStream();
 

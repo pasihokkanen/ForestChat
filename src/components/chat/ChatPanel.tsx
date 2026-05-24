@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { streamChat as sseStreamChat } from "@/lib/chat/sse-client";
 import { useForestStore } from "@/lib/store";
 import ChatHeader from "./ChatHeader";
@@ -21,6 +21,7 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
     activeModel,
     error,
     addMessage,
+    setMessages,
     appendStreamContent,
     clearStream,
     setStreaming,
@@ -31,6 +32,30 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
     clearChat,
     triggerRefetch,
   } = useForestStore();
+
+  // Load existing conversation on mount
+  const [loadingHistory, setLoadingHistory] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoadingHistory(true);
+        const res = await fetch(`/api/chat?forest_id=${encodeURIComponent(forestId)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        if (data.session_id) setSessionId(data.session_id);
+        if (data.model) setActiveModel(data.model);
+        if (data.messages?.length > 0) setMessages(data.messages);
+      } catch {
+        // Silently fail — chat will start fresh if fetch fails
+      } finally {
+        if (!cancelled) setLoadingHistory(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [forestId, setSessionId, setActiveModel, setMessages]);
 
   const handleSend = useCallback(
     async (message: string) => {
