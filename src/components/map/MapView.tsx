@@ -18,7 +18,7 @@ export default function MapView({ onMapReady }: MapViewProps) {
 
     const m = new maplibregl.Map({
       container: mapContainer.current,
-      style: "https://tiles.openfreemap.org/styles/liberty",
+      style: "/styles/liberty.json",
       center: [24.0, 62.5],
       zoom: 6,
       cooperativeGestures: false,
