@@ -26,14 +26,14 @@ export const DEV_CLASS_FI_TO_EN: Record<string, string> = {
   Suojuspuusto: "shelterwood",
 };
 
-/** Bilingual (Finnish/English) display labels for each development class. */
+/** English-only display labels for each development class. */
 export const DEV_CLASS_LABELS: Record<string, string> = {
-  seedling: "Taimikko / Seedling stand",
-  young_thinning: "Nuori kasvatusmetsikkö / Young thinning",
-  mature_thinning: "Varttunut kasvatusmetsikkö / Mature thinning",
-  regeneration_ready: "Uudistuskypsä / Regeneration ready",
-  uneven_aged: "Eri-ikäisrakenteinen / Uneven-aged",
-  shelterwood: "Suojuspuusto / Shelterwood",
+  seedling: "Seedling stand",
+  young_thinning: "Young thinning",
+  mature_thinning: "Mature thinning",
+  regeneration_ready: "Regeneration ready",
+  uneven_aged: "Uneven-aged",
+  shelterwood: "Shelterwood",
 };
 
 /**
