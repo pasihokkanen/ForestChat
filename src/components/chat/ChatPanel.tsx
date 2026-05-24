@@ -61,12 +61,6 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
     async (message: string) => {
       if (!message.trim() || isStreaming) return;
 
-      // Handle /new command
-      if (message.trim() === "/new") {
-        clearChat();
-        return;
-      }
-
       // Add user message
       addMessage({
         id: `temp-${Date.now()}`,
@@ -92,6 +86,29 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
           setToolCall({ name, status: error ? "error" : "done", result: error || result });
         },
         onDone: (messageId, newSessionId, model) => {
+          // /new command creates a fresh session — clear old messages
+          if (newSessionId && newSessionId !== sessionId) {
+            const greeting = useForestStore.getState().streamingContent;
+            clearChat();
+            // Re-add the greeting from /new if present
+            if (greeting) {
+              addMessage({
+                id: `greeting-${Date.now()}`,
+                session_id: newSessionId,
+                role: "assistant",
+                content: greeting,
+                tool_calls: null,
+                created_at: new Date().toISOString(),
+              });
+            }
+            clearStream();
+            setStreaming(false);
+            setToolCall(null);
+            setSessionId(newSessionId);
+            if (model) setActiveModel(model);
+            return;
+          }
+
           // Finalize streaming content as a proper message
           const content = useForestStore.getState().streamingContent;
           if (content) {
