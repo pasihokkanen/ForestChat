@@ -22,6 +22,8 @@ const AGE_COLORS = [
 export interface StandLayerProps {
   map: maplibregl.Map | null;
   compartments: CompartmentFeatureCollection;
+  /** Incremented on every map style switch so the layer re-registers. */
+  styleVersion?: number;
 }
 
 /**
@@ -62,7 +64,7 @@ function shouldUseAgeColoring(
  * Renders forest stand polygons on a MapLibre map and handles
  * click-to-inspect via popups.
  */
-export default function StandLayer({ map, compartments }: StandLayerProps) {
+export default function StandLayer({ map, compartments, styleVersion = 0 }: StandLayerProps) {
   const popupRef = useRef<maplibregl.Popup | null>(null);
   const hasZoomed = useRef(false);
   const useAgeColor = shouldUseAgeColoring(compartments.features);
@@ -223,7 +225,7 @@ export default function StandLayer({ map, compartments }: StandLayerProps) {
       map.off("click", handleBackgroundClick);
       popupRef.current?.remove();
     };
-  }, [map, compartments, buildMatchExpression]);
+  }, [map, compartments, buildMatchExpression, styleVersion]);
 
   // Update source data when compartments change
   useEffect(() => {
@@ -264,7 +266,7 @@ export default function StandLayer({ map, compartments }: StandLayerProps) {
     }, 200);
 
     return () => clearInterval(interval);
-  }, [map, compartments]);
+  }, [map, compartments, styleVersion]);
 
   return null; // No DOM — pure map-side effect
 }

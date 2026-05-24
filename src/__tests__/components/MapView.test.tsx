@@ -13,6 +13,7 @@ import MapView from "@/components/map/MapView";
 vi.mock("maplibre-gl", () => {
   const MockMap = {
     on: vi.fn().mockReturnThis(),
+    once: vi.fn().mockReturnThis(),
     off: vi.fn().mockReturnThis(),
     remove: vi.fn(),
     resize: vi.fn(),
@@ -20,6 +21,8 @@ vi.mock("maplibre-gl", () => {
     addSource: vi.fn(),
     addLayer: vi.fn(),
     getSource: vi.fn(),
+    setStyle: vi.fn(),
+    isStyleLoaded: vi.fn(() => true),
     getCanvas: vi.fn(() => ({ style: {} })),
     fitBounds: vi.fn(),
     flyTo: vi.fn(),
