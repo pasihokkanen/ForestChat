@@ -1890,7 +1890,7 @@ export function useOperations(forestId: string | null) {
 5. `detectPeatland` correctly identifies peatland vs mineral
 6. `classifySite` maps Finnish kasvupaikka to correct internal key
 
-### T10.2 — Chat API Integration Tests (1h)
+### ✅ T10.2 — Chat API Integration Tests (1h) ✅ 2026-05-24
 
 **Files:**
 - Create: `src/__tests__/integration/chat-api.test.ts`
@@ -1907,7 +1907,7 @@ Uses MSW to mock:
 - OpenRouter streaming response (return mock tool calls and text)
 - Supabase DB queries (return test compartments)
 
-### T10.3 — Chat UI Component Tests (1h)
+### ✅ T10.3 — Chat UI Component Tests (1h) ✅ 2026-05-24
 
 **Files:**
 - Create: `src/__tests__/components/ChatPanel.test.tsx` — renders with messages
