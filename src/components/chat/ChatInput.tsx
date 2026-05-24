@@ -67,13 +67,13 @@ export default function ChatInput({ onSend, disabled }: ChatInputProps) {
   }, [adjustHeight]);
 
   return (
-    <div className="border-t border-gray-200 px-3 py-3 bg-white shrink-0">
+    <div className="border-t border-gray-200 dark:border-gray-700 px-3 py-3 bg-white dark:bg-gray-900 shrink-0">
       <div className="flex items-end gap-2">
         {/* Commands button — left side */}
         <div ref={cmdBtnRef} className="relative shrink-0">
           <button
             onClick={toggleCommands}
-            className="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
+            className="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 transition-colors"
             title="Commands"
             aria-label="Toggle commands menu"
           >
@@ -113,7 +113,7 @@ export default function ChatInput({ onSend, disabled }: ChatInputProps) {
           placeholder="Ask about your forest plan..."
           disabled={disabled}
           rows={1}
-          className="flex-1 resize-none rounded-xl border border-gray-300 px-3 py-2 text-sm text-gray-800 bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex-1 resize-none rounded-xl border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm text-gray-800 dark:text-gray-100 bg-white dark:bg-gray-800 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
           style={{ minHeight: "36px", maxHeight: "80px" }}
         />
         <button
@@ -138,7 +138,7 @@ export default function ChatInput({ onSend, disabled }: ChatInputProps) {
           </svg>
         </button>
       </div>
-      <p className="text-[10px] text-gray-400 mt-1 px-1">
+      <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 px-1">
         Enter to send · Shift+Enter for new line
       </p>
     </div>

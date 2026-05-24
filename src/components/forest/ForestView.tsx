@@ -146,7 +146,7 @@ export default function ForestView({ forestId }: ForestViewProps) {
           </div>
         )}
       </div>
-      <div className="w-[400px] border-l border-gray-200 bg-white flex flex-col shrink-0">
+      <div className="w-[400px] border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex flex-col shrink-0">
         <ChatPanel forestId={forestId} />
       </div>
     </div>

@@ -92,31 +92,31 @@ export default function ToolCallCard({
 
   return (
     <div className="flex justify-start">
-      <div className="max-w-[85%] rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm">
+      <div className="max-w-[85%] rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-sm">
         <div className="flex items-center gap-2">
           {config.icon}
-          <span className="font-medium text-gray-700 text-xs">
+          <span className="font-medium text-gray-700 dark:text-gray-300 text-xs">
             {formatToolName(name)}
           </span>
           <span
             className={`text-[10px] font-medium ${
               status === "done"
-                ? "text-green-600"
+                ? "text-green-600 dark:text-green-400"
                 : status === "error"
-                  ? "text-red-600"
-                  : "text-blue-600"
+                  ? "text-red-600 dark:text-red-400"
+                  : "text-blue-600 dark:text-blue-400"
             }`}
           >
             {config.label}
           </span>
         </div>
         {result && status === "done" && (
-          <pre className="mt-2 text-xs text-gray-600 whitespace-pre-wrap font-sans leading-relaxed max-h-32 overflow-y-auto border-t border-gray-200 pt-2">
+          <pre className="mt-2 text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap font-sans leading-relaxed max-h-32 overflow-y-auto border-t border-gray-200 dark:border-gray-700 pt-2">
             {result}
           </pre>
         )}
         {status === "error" && result && (
-          <pre className="mt-2 text-xs text-red-600 whitespace-pre-wrap font-sans leading-relaxed border-t border-gray-200 pt-2">
+          <pre className="mt-2 text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap font-sans leading-relaxed border-t border-gray-200 dark:border-gray-700 pt-2">
             ⚠️ {result}
           </pre>
         )}
