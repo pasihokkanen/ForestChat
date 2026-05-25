@@ -2,15 +2,22 @@
 
 > **For Hermes:** Load subagent-driven-development skill before implementing. Use OpenCode CLI for coding subagents. Update this plan file to mark tasks as ✅ upon completion.
 
-**Version:** 2.0
+**Version:** 2.1
 **Date:** 2026-05-25
+
+**Changelog v2.1:**
+- Changed chart persistence from localStorage to Supabase backend (cross-device sync)
+- Added `chart_tabs` database table with RLS + migration SQL
+- Added API route: `/api/forest/[id]/charts` (GET list, POST create, DELETE remove/clear)
+- Server-side `create_chart`/`clear_charts` tools now persist to Supabase directly
+- Added `useCharts` hook for loading chart tabs on mount
+- Charts survive page reload AND are visible on any device
 
 **Changelog v2.0:**
 - Added full chart type palette: bar, pie, line, area, stacked_bar, scatter, radar, donut, horizontal_bar, composed, waterfall
-- Added localStorage persistence for chart tabs (charts survive page reload / next-day visits)
+- Added localStorage persistence for chart tabs (superseded by v2.1 backend persistence)
 - Changed panel layout order: Charts | Map | Chat (fullscreen reads left-to-right as visual-first)
 - Added clear_charts AI tool for resetting all chart tabs
-- Added chart persistence section to P4.3 and P4.10
 
 **Goal:** Build the interactive visualization dashboard — a 3-panel layout (charts + map + chat) where the AI creates charts through conversation, and all panels respond to the same selection state (clicking a chart bar highlights stands on the map, selecting a stand updates chart highlights).
 
@@ -28,6 +35,51 @@
 - ✅ Recharts installed as dependency
 - ✅ Supabase repos for operations, compartments, chat
 - ✅ useOperations hook with refetch support
+
+---
+
+## Database: Chart Tabs Table
+
+**New migration:** `004_add_chart_tabs.sql`
+
+```sql
+-- supabase/migrations/004_add_chart_tabs.sql
+CREATE TABLE chart_tabs (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  forest_id       UUID NOT NULL REFERENCES forests(id) ON DELETE CASCADE,
+  chart_id        TEXT NOT NULL,               -- AI-generated chart ID, e.g. "chart-yearly-income"
+  title           TEXT NOT NULL,
+  type            TEXT NOT NULL,               -- bar, pie, line, area, stacked_bar, scatter, radar, donut, horizontal_bar, composed, waterfall
+  data            JSONB NOT NULL,              -- array of data objects
+  x_key           TEXT,
+  y_key           TEXT NOT NULL,
+  y_key2          TEXT,                        -- secondary Y axis (composed charts)
+  name_key        TEXT,                        -- pie/donut slice labels
+  color_key       TEXT,                        -- color grouping key
+  stand_dimension TEXT,                        -- stand_id mapping key for cross-panel interaction
+  created_at      TIMESTAMPTZ DEFAULT now(),
+  updated_at      TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(forest_id, chart_id)
+);
+
+CREATE INDEX idx_chart_tabs_forest ON chart_tabs(forest_id);
+
+ALTER TABLE chart_tabs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Owner full access on chart_tabs" ON chart_tabs
+  FOR ALL USING (forest_id IN (SELECT id FROM forests WHERE owner_id = auth.uid()));
+
+CREATE POLICY "Shared read on chart_tabs" ON chart_tabs
+  FOR SELECT USING (forest_id IN (SELECT forest_id FROM plan_shares WHERE shared_with = auth.uid()));
+```
+
+**Run in Supabase SQL Editor before implementing** — the plan assumes migration is applied.
+
+**CRUD surface:**
+- **AI tool `create_chart`** runs server-side, calls `ctx.supabase.from("chart_tabs").upsert()` directly (no API route needed — it's inside the chat's tool loop)
+- **AI tool `clear_charts`** runs server-side, calls `ctx.supabase.from("chart_tabs").delete().eq("forest_id", ctx.forestId)`
+- **Client page load** fetches via `GET /api/forest/[id]/charts` (API route)
+- **Manual tab close** calls `DELETE /api/forest/[id]/charts?chart_id=...` (API route)
 
 ---
 
@@ -57,11 +109,18 @@
 ```
 Chat → AI generates chart data via query_operations/search_stands
      → AI calls create_chart(chartConfig) tool
+     → Server persists to Supabase `chart_tabs` table (upsert)
      → Server emits SSE event: "create_chart" { chartConfig }
      → Client SSE parser receives event
      → Zustand visualization-slice: addChartTab(chartConfig)
      → ChartPanel re-renders with new tab
      → Recharts renders the chart
+
+On page load:
+     → useCharts(forestId) hook fires
+     → GET /api/forest/[id]/charts → fetches chart_tabs from Supabase
+     → Zustand: setChartTabs(tabs)
+     → ChartsPanel renders persisted tabs
 
 User clicks chart bar (year=2028):
      → Zustand: setSelectedYear(2028)
@@ -86,7 +145,10 @@ Two new SSE event types added to the existing set (chunk, tool_start, tool_end, 
 | `remove_chart` | `{ chart_id: string }` | Client removes a chart tab |
 | `clear_charts` | `{}` | Client removes all chart tabs |
 
-These are emitted by new AI tools but could also be triggered directly by the server-side tool loop.
+These are emitted by AI tools AFTER the server-side handler persists the change to the `chart_tabs` table. The client only reacts to the SSE event; the database write already happened. This way:
+- Charts are always backed by Supabase (cross-device)
+- The SSE event provides real-time feedback to the chat UI
+- On page load, charts are fetched from the `GET /api/forest/[id]/charts` endpoint
 
 ### New AI Tools
 
@@ -239,6 +301,7 @@ Track A: Layout & Panel System
 
 Track B: Visualization Slice & SSE Handling
   P4.3 → Zustand visualization slice + types
+  P4.3b → Chart API route + useCharts hook (Supabase persistence)
   P4.4 → SSE event handlers for chart/select events (client)
 
 Track C: Stand Highlight System (Map)
@@ -268,7 +331,8 @@ Track G: Tests
 ```
 P4.1 ──► P4.2 ──┐
                  ├──► P4.6 (needs highlight layer P4.5)
-          P4.3 ──┴──► P4.4 ──┐
+          P4.3 ──┼──► P4.4 ──┐
+          P4.3b ─┘            │
                               │
 P4.5 ──► P4.6 ◄──── P4.11 ──┤
                       │       ├──► P4.13 (integration)
@@ -435,6 +499,8 @@ export interface VisualizationSlice {
   activeChartTab: string | null;
   addChartTab: (tab: ChartTab) => void;
   removeChartTab: (id: string) => void;
+  clearAllCharts: () => void;         // clear_charts AI tool
+  setChartTabs: (tabs: ChartTab[]) => void;  // initial load from API
   setActiveChartTab: (id: string | null) => void;
   
   chartsFullscreen: boolean;
@@ -445,6 +511,10 @@ export interface VisualizationSlice {
   
   highlightedStandIds: string[];
   setHighlightedStands: (ids: string[]) => void;
+  
+  // localStorage fallback for offline resilience
+  loadChartsFromStorage: (forestId: string) => void;
+  saveChartsToStorage: () => void;
 }
 ```
 
@@ -472,12 +542,17 @@ export const useForestStore = create<ForestStore>()((...a) => ({
 - [ ] `setHighlightedStands` works
 - [ ] `setSelectedYear` works
 
-**localStorage persistence implementation:**
+**Backend persistence (Supabase):**
+
+Persistence is handled at two levels:
+1. **Server-side (within AI tools):** `create_chart` and `clear_charts` handlers write directly to the `chart_tabs` table via `ctx.supabase`
+2. **Client-side (manual user actions):** Removing a single chart tab or loading on page mount uses the API route
+
+**Visualization slice:**
 
 ```typescript
 const STORAGE_PREFIX = "forestchat-charts-";
 
-// In createVisualizationSlice:
 export const createVisualizationSlice: StateCreator<VisualizationSlice> = (set, get) => ({
   chartTabs: [],
   activeChartTab: null,
@@ -510,7 +585,12 @@ export const createVisualizationSlice: StateCreator<VisualizationSlice> = (set, 
 
   // ... other setters ...
 
+  // On page load: fetch charts from Supabase
+  // Hook into ForestView's data loading — the useCharts hook calls this
   loadChartsFromStorage: (forestId: string) => {
+    // Note: this is called after fetching from the API route.
+    // The API route is the source of truth, not localStorage.
+    // If we also cache locally for offline resilience, write here.
     try {
       const raw = localStorage.getItem(`${STORAGE_PREFIX}${forestId}`);
       if (raw) {
@@ -521,14 +601,14 @@ export const createVisualizationSlice: StateCreator<VisualizationSlice> = (set, 
         });
       }
     } catch {
-      // Corrupted storage — silently reset
       localStorage.removeItem(`${STORAGE_PREFIX}${forestId}`);
     }
   },
 
   saveChartsToStorage: () => {
+    // Local cache for offline resilience (secondary to Supabase)
+    // The primary persistence happens server-side in the AI tool handlers.
     const { chartTabs } = get();
-    // Need forest ID — use Zustand's get() to look up the forest slice
     try {
       const state = get() as unknown as ForestStore;
       const forestId = state.forest?.id;
@@ -536,17 +616,187 @@ export const createVisualizationSlice: StateCreator<VisualizationSlice> = (set, 
         localStorage.setItem(`${STORAGE_PREFIX}${forestId}`, JSON.stringify(chartTabs));
       }
     } catch {
-      // Storage full or unavailable — silently fail
+      // silently fail
     }
   },
 });
 ```
 
-**Call sites for persistence:**
-- `addChartTab` and `removeChartTab` must call `get().saveChartsToStorage()` after mutating
-- `clearAllCharts` must call `get().saveChartsToStorage()`
-- ForestView on mount: `loadChartsFromStorage(forestId)`
-- Zustand `subscribe` on chartTabs changes: auto-sync (alternatively call save explicitly in each mutator)
+**Persistence flow summary:**
+
+| Action | Primary store | SSE event |
+|--------|---------------|-----------|
+| AI creates chart via `create_chart` tool | Supabase `chart_tabs` (upsert) | ✅ `create_chart` to client |
+| AI clears all via `clear_charts` tool | Supabase `chart_tabs` (delete all) | ✅ `clear_charts` to client |
+| User closes a chart tab | API route `DELETE` | ❌ No SSE — client-side only |
+| User loads the page | `GET /api/forest/[id]/charts` → Zustand | ❌ — initial load |
+| Offline reload | localStorage fallback (cached copy) | ❌ — local only |
+
+---
+
+### P4.3b — Chart API Route + useCharts Hook (1.5h)
+
+**Objective:** Create the API route for chart CRUD and a React hook that fetches chart tabs from Supabase on page mount.
+
+**Files:**
+- Create: `src/app/api/forest/[id]/charts/route.ts` — GET, POST, DELETE
+- Create: `src/lib/hooks/use-charts.ts` — React hook
+- Create: `src/lib/repos/chart-tabs.ts` — Supabase repo functions
+
+**API Route — `POST /api/forest/[id]/charts`:**
+
+```typescript
+// For client-side chart creation (manual tab close sends DELETE instead)
+// CREATE is primarily done server-side via the AI tool, but the API route
+// exists for future extensibility. The primary CREATE path is the AI tool.
+export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id: forestId } = await params;
+  const body = await request.json();
+  // Validate, upsert to chart_tabs, return chart tab
+}
+```
+
+**API Route — `GET /api/forest/[id]/charts`:**
+
+```typescript
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id: forestId } = await params;
+  // Fetch all chart_tabs for this forest, ordered by created_at ASC
+  // Return as JSON array of ChartTab objects
+}
+```
+
+**API Route — `DELETE /api/forest/[id]/charts`:**
+
+```typescript
+// Query param: ?chart_id=... — delete a single chart
+// No query param — delete all (used by clear_charts as fallback)
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id: forestId } = await params;
+  const chartId = request.nextUrl.searchParams.get("chart_id");
+  // If chartId: delete single row
+  // If no chartId: delete all chart_tabs for this forest
+}
+```
+
+**Repo (`src/lib/repos/chart-tabs.ts`):**
+
+```typescript
+import { createServerSupabase } from "@/lib/supabase/server";
+import type { ChartTab } from "@/lib/store/visualization-slice";
+
+export async function getChartTabs(forestId: string): Promise<ChartTab[]> {
+  const supabase = await createServerSupabase();
+  const { data } = await supabase
+    .from("chart_tabs")
+    .select("*")
+    .eq("forest_id", forestId)
+    .order("created_at", { ascending: true });
+  return (data ?? []).map(mapRowToChartTab);
+}
+
+export async function upsertChartTab(forestId: string, tab: ChartTab): Promise<void> {
+  const supabase = await createServerSupabase();
+  await supabase.from("chart_tabs").upsert({
+    forest_id: forestId,
+    chart_id: tab.id,
+    title: tab.title,
+    type: tab.type,
+    data: tab.data,
+    x_key: tab.xKey,
+    y_key: tab.yKey,
+    y_key2: tab.yKey2,
+    name_key: tab.nameKey,
+    color_key: tab.colorKey,
+    stand_dimension: tab.standDimension,
+  }, { onConflict: "forest_id, chart_id" });
+}
+
+export async function deleteChartTab(forestId: string, chartId: string): Promise<void> {
+  const supabase = await createServerSupabase();
+  await supabase.from("chart_tabs").delete().eq("forest_id", forestId).eq("chart_id", chartId);
+}
+
+export async function deleteAllChartTabs(forestId: string): Promise<void> {
+  const supabase = await createServerSupabase();
+  await supabase.from("chart_tabs").delete().eq("forest_id", forestId);
+}
+
+function mapRowToChartTab(row: Record<string, unknown>): ChartTab {
+  return {
+    id: row.chart_id as string,
+    title: row.title as string,
+    type: row.type as ChartTab["type"],
+    data: row.data as Record<string, unknown>[],
+    xKey: (row.x_key as string) ?? null,
+    yKey: row.y_key as string,
+    yKey2: (row.y_key2 as string) ?? null,
+    nameKey: (row.name_key as string) ?? null,
+    colorKey: (row.color_key as string) ?? null,
+    standDimension: (row.stand_dimension as string) ?? null,
+  };
+}
+```
+
+**Hook (`src/lib/hooks/use-charts.ts`):**
+
+```typescript
+"use client";
+
+import { useEffect } from "react";
+import { useForestStore } from "@/lib/store";
+
+export function useCharts(forestId: string) {
+  const { setChartTabs } = useForestStore();
+
+  useEffect(() => {
+    let cancelled = false;
+    
+    fetch(`/api/forest/${encodeURIComponent(forestId)}/charts`)
+      .then(res => res.json())
+      .then(tabs => {
+        if (!cancelled && Array.isArray(tabs)) {
+          setChartTabs(tabs);
+        }
+      })
+      .catch(() => {
+        // Silently fail — charts will be empty, user can ask AI to recreate
+      });
+
+    return () => { cancelled = true; };
+  }, [forestId, setChartTabs]);
+}
+```
+
+Note: `setChartTabs` must be added to VisualizationSlice — replaces `loadChartsFromStorage` for the initial-load case:
+
+```typescript
+// In VisualizationSlice interface:
+setChartTabs: (tabs: ChartTab[]) => void;
+
+// Implementation:
+setChartTabs: (tabs) => set({
+  chartTabs: tabs,
+  activeChartTab: tabs.length > 0 ? tabs[tabs.length - 1].id : null,
+}, false, "setChartTabs"),
+```
+
+**Integration into ForestView:**
+
+```tsx
+// In ForestView, alongside useForest and useCompartments:
+import { useCharts } from "@/lib/hooks/use-charts";
+
+// Inside the component body:
+useCharts(forestId);
+```
+
+**Verification:**
+- [ ] `GET /api/forest/[id]/charts` returns chart tabs from Supabase
+- [ ] `DELETE /api/forest/[id]/charts?chart_id=...` removes single tab
+- [ ] `DELETE /api/forest/[id]/charts` removes all tabs for forest
+- [ ] `useCharts` hook fetches on mount and populates Zustand
+- [ ] RLS policies prevent cross-forest data leaks
 
 ---
 
@@ -779,7 +1029,7 @@ function StandLayer({ map, compartments, styleVersion }: StandLayerProps) {
 - Modify: `src/lib/chat/tool-executor.ts` — add handler
 - Modify: `src/app/api/chat/route.ts` — support sending SSE events from tool execution
 
-**Critical design:** Unlike other tools that modify database state, `create_chart` is a *client-side* tool. The handler validates the chart config, stores nothing in the DB, and the SSE event is streamed to the client.
+**Critical design:** The `create_chart` tool writes to the `chart_tabs` table directly via `ctx.supabase` (server-side), *then* emits the SSE event to notify the client. This ensures the chart is persisted in Supabase for cross-device access. The client only reacts to the SSE event — it doesn't need to call an API route.
 
 **Tool definition:**
 
@@ -833,19 +1083,42 @@ const toolHandlers = {
       return { success: false, result: "", error: "data must be a non-empty array" };
     }
     
+    // Build chart tab object
+    const chartTab = {
+      id: chart_id as string,
+      title: title as string,
+      type: type as string,
+      data: data as Record<string, unknown>[],
+      xKey: (x_key as string) ?? null,
+      yKey: y_key as string,
+      yKey2: (data as Record<string, unknown>)?.y_key2 as string ?? null,
+      nameKey: (name_key as string) ?? null,
+      colorKey: (color_key as string) ?? null,
+      standDimension: (stand_dimension as string) ?? null,
+    } satisfies ChartTab;
+    
+    // Persist to Supabase (server-side, before SSE event)
+    try {
+      await ctx.supabase.from("chart_tabs").upsert({
+        forest_id: ctx.forestId,
+        chart_id: chartTab.id,
+        title: chartTab.title,
+        type: chartTab.type,
+        data: chartTab.data,
+        x_key: chartTab.xKey,
+        y_key: chartTab.yKey,
+        y_key2: chartTab.yKey2,
+        name_key: chartTab.nameKey,
+        color_key: chartTab.colorKey,
+        stand_dimension: chartTab.standDimension,
+      }, { onConflict: "forest_id, chart_id" });
+    } catch (err) {
+      // Log but don't fail — SSE event still propagates
+      console.error("Failed to persist chart tab:", err);
+    }
+    
     // Emit SSE event to client
-    ctx.sendSse?.("create_chart", {
-      id: chart_id,
-      title,
-      type,
-      data,
-      xKey: x_key ?? null,
-      yKey: y_key,
-      yKey2: data.y_key2 ?? null,
-      nameKey: name_key ?? null,
-      colorKey: color_key ?? null,
-      standDimension: stand_dimension ?? null,
-    });
+    ctx.sendSse?.("create_chart", chartTab);
     
     return {
       success: true,
@@ -854,7 +1127,13 @@ const toolHandlers = {
   },
 
   clear_charts: async (_args: Record<string, unknown>, ctx: ToolContext) => {
-    // Emit SSE event to remove all chart tabs
+    // Delete from Supabase first
+    try {
+      await ctx.supabase.from("chart_tabs").delete().eq("forest_id", ctx.forestId);
+    } catch (err) {
+      console.error("Failed to clear chart tabs:", err);
+    }
+    // Then emit SSE event to remove all chart tabs from client state
     ctx.sendSse?.("clear_charts", {});
     return {
       success: true,
@@ -1228,21 +1507,26 @@ export default function ChartCard({ tab }: ChartCardProps) {
 - Modify: `src/components/charts/ChartsPanel.tsx` — tabs + content + fullscreen
 - Modify: `src/components/charts/ChartTabBar.tsx` — interactive tabs
 
-**ChartsPanel:**
+|**ChartsPanel:**
 
 ```tsx
 export default function ChartsPanel() {
-  const { chartTabs, activeChartTab, removeChartTab, setActiveChartTab, chartsFullscreen, setChartsFullscreen, loadChartsFromStorage } = useForestStore();
-  const forest = useForestStore(s => s.forest);
-  
-  // Load persisted charts on mount
-  useEffect(() => {
-    if (forest?.id) {
-      loadChartsFromStorage(forest.id);
-    }
-  }, [forest?.id, loadChartsFromStorage]);
+  const { chartTabs, activeChartTab, removeChartTab, setActiveChartTab, chartsFullscreen, setChartsFullscreen, forest } = useForestStore();
   
   const activeTab = chartTabs.find(t => t.id === activeChartTab);
+  
+  // When user closes a chart tab, remove from Supabase via API route
+  const handleClose = async (chartId: string) => {
+    if (!forest?.id) return;
+    try {
+      await fetch(`/api/forest/${encodeURIComponent(forest.id)}/charts?chart_id=${encodeURIComponent(chartId)}`, {
+        method: "DELETE",
+      });
+    } catch {
+      // Silently fail — chart will reappear on next page load if DB delete failed
+    }
+    removeChartTab(chartId);
+  };
   
   return (
     <div className={`flex flex-col ${chartsFullscreen ? 'fixed inset-0 z-50 bg-white dark:bg-gray-900' : 'h-full'}`}>
@@ -1250,7 +1534,7 @@ export default function ChartsPanel() {
         tabs={chartTabs}
         activeId={activeChartTab}
         onSelect={setActiveChartTab}
-        onClose={removeChartTab}
+        onClose={handleClose}
         onFullscreenToggle={() => setChartsFullscreen(!chartsFullscreen)}
         isFullscreen={chartsFullscreen}
       />
@@ -1571,6 +1855,10 @@ describe("SSE chart events (client-side)", () => {
 |------|--------|--------|
 | `src/lib/store/visualization-slice.ts` | 🆕 Create | New UI state for charts + cross-panel |
 | `src/lib/store/index.ts` | 🔧 Modify | Add slice to store |
+| `src/lib/repos/chart-tabs.ts` | 🆕 Create | Supabase repo for chart_tabs CRUD |
+| `src/lib/hooks/use-charts.ts` | 🆕 Create | Fetch charts from Supabase on mount |
+| `src/app/api/forest/[id]/charts/route.ts` | 🆕 Create | GET list, POST upsert, DELETE chart_tabs |
+| `supabase/migrations/004_add_chart_tabs.sql` | 🆕 Create | chart_tabs table + RLS |
 | `src/components/layout/PanelLayout.tsx` | 🆕 Create | 3-panel resizable layout |
 | `src/components/layout/PanelResizer.tsx` | 🆕 Create | Drag handle component |
 | `src/components/forest/ForestView.tsx` | 🔧 Modify | Use PanelLayout, add ChartsPanel |
@@ -1621,6 +1909,12 @@ Estimated total effort: **~16-18 hours**
 - [ ] Empty state shows when no chart tabs exist
 - [ ] Drag resizing between panels works
 - [ ] Panel widths are persisted across page reload (localStorage)
-- [ ] ✅ **Chart tabs persist across page reload** — create a chart, refresh, still there
+- [ ] ✅ **Chart tabs persist across page reload AND across devices** — create a chart on device A, open on device B, same charts visible
 - [ ] ✅ **All chart types render** — bar, stacked_bar, pie, donut, line, area, scatter, radar, composed, horizontal_bar, waterfall
 - [ ] ✅ **Charts panel is leftmost in the layout** (Charts | Map | Chat)
+- [ ] ✅ **Migration `004_add_chart_tabs.sql` run in Supabase SQL Editor** before implementing
+- [ ] ✅ `create_chart` AI tool writes to `chart_tabs` table (verify in Supabase dashboard)
+- [ ] ✅ `clear_charts` AI tool deletes from `chart_tabs` table
+- [ ] ✅ Manual tab close calls `DELETE /api/forest/[id]/charts` API route
+- [ ] ✅ `useCharts` hook fetches chart tabs on page load
+- [ ] ✅ RLS policies allow owner write and shared read
