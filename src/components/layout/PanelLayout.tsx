@@ -31,6 +31,29 @@ function saveWidths(charts: number, chat: number) {
   }
 }
 
+/** Tiny component that subscribes to chartTabs.length for the badge — keeps PanelLayout stable. */
+function ChartBadgeButton({
+  onClick,
+  title,
+  className,
+}: {
+  onClick: () => void;
+  title: string;
+  className: string;
+}) {
+  const count = useForestStore((s) => s.chartTabs.length);
+  return (
+    <button onClick={onClick} className={className} title={title}>
+      📊
+      {count > 0 && (
+        <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
 export default function PanelLayout({
   chartsPanel,
   mapPanel,
@@ -39,7 +62,6 @@ export default function PanelLayout({
   const isLarge = useMediaQuery("(min-width: 1280px)");
   const isMedium = useMediaQuery("(min-width: 1024px)");
   const chartsFullscreen = useForestStore((s) => s.chartsFullscreen);
-  const chartTabs = useForestStore((s) => s.chartTabs);
 
   const savedWidths = useRef(loadWidths());
   const [chartsWidth, setChartsWidth] = useState(savedWidths.current.charts);
@@ -122,18 +144,11 @@ export default function PanelLayout({
           )}
 
           {!chartsFullscreen && (
-            <button
+            <ChartBadgeButton
               onClick={() => setChartsOpen(!chartsOpen)}
-              className="absolute bottom-2 left-2 z-20 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full w-10 h-10 flex items-center justify-center shadow-md text-lg hover:bg-gray-50 dark:hover:bg-gray-700"
               title={chartsOpen ? "Hide charts" : "Show charts"}
-            >
-              📊
-              {chartTabs.length > 0 && (
-                <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                  {chartTabs.length}
-                </span>
-              )}
-            </button>
+              className="absolute bottom-2 left-2 z-20 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full w-10 h-10 flex items-center justify-center shadow-md text-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+            />
           )}
         </div>
       </div>
@@ -171,18 +186,11 @@ export default function PanelLayout({
             </div>
           )}
 
-          <button
+          <ChartBadgeButton
             onClick={() => setChartsOpen(!chartsOpen)}
-            className="fixed bottom-4 left-4 z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full w-12 h-12 flex items-center justify-center shadow-lg text-xl hover:bg-gray-50 dark:hover:bg-gray-700"
             title={chartsOpen ? "Close charts" : "Open charts"}
-          >
-            📊
-            {chartTabs.length > 0 && (
-              <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-xs rounded-full w-6 h-6 flex items-center justify-center">
-                {chartTabs.length}
-              </span>
-            )}
-          </button>
+            className="fixed bottom-4 left-4 z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full w-12 h-12 flex items-center justify-center shadow-lg text-xl hover:bg-gray-50 dark:hover:bg-gray-700"
+          />
         </>
       )}
     </div>

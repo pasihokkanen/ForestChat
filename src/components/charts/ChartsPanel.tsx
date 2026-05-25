@@ -54,7 +54,7 @@ export default function ChartsPanel() {
         onFullscreenToggle={() => setChartsFullscreen(!chartsFullscreen)}
         isFullscreen={chartsFullscreen}
       />
-      <div className="flex-1 p-2 overflow-hidden">
+      <div className="flex-1 p-2 overflow-hidden" style={{ minHeight: 200 }}>
         {activeTab ? (
           <ChartCard key={activeTab.id} tab={activeTab} />
         ) : (

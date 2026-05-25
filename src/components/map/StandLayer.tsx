@@ -286,22 +286,26 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
   // Update highlight layer filters when selection changes (P4.6)
   useEffect(() => {
     if (!map) return;
-    if (!map.getLayer("stands-highlight")) return;
+    try {
+      if (!map.getLayer("stands-highlight")) return;
 
-    const ids = highlightedStandIds.length > 0
-      ? highlightedStandIds
-      : selectedStandId
-        ? [selectedStandId]
-        : [];
+      const ids = highlightedStandIds.length > 0
+        ? highlightedStandIds
+        : selectedStandId
+          ? [selectedStandId]
+          : [];
 
-    const filter = ids.length > 0
-      ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (["match", ["get", "stand_id"], ["literal", ids], true, false] as any)
-      : // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (["==", ["get", "stand_id"], ""] as any);
+      const filter = ids.length > 0
+        ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (["match", ["get", "stand_id"], ["literal", ids], true, false] as any)
+        : // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (["==", ["get", "stand_id"], ""] as any);
 
-    map.setFilter("stands-highlight", filter);
-    map.setFilter("stands-highlight-fill", filter);
+      map.setFilter("stands-highlight", filter);
+      map.setFilter("stands-highlight-fill", filter);
+    } catch {
+      // Layer/source may not be available during layout transitions — skip
+    }
   }, [map, selectedStandId, highlightedStandIds, styleVersion]);
 
   // Zoom to selected stand when selection changes via AI or chart click
