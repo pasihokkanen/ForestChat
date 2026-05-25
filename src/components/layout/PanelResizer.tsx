@@ -9,17 +9,18 @@ interface PanelResizerProps {
 
 export default function PanelResizer({ onResize }: PanelResizerProps) {
   const isDragging = useRef(false);
+  const lastClientX = useRef(0);
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
       e.preventDefault();
       isDragging.current = true;
-
-      const startX = e.clientX;
+      lastClientX.current = e.clientX;
 
       const handlePointerMove = (ev: PointerEvent) => {
         if (!isDragging.current) return;
-        const delta = ev.clientX - startX;
+        const delta = ev.clientX - lastClientX.current;
+        lastClientX.current = ev.clientX;
         onResize(delta);
       };
 

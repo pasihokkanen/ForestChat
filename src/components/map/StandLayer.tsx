@@ -273,9 +273,13 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
   // Update source data when compartments change
   useEffect(() => {
     if (!map) return;
-    const source = map.getSource("stands") as maplibregl.GeoJSONSource | undefined;
-    if (source?.setData) {
-      source.setData(compartments);
+    try {
+      const source = map.getSource("stands") as maplibregl.GeoJSONSource | undefined;
+      if (source?.setData) {
+        source.setData(compartments);
+      }
+    } catch {
+      // Source may not be available during layout transitions — skip
     }
   }, [map, compartments]);
 
@@ -304,8 +308,13 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
   useEffect(() => {
     if (!map || !selectedStandId) return;
 
-    // Find the feature for this stand
-    const source = map.getSource("stands") as maplibregl.GeoJSONSource | undefined;
+    // Guard: source must exist (can be missing during layout transitions)
+    let source: maplibregl.GeoJSONSource | undefined;
+    try {
+      source = map.getSource("stands") as maplibregl.GeoJSONSource | undefined;
+    } catch {
+      return;
+    }
     if (!source) return;
 
     try {
