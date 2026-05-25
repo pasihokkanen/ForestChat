@@ -2,9 +2,15 @@
 
 > **For Hermes:** Load subagent-driven-development skill before implementing. Use OpenCode CLI for coding subagents. Update this plan file to mark tasks as ✅ upon completion.
 
-**Version:** 2.2
+**Version:** 2.3
 **Date:** 2026-05-25
 **Implemented:** ✅ 2026-05-25
+
+**Changelog v2.3 (2026-05-25):**
+- 🐛 B1: Fixed fullscreen crash (TypeError: `getSource`/`getLayer` on undefined) — PanelLayout now always renders the same React tree; fullscreen uses CSS overlay + `hidden` class instead of a separate return branch that unmounted MapView
+- 🐛 B2: Fixed PanelResizer cumulative delta bug — changed from `clientX - startX` (total from drag start) to incremental delta via `lastClientX` ref, preventing exponential panel growth/shrinkage during drag
+- 🐛 B3: Removed `useRef()` calls inside `setState` functional updaters in PanelLayout — moved width persistence to a proper `useEffect`
+- 🛡️ B4: Added try-catch guards around `map.getSource()`/`map.getLayer()` calls in StandLayer for defensive robustness during layout transitions
 
 **Changelog v2.2:**
 - 🔴 C1: Extended SSE `SseEvent` type in `sse.ts` to include `select_stand`, `create_chart`, `remove_chart`, `clear_charts` (was relying on `as SseEvent` cast)
