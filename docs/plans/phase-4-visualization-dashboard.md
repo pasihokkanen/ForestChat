@@ -156,6 +156,7 @@ These are emitted by AI tools AFTER the server-side handler persists the change 
 |------|-------------|------------|
 | `select_stand` | "Highlight a specific stand on the map and zoom to it" | `stand_id: string` |
 | `create_chart` | "Create a new chart tab in the visualization panel" | See below |
+| `remove_chart` | "Remove a single chart tab by its chart_id" | `chart_id: string` |
 | `clear_charts` | "Remove all chart tabs from the visualization panel" | `{}` |
 
 **`create_chart` tool definition:**
@@ -242,6 +243,25 @@ These are emitted by AI tools AFTER the server-side handler persists the change 
 }
 ```
 
+**`remove_chart` tool definition:**
+
+```typescript
+{
+  name: "remove_chart",
+  description: `Remove a single chart tab by its chart_id.
+  Use this when the user asks to remove a specific chart (e.g., "remove the species pie chart").
+  The AI must know the chart_id — it can find it from the conversation context or
+  by querying the chart_tabs table if needed.`,
+  parameters: {
+    type: "object",
+    properties: {
+      chart_id: { type: "string", description: "The chart ID to remove, e.g. 'chart-species-distribution'" },
+    },
+    required: ["chart_id"],
+  },
+}
+```
+
 ### Zustand Visualization Slice (New)
 
 ```typescript
@@ -280,6 +300,9 @@ interface VisualizationSlice {
   setHighlightedStands: (ids: string[]) => void;
   
   // --- localStorage persistence ---
+  // ⚠️ Note: despite the name, the PRIMARY persistence is Supabase.
+  // `loadChartsFromStorage` is also used for the initial API fetch.
+  // On next refactor, consider renaming to `initializeCharts`.
   // ChartTabs are persisted under `forestchat-charts-${forestId}` in localStorage.
   // On state initialization, load from localStorage.
   // On add/remove/clear, immediately sync to localStorage.
@@ -485,11 +508,12 @@ Ask the AI to create a chart, e.g.
 export interface ChartTab {
   id: string;
   title: string;
-  type: "bar" | "pie" | "line" | "area";
+  type: "bar" | "pie" | "line" | "area" | "stacked_bar" | "scatter" | "radar" | "donut" | "horizontal_bar" | "composed" | "waterfall";
   data: Record<string, unknown>[];
   xKey: string | null;    // null for pie charts
   yKey: string;
-  nameKey: string | null;  // only for pie
+  yKey2: string | null;   // secondary Y axis, used by composed charts
+  nameKey: string | null;  // only for pie/donut
   colorKey: string | null;
   standDimension: string | null;
 }
@@ -813,13 +837,14 @@ useCharts(forestId);
 ```typescript
 // New event types added to SseEventType and SseCallbacks
 export type SseEventType = "chunk" | "tool_start" | "tool_end" | "done" | "error" 
-  | "select_stand" | "create_chart" | "remove_chart";
+  | "select_stand" | "create_chart" | "remove_chart" | "clear_charts";
 
 interface SseCallbacks {
   // ... existing callbacks ...
   onSelectStand?: (standId: string) => void;
   onCreateChart?: (chartConfig: ChartTab) => void;
   onRemoveChart?: (chartId: string) => void;
+  onClearCharts?: () => void;
 }
 ```
 
@@ -834,6 +859,9 @@ case "create_chart":
   break;
 case "remove_chart":
   callbacks.onRemoveChart?.(data.chart_id);
+  break;
+case "clear_charts":
+  callbacks.onClearCharts?.();
   break;
 ```
 
@@ -850,10 +878,13 @@ onCreateChart: (chartConfig) => {
 onRemoveChart: (chartId) => {
   removeChartTab(chartId);
 },
+onClearCharts: () => {
+  clearAllCharts();
+},
 ```
 
 **Verification:**
-- [ ] SSE client recognizes the 3 new event types
+- [ ] SSE client recognizes all 4 new event types
 - [ ] ChatPanel dispatches to Zustand on receipt
 - [ ] No console errors on receiving unknown event types (backward compatible)
 
@@ -1020,14 +1051,13 @@ function StandLayer({ map, compartments, styleVersion }: StandLayerProps) {
 
 ## Track D: AI Tools (Backend)
 
-### P4.7 — Add `create_chart` Tool to Tool Definitions + Executor (1h)
+### P4.7 — Add `create_chart` + `clear_charts` Tools to Tool Definitions + Executor (1.25h)
 
-**Objective:** Add the `create_chart` AI tool that accepts chart data from the AI and emits an SSE event to the client.
+**Objective:** Add the `create_chart` and `clear_charts` AI tools. Both run server-side: `create_chart` validates the chart config, persists to Supabase `chart_tabs`, then emits SSE. `clear_charts` deletes all chart_tabs for the forest, then emits SSE.
 
 **Files:**
-- Modify: `src/lib/chat/tools.ts` — add create_chart definition
-- Modify: `src/lib/chat/tool-executor.ts` — add handler
-- Modify: `src/app/api/chat/route.ts` — support sending SSE events from tool execution
+- Modify: `src/lib/chat/tools.ts` — add create_chart + clear_charts tool definitions
+- Modify: `src/lib/chat/tool-executor.ts` — add both handlers
 
 **Critical design:** The `create_chart` tool writes to the `chart_tabs` table directly via `ctx.supabase` (server-side), *then* emits the SSE event to notify the client. This ensures the chart is persisted in Supabase for cross-device access. The client only reacts to the SSE event — it doesn't need to call an API route.
 
@@ -1070,7 +1100,7 @@ const toolHandlers = {
   // ... existing handlers ...
   
   create_chart: async (args: Record<string, unknown>, ctx: ToolContext) => {
-    const { chart_id, title, type, data, x_key, y_key, name_key, color_key, stand_dimension } = args;
+    const { chart_id, title, type, data, x_key, y_key, name_key, color_key, stand_dimension, y_key2 } = args;
     
     // Validation
     if (!chart_id || typeof chart_id !== 'string') {
@@ -1091,7 +1121,7 @@ const toolHandlers = {
       data: data as Record<string, unknown>[],
       xKey: (x_key as string) ?? null,
       yKey: y_key as string,
-      yKey2: (data as Record<string, unknown>)?.y_key2 as string ?? null,
+      yKey2: (y_key2 as string) ?? null,
       nameKey: (name_key as string) ?? null,
       colorKey: (color_key as string) ?? null,
       standDimension: (stand_dimension as string) ?? null,
@@ -1140,6 +1170,28 @@ const toolHandlers = {
       result: "✅ All charts cleared from the visualization panel.",
     };
   },
+
+  remove_chart: async (args: Record<string, unknown>, ctx: ToolContext) => {
+    const { chart_id } = args;
+    if (!chart_id || typeof chart_id !== 'string') {
+      return { success: false, result: "", error: "chart_id is required" };
+    }
+    // Delete from Supabase
+    try {
+      await ctx.supabase.from("chart_tabs")
+        .delete()
+        .eq("forest_id", ctx.forestId)
+        .eq("chart_id", chart_id);
+    } catch (err) {
+      console.error("Failed to remove chart tab:", err);
+    }
+    // Emit SSE event to remove chart from client
+    ctx.sendSse?.("remove_chart", { chart_id });
+    return {
+      success: true,
+      result: `✅ Chart "${chart_id}" removed.`,
+    };
+  },
 };
 ```
 
@@ -1166,13 +1218,13 @@ const result = await toolHandlers[toolName]?.(args, ctx);
 
 ---
 
-### P4.8 — Add `select_stand` Tool to Tool Definitions + Executor (0.75h)
+### P4.8 — Add `select_stand` + `remove_chart` Tools to Tool Definitions + Executor (1h)
 
-**Objective:** Add the `select_stand` AI tool that selects a stand on the map and zooms to it.
+**Objective:** Add the `select_stand` AI tool (highlights a stand on the map via SSE) and the `remove_chart` AI tool (deletes a single chart tab from Supabase + emits SSE).
 
 **Files:**
-- Modify: `src/lib/chat/tools.ts` — add select_stand definition
-- Modify: `src/lib/chat/tool-executor.ts` — add handler
+- Modify: `src/lib/chat/tools.ts` — add select_stand + remove_chart definitions
+- Modify: `src/lib/chat/tool-executor.ts` — add handlers
 
 **Tool definition:**
 
@@ -1244,8 +1296,15 @@ import {
 // Renders bars colored green (positive) or red (negative) based on value sign.
 // Implement as a Recharts <Rectangle> wrapper:
 //   <Bar dataKey={...} shape={<WaterfallBar />} />
-// For simplicity, the initial implementation renders all bars green
-// and relies on the AI to send positive=gain / negative=loss data.
+//
+// Implementation:
+// import { Rectangle } from "recharts";
+// function WaterfallBar(props: Record<string, unknown>) {
+//   const { fill, value, ...rest } = props;
+//   const barColor = typeof value === "number" && value < 0 ? "#E53935" : "#4CAF50";
+//   return <Rectangle {...rest} fill={barColor} />;
+// }
+// For initial MVP, start with monochrome bars and add the custom shape as an enhancement.
 import type { ChartTab } from "@/lib/store/visualization-slice";
 import { useForestStore } from "@/lib/store";
 
@@ -1321,7 +1380,11 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <YAxis />
             <Tooltip />
             <Legend />
-            {/* Data keys are grouped by color_key — each unique value in color_key becomes a stack */}
+            {/* Stacked bar: data shape should be { category, segmentA: value, segmentB: value, ... }.
+                 y_key is the first value column. Additional segments are detected from data columns.
+                 Each unique segment key gets its own <Bar stackId="a">.
+                 Simple initial implementation: render y_key as the primary stack.
+                 For Multi-stack: iterate over tab.data[0] keys, skip x_key, name_key, render each numeric key as <Bar>. */}
             <Bar dataKey={tab.yKey} stackId="a" fill="#4CAF50" />
             {tab.colorKey && <Bar dataKey={tab.colorKey} stackId="a" fill="#2196F3" />}
           </BarChart>
