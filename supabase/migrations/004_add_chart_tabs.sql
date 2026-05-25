@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS chart_tabs (
   UNIQUE(forest_id, chart_id)
 );
 
-CREATE INDEX idx_chart_tabs_forest ON chart_tabs(forest_id);
+CREATE INDEX IF NOT EXISTS idx_chart_tabs_forest ON chart_tabs(forest_id);
 
 ALTER TABLE chart_tabs ENABLE ROW LEVEL SECURITY;
 
