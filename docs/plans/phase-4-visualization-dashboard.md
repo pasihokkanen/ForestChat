@@ -2,8 +2,19 @@
 
 > **For Hermes:** Load subagent-driven-development skill before implementing. Use OpenCode CLI for coding subagents. Update this plan file to mark tasks as ✅ upon completion.
 
-**Version:** 2.1
+**Version:** 2.2
 **Date:** 2026-05-25
+
+**Changelog v2.2:**
+- 🔴 C1: Extended SSE `SseEvent` type in `sse.ts` to include `select_stand`, `create_chart`, `remove_chart`, `clear_charts` (was relying on `as SseEvent` cast)
+- 🔴 C2: Fixed ToolContext — `sendSse` added as extension to existing interface, not replacement (preserves `userId`)
+- 🔴 C3: ChatPanel SSE callbacks now shown merged into the full `sseStreamChat()` callbacks object
+- 🟡 S1: Added `default` case to ChartCard switch for unknown chart types
+- 🟡 S2: `addChartTab` now upserts (replaces existing tab with same id instead of duplicating)
+- 🟡 S3: Removed dead localStorage code (`loadChartsFromStorage`, `saveChartsToStorage`, `STORAGE_PREFIX`) — Supabase is the sole persistence layer
+- 🟡 S4: Moved `WaterfallBar` definition from comments into executable component code; added `Rectangle` import
+- 🟡 S5: Fixed `create_chart` tool enum to include all 11 chart types (was only 4); added missing `y_key2` parameter
+- 🟡 S6: Added auto-invalidation: all data-mutation tools (add_operation, remove_operation, batch_update_operations, generate_plan) now clear `chart_tabs` via `invalidateChartTabs` helper in route tool loop — charts always reflect current data, no AI action needed
 
 **Changelog v2.1:**
 - Changed chart persistence from localStorage to Supabase backend (cross-device sync)
@@ -145,10 +156,57 @@ Two new SSE event types added to the existing set (chunk, tool_start, tool_end, 
 | `remove_chart` | `{ chart_id: string }` | Client removes a chart tab |
 | `clear_charts` | `{}` | Client removes all chart tabs |
 
+**Server-side type update (`src/lib/chat/sse.ts`):**
+
+The `SseEvent` interface must be extended to include the 4 new event types:
+
+```typescript
+// src/lib/chat/sse.ts — Extended SseEvent
+export interface SseEvent {
+  event: "chunk" | "tool_start" | "tool_end" | "done" | "error"
+    | "select_stand" | "create_chart" | "remove_chart" | "clear_charts";
+  data: {
+    content?: string;
+    name?: string;
+    args?: unknown;
+    result?: string;
+    message_id?: string;
+    session_id?: string;
+    model?: string | null;
+    error?: string;
+    // New fields
+    stand_id?: string;
+    chart_id?: string;
+    // ChartTab fields (title, type, data, x_key, y_key, etc.) are passed
+    // as unknown and destructured at the call site.
+    [key: string]: unknown;
+  };
+}
+```
+
+This allows `send({ event: "create_chart", data: chartTab })` without casting. The route's `sendSse` wrapper can use the native `send` function directly.
+
 These are emitted by AI tools AFTER the server-side handler persists the change to the `chart_tabs` table. The client only reacts to the SSE event; the database write already happened. This way:
 - Charts are always backed by Supabase (cross-device)
 - The SSE event provides real-time feedback to the chat UI
 - On page load, charts are fetched from the `GET /api/forest/[id]/charts` endpoint
+
+### Chart Invalidation on Data Changes
+
+**Charts auto-invalidate when operations change.** Any AI tool that modifies operations (add, remove, batch update, generate plan) automatically clears all chart tabs for the forest — both from Supabase and from the client via SSE. This ensures charts always reflect the current data without the user needing to ask for a refresh.
+
+```
+add_operation / remove_operation / batch_update_operations / generate_plan
+  → Tool handler executes the mutation
+  → On success: delete all chart_tabs for this forest from Supabase
+  → Emit clear_charts SSE event to client
+  → Client clears all chart tabs from Zustand → Charts panel shows empty state
+  → User can ask AI to recreate charts with fresh data
+```
+
+The invalidation is implemented as a shared `invalidateCharts(ctx)` helper in `tool-executor.ts`, called by each mutation handler after a successful operation. This centralizes the logic and ensures consistency — no tool can forget to invalidate.
+
+**User experience:** When the user says "add a thinning for stand 7 in 2028," the charts briefly disappear. The AI's response can optionally recreate the most relevant chart(s) in the same turn. If not, the user simply asks "show yearly income as a bar chart again" and gets the refreshed data.
 
 ### New AI Tools
 
@@ -285,6 +343,7 @@ interface VisualizationSlice {
   addChartTab: (tab: ChartTab) => void;
   removeChartTab: (id: string) => void;
   clearAllCharts: () => void;  // clear_charts tool
+  setChartTabs: (tabs: ChartTab[]) => void;  // initial load from API
   setActiveChartTab: (id: string | null) => void;
   
   // Charts panel state
@@ -298,18 +357,6 @@ interface VisualizationSlice {
   // Highlighted stand IDs (from chart clicks or AI commands)
   highlightedStandIds: string[];
   setHighlightedStands: (ids: string[]) => void;
-  
-  // --- localStorage persistence ---
-  // ⚠️ Note: despite the name, the PRIMARY persistence is Supabase.
-  // `loadChartsFromStorage` is also used for the initial API fetch.
-  // On next refactor, consider renaming to `initializeCharts`.
-  // ChartTabs are persisted under `forestchat-charts-${forestId}` in localStorage.
-  // On state initialization, load from localStorage.
-  // On add/remove/clear, immediately sync to localStorage.
-  // The forestSlice.forest.id drives the storage key, so each forest
-  // has its own independent set of charts.
-  loadChartsFromStorage: (forestId: string) => void;
-  saveChartsToStorage: () => void;
 }
 ```
 
@@ -536,9 +583,8 @@ export interface VisualizationSlice {
   highlightedStandIds: string[];
   setHighlightedStands: (ids: string[]) => void;
   
-  // localStorage fallback for offline resilience
-  loadChartsFromStorage: (forestId: string) => void;
-  saveChartsToStorage: () => void;
+  // Chart tabs loaded from API (page mount)
+  setChartTabs: (tabs: ChartTab[]) => void;
 }
 ```
 
@@ -575,8 +621,6 @@ Persistence is handled at two levels:
 **Visualization slice:**
 
 ```typescript
-const STORAGE_PREFIX = "forestchat-charts-";
-
 export const createVisualizationSlice: StateCreator<VisualizationSlice> = (set, get) => ({
   chartTabs: [],
   activeChartTab: null,
@@ -586,7 +630,10 @@ export const createVisualizationSlice: StateCreator<VisualizationSlice> = (set, 
 
   addChartTab: (tab) =>
     set((state) => {
-      const chartTabs = [...state.chartTabs, tab];
+      const existing = state.chartTabs.findIndex(t => t.id === tab.id);
+      const chartTabs = existing >= 0
+        ? [...state.chartTabs.slice(0, existing), tab, ...state.chartTabs.slice(existing + 1)]
+        : [...state.chartTabs, tab];
       return { chartTabs, activeChartTab: tab.id };
     }, false, "addChartTab"),
 
@@ -607,43 +654,17 @@ export const createVisualizationSlice: StateCreator<VisualizationSlice> = (set, 
 
   setActiveChartTab: (id) => set({ activeChartTab: id }),
 
-  // ... other setters ...
+  // Set chart tabs from API fetch (page load)
+  setChartTabs: (tabs) => set({
+    chartTabs: tabs,
+    activeChartTab: tabs.length > 0 ? tabs[tabs.length - 1].id : null,
+  }, false, "setChartTabs"),
 
-  // On page load: fetch charts from Supabase
-  // Hook into ForestView's data loading — the useCharts hook calls this
-  loadChartsFromStorage: (forestId: string) => {
-    // Note: this is called after fetching from the API route.
-    // The API route is the source of truth, not localStorage.
-    // If we also cache locally for offline resilience, write here.
-    try {
-      const raw = localStorage.getItem(`${STORAGE_PREFIX}${forestId}`);
-      if (raw) {
-        const chartTabs: ChartTab[] = JSON.parse(raw);
-        set({
-          chartTabs,
-          activeChartTab: chartTabs.length > 0 ? chartTabs[chartTabs.length - 1].id : null,
-        });
-      }
-    } catch {
-      localStorage.removeItem(`${STORAGE_PREFIX}${forestId}`);
-    }
-  },
-
-  saveChartsToStorage: () => {
-    // Local cache for offline resilience (secondary to Supabase)
-    // The primary persistence happens server-side in the AI tool handlers.
-    const { chartTabs } = get();
-    try {
-      const state = get() as unknown as ForestStore;
-      const forestId = state.forest?.id;
-      if (forestId) {
-        localStorage.setItem(`${STORAGE_PREFIX}${forestId}`, JSON.stringify(chartTabs));
-      }
-    } catch {
-      // silently fail
-    }
-  },
+  setChartsFullscreen: (v) => set({ chartsFullscreen: v }),
+  setSelectedYear: (year) => set({ selectedYear: year }),
+  setHighlightedStands: (ids) => set({ highlightedStandIds: ids }),
 });
+```
 ```
 
 **Persistence flow summary:**
@@ -652,9 +673,9 @@ export const createVisualizationSlice: StateCreator<VisualizationSlice> = (set, 
 |--------|---------------|-----------|
 | AI creates chart via `create_chart` tool | Supabase `chart_tabs` (upsert) | ✅ `create_chart` to client |
 | AI clears all via `clear_charts` tool | Supabase `chart_tabs` (delete all) | ✅ `clear_charts` to client |
+| AI modifies operations (add/remove/batch/generate) | Supabase `chart_tabs` (delete all → auto-invalidation) | ✅ `clear_charts` to client |
 | User closes a chart tab | API route `DELETE` | ❌ No SSE — client-side only |
 | User loads the page | `GET /api/forest/[id]/charts` → Zustand | ❌ — initial load |
-| Offline reload | localStorage fallback (cached copy) | ❌ — local only |
 
 ---
 
@@ -792,7 +813,7 @@ export function useCharts(forestId: string) {
 }
 ```
 
-Note: `setChartTabs` must be added to VisualizationSlice — replaces `loadChartsFromStorage` for the initial-load case:
+Note: `setChartTabs` must be added to VisualizationSlice for the initial-load case:
 
 ```typescript
 // In VisualizationSlice interface:
@@ -865,22 +886,28 @@ case "clear_charts":
   break;
 ```
 
-**ChatPanel update:** Add handlers that dispatch to Zustand:
+**ChatPanel update:** Add handlers that dispatch to Zustand. These are added to the existing `sseStreamChat()` callbacks object alongside `onChunk`, `onToolStart`, `onToolEnd`, `onDone`, and `onError`:
 
 ```typescript
-onSelectStand: (standId) => {
-  selectStand(standId);           // from map-slice
-  // Map zoom + popup handled by StandLayer reacting to selectedStandId
-},
-onCreateChart: (chartConfig) => {
-  addChartTab(chartConfig);
-},
-onRemoveChart: (chartId) => {
-  removeChartTab(chartId);
-},
-onClearCharts: () => {
-  clearAllCharts();
-},
+// In ChatPanel's handleSend, extend sseStreamChat callbacks:
+await sseStreamChat(message, forestId, sessionId, {
+  // ... existing callbacks (onChunk, onToolStart, onToolEnd, onDone, onError) ...
+  
+  // NEW callbacks:
+  onSelectStand: (standId) => {
+    selectStand(standId);           // from map-slice
+    // Map zoom + popup handled by StandLayer reacting to selectedStandId
+  },
+  onCreateChart: (chartConfig) => {
+    addChartTab(chartConfig);
+  },
+  onRemoveChart: (chartId) => {
+    removeChartTab(chartId);
+  },
+  onClearCharts: () => {
+    clearAllCharts();
+  },
+});
 ```
 
 **Verification:**
@@ -1072,10 +1099,11 @@ function StandLayer({ map, compartments, styleVersion }: StandLayerProps) {
     properties: {
       chart_id: { type: "string" },
       title: { type: "string" },
-      type: { type: "string", enum: ["bar", "pie", "line", "area"] },
+      type: { type: "string", enum: ["bar", "pie", "line", "area", "stacked_bar", "scatter", "radar", "donut", "horizontal_bar", "composed", "waterfall"] },
       data: { type: "array", items: { type: "object" } },
       x_key: { type: "string" },
       y_key: { type: "string" },
+      y_key2: { type: "string" },
       name_key: { type: "string" },
       color_key: { type: "string" },
       stand_dimension: { type: "string" },
@@ -1087,17 +1115,28 @@ function StandLayer({ map, compartments, styleVersion }: StandLayerProps) {
 
 **SSE emission from tool executor:**
 
-The tool executor needs access to the SSE `send` function. Refactor the executor context:
+The tool executor needs access to the SSE `send` function. Extend the existing `ToolContext` interface (add `sendSse` — do not replace):
 
 ```typescript
-interface ToolContext {
-  supabase: SupabaseClient;
-  forestId: string;
-  sendSse?: (event: string, data: unknown) => void; // optional — for client-side tools
-}
+// In tool-executor.ts: ADD sendSse to the existing ToolContext interface.
+// Existing fields (forestId, userId, supabase) remain unchanged.
+sendSse?: (event: string, data: unknown) => void;
+```
+
+The tool executor also needs a shared helper for chart invalidation:
 
 const toolHandlers = {
   // ... existing handlers ...
+  
+  // Shared chart invalidation helper — called by all mutation handlers
+  invalidateChartTabs: async (ctx: ToolContext) => {
+    try {
+      await ctx.supabase.from("chart_tabs").delete().eq("forest_id", ctx.forestId);
+    } catch (err) {
+      console.error("Failed to invalidate chart tabs:", err);
+    }
+    ctx.sendSse?.("clear_charts", {});
+  },
   
   create_chart: async (args: Record<string, unknown>, ctx: ToolContext) => {
     const { chart_id, title, type, data, x_key, y_key, name_key, color_key, stand_dimension, y_key2 } = args;
@@ -1197,17 +1236,39 @@ const toolHandlers = {
 
 **Route changes for SSE send:**
 
-The route's tool loop currently calls `send` directly. Pass it as context:
+The route's tool loop already calls `send` directly. Pass it as context and handle invalidation after mutation tools:
 
 ```typescript
 // In the tool loop (route.ts):
 const sendSse = (event: string, data: unknown) => {
-  send({ event, data } as SseEvent);
+  send({ event, data } as { event: string; data: unknown });
 };
 
-const ctx: ToolContext = { supabase, forestId, sendSse };
-const result = await toolHandlers[toolName]?.(args, ctx);
+const ctx: ToolContext = { supabase, forestId: forest_id, userId: user.id, sendSse };
+
+// After tool execution, if the tool modified operations, invalidate charts:
+const DATA_MUTATION_TOOLS = new Set([
+  "add_operation", "remove_operation", "batch_update_operations", "generate_plan",
+]);
+
+for (const chunk of streamChat(...)) {
+  if (chunk.type === "tool_call") {
+    send({ event: "tool_start", data: { name: chunk.name, args: chunk.arguments } });
+
+    const result = await executeTool(chunk.name, chunk.arguments, ctx);
+
+    // Auto-invalidate charts when operations are modified
+    if (result.success && DATA_MUTATION_TOOLS.has(chunk.name)) {
+      await toolHandlers.invalidateChartTabs(ctx);
+    }
+
+    send({ event: "tool_end", data: { name: chunk.name, result: result.result, error: result.error } });
+    // ...
+  }
+}
 ```
+
+**Note:** The invalidation is handled in the route's tool loop (not in individual handlers) to keep mutation tools decoupled from chart logic. The `invalidateChartTabs` helper is exported so the route can call it after mutation tool success.
 
 **Verification:**
 - [ ] `create_chart` tool appears in tool definitions
@@ -1294,17 +1355,15 @@ import {
 } from "recharts";
 // WaterfallBar: custom shape for waterfall chart.
 // Renders bars colored green (positive) or red (negative) based on value sign.
-// Implement as a Recharts <Rectangle> wrapper:
-//   <Bar dataKey={...} shape={<WaterfallBar />} />
-//
-// Implementation:
-// import { Rectangle } from "recharts";
-// function WaterfallBar(props: Record<string, unknown>) {
-//   const { fill, value, ...rest } = props;
-//   const barColor = typeof value === "number" && value < 0 ? "#E53935" : "#4CAF50";
-//   return <Rectangle {...rest} fill={barColor} />;
-// }
-// For initial MVP, start with monochrome bars and add the custom shape as an enhancement.
+
+function WaterfallBar(props: Record<string, unknown>) {
+  const { fill, value, ...rest } = props;
+  const barColor = typeof value === "number" && value < 0 ? "#E53935" : "#4CAF50";
+  return <Rectangle {...rest} fill={barColor} />;
+}
+
+// Note: Rectangle is imported from recharts:
+import { Rectangle } from "recharts";
 import type { ChartTab } from "@/lib/store/visualization-slice";
 import { useForestStore } from "@/lib/store";
 
@@ -1533,12 +1592,19 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <YAxis />
             <Tooltip />
             {/* Waterfall: positive values = gain (green), negative = loss (red) */}
-            <Bar dataKey={tab.yKey} fill="#4CAF50"
+            <Bar dataKey={tab.yKey}
               shape={<WaterfallBar />}
               onClick={(data) => handleChartClick(data)}
             />
           </BarChart>
         </ResponsiveContainer>
+      );
+
+    default:
+      return (
+        <div className="flex items-center justify-center h-full text-gray-400 text-sm">
+          Unknown chart type: {tab.type}
+        </div>
       );
   }
 }
@@ -1933,9 +1999,10 @@ describe("SSE chart events (client-side)", () => {
 | `src/components/map/StandLayer.tsx` | 🔧 Modify | Add highlight layers |
 | `src/lib/chat/sse-client.ts` | 🔧 Modify | New event types |
 | `src/components/chat/ChatPanel.tsx` | 🔧 Modify | Event handlers for chart/select |
-| `src/lib/chat/tools.ts` | 🔧 Modify | +create_chart, +select_stand |
-| `src/lib/chat/tool-executor.ts` | 🔧 Modify | Handlers for new tools |
-| `src/app/api/chat/route.ts` | 🔧 Modify | Pass sendSse to tool context |
+| `src/lib/chat/tools.ts` | 🔧 Modify | +create_chart, +select_stand, +remove_chart, +clear_charts |
+| `src/lib/chat/tool-executor.ts` | 🔧 Modify | Handlers for new tools + invalidateChartTabs helper |
+| `src/lib/chat/sse.ts` | 🔧 Modify | Extend SseEvent type with 4 new event types |
+| `src/app/api/chat/route.ts` | 🔧 Modify | Pass sendSse to tool context + auto-invalidate charts on mutation |
 | `src/lib/hooks/use-media-query.ts` | 🆕 Create | Responsive hook |
 | tests | 🆕 Create | 3 test files |
 
