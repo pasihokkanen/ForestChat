@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeAll } from "vitest";
 import { render, screen } from "@testing-library/react";
 import ChatMessages from "@/components/chat/ChatMessages";
+import type { ChatMessage } from "@/types/database";
 
 beforeAll(() => {
   Element.prototype.scrollIntoView = vi.fn();
@@ -12,7 +13,7 @@ function makeMsg(overrides: Partial<{
   role: "user" | "assistant" | "tool";
   content: string;
   created_at: string;
-}> = {}) {
+}> = {}): ChatMessage {
   return {
     id: "msg-1",
     session_id: "session-1",

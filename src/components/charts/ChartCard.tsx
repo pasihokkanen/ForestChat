@@ -108,7 +108,10 @@ export default function ChartCard({ tab }: ChartCardProps) {
           <BarChart
             data={tab.data}
             onClick={(e) =>
-              handleChartClick(e?.activePayload?.[0]?.payload as Record<string, unknown> | undefined)
+              handleChartClick(
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (e as any)?.activePayload?.[0]?.payload as Record<string, unknown> | undefined
+              )
             }
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -118,7 +121,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <Bar
               dataKey={tab.yKey}
               fill="#4CAF50"
-              onClick={(data) => handleChartClick(data as Record<string, unknown>)}
+              onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
               radius={[4, 4, 0, 0]}
             />
           </BarChart>
@@ -131,7 +134,10 @@ export default function ChartCard({ tab }: ChartCardProps) {
           <BarChart
             data={tab.data}
             onClick={(e) =>
-              handleChartClick(e?.activePayload?.[0]?.payload as Record<string, unknown> | undefined)
+              handleChartClick(
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (e as any)?.activePayload?.[0]?.payload as Record<string, unknown> | undefined
+              )
             }
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -154,7 +160,10 @@ export default function ChartCard({ tab }: ChartCardProps) {
             data={tab.data}
             layout="vertical"
             onClick={(e) =>
-              handleChartClick(e?.activePayload?.[0]?.payload as Record<string, unknown> | undefined)
+              handleChartClick(
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (e as any)?.activePayload?.[0]?.payload as Record<string, unknown> | undefined
+              )
             }
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -169,7 +178,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <Bar
               dataKey={tab.yKey}
               fill="#FF9800"
-              onClick={(data) => handleChartClick(data as Record<string, unknown>)}
+              onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
               radius={[0, 4, 4, 0]}
             />
           </BarChart>
@@ -188,7 +197,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
               cy="50%"
               outerRadius={100}
               label={({ name, value }) => `${name}: ${value}`}
-              onClick={(data) => handleChartClick(data as Record<string, unknown>)}
+              onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
             >
               {tab.data.map((_, i) => (
                 <Cell key={i} fill={getCellFill(i)} />
@@ -213,7 +222,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
               innerRadius={50}
               outerRadius={100}
               label={({ name, value }) => `${name}: ${value}`}
-              onClick={(data) => handleChartClick(data as Record<string, unknown>)}
+              onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
             >
               {tab.data.map((_, i) => (
                 <Cell key={i} fill={getCellFill(i)} />
@@ -231,7 +240,10 @@ export default function ChartCard({ tab }: ChartCardProps) {
           <LineChart
             data={tab.data}
             onClick={(e) =>
-              handleChartClick(e?.activePayload?.[0]?.payload as Record<string, unknown> | undefined)
+              handleChartClick(
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (e as any)?.activePayload?.[0]?.payload as Record<string, unknown> | undefined
+              )
             }
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -255,7 +267,10 @@ export default function ChartCard({ tab }: ChartCardProps) {
           <AreaChart
             data={tab.data}
             onClick={(e) =>
-              handleChartClick(e?.activePayload?.[0]?.payload as Record<string, unknown> | undefined)
+              handleChartClick(
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (e as any)?.activePayload?.[0]?.payload as Record<string, unknown> | undefined
+              )
             }
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -278,7 +293,10 @@ export default function ChartCard({ tab }: ChartCardProps) {
         <ResponsiveContainer width="100%" height="100%">
           <ScatterChart
             onClick={(e) =>
-              handleChartClick(e?.activePayload?.[0]?.payload as Record<string, unknown> | undefined)
+              handleChartClick(
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (e as any)?.activePayload?.[0]?.payload as Record<string, unknown> | undefined
+              )
             }
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -298,7 +316,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <Scatter
               data={tab.data}
               fill="#E91E63"
-              onClick={(data) => handleChartClick(data as Record<string, unknown>)}
+              onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
             />
           </ScatterChart>
         </ResponsiveContainer>
@@ -329,7 +347,10 @@ export default function ChartCard({ tab }: ChartCardProps) {
           <ComposedChart
             data={tab.data}
             onClick={(e) =>
-              handleChartClick(e?.activePayload?.[0]?.payload as Record<string, unknown> | undefined)
+              handleChartClick(
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (e as any)?.activePayload?.[0]?.payload as Record<string, unknown> | undefined
+              )
             }
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -354,7 +375,10 @@ export default function ChartCard({ tab }: ChartCardProps) {
           <BarChart
             data={tab.data}
             onClick={(e) =>
-              handleChartClick(e?.activePayload?.[0]?.payload as Record<string, unknown> | undefined)
+              handleChartClick(
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (e as any)?.activePayload?.[0]?.payload as Record<string, unknown> | undefined
+              )
             }
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -364,7 +388,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <Bar
               dataKey={tab.yKey}
               shape={<WaterfallBar />}
-              onClick={(data) => handleChartClick(data as Record<string, unknown>)}
+              onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
             />
           </BarChart>
         </ResponsiveContainer>

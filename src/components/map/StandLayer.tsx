@@ -291,10 +291,10 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
         : [];
 
     const filter = ids.length > 0
-      ? (
-          ["match", ["get", "stand_id"], ["literal", ids], true, false] as maplibregl.Expression
-        )
-      : (["==", ["get", "stand_id"], ""] as maplibregl.Expression);
+      ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (["match", ["get", "stand_id"], ["literal", ids], true, false] as any)
+      : // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (["==", ["get", "stand_id"], ""] as any);
 
     map.setFilter("stands-highlight", filter);
     map.setFilter("stands-highlight-fill", filter);

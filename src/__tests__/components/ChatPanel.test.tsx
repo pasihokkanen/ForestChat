@@ -22,6 +22,14 @@ const mockStore = {
   setError: vi.fn(),
   clearChat: vi.fn(),
   triggerRefetch: vi.fn(),
+  selectStand: vi.fn(),
+  addChartTab: vi.fn(),
+  removeChartTab: vi.fn(),
+  clearAllCharts: vi.fn(),
+  chartsFullscreen: false,
+  chartTabs: [],
+  activeChartTab: null,
+  highlightedStandIds: [],
 };
 
 vi.mock("@/lib/store", () => ({

@@ -131,7 +131,8 @@ export async function POST(request: NextRequest) {
       const maxIterations = 10;
 
       const sendSse = (event: string, data: unknown) => {
-        send({ event, data } as { event: string; data: unknown });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        send({ event, data } as any);
       };
 
       const ctx: ToolContext = {

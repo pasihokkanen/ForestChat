@@ -1,31 +1,27 @@
 // src/lib/ai/__tests__/chart-tools.test.ts
 // Phase 4.15 — Integration tests for create_chart, select_stand, clear_charts tools
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { executeTool } from "@/lib/chat/tool-executor";
+import { describe, it, expect, vi } from "vitest";
+import { executeTool, type ToolContext } from "@/lib/chat/tool-executor";
 
-function mockSupabase() {
-  const from = vi.fn().mockReturnValue({
-    upsert: vi.fn().mockResolvedValue({ error: null }),
-    delete: vi.fn().mockReturnValue({
-      eq: vi.fn().mockReturnValue({
-        eq: vi.fn().mockResolvedValue({ error: null }),
-      }),
-    }),
-    select: vi.fn().mockReturnValue({
-      eq: vi.fn().mockReturnValue({
-        order: vi.fn().mockResolvedValue({ data: [], error: null }),
-      }),
-    }),
-  });
-  return { from } as unknown as ReturnType<typeof vi.fn>;
-}
-
-function makeCtx(overrides: Partial<{ sendSse: typeof vi.fn }> = {}) {
+function makeCtx(overrides: Partial<{ sendSse: typeof vi.fn }> = {}): ToolContext {
   return {
     forestId: "test-forest-id",
     userId: "test-user-id",
-    supabase: mockSupabase(),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    supabase: { from: vi.fn().mockReturnValue({
+      upsert: vi.fn().mockResolvedValue({ error: null }),
+      delete: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          eq: vi.fn().mockResolvedValue({ error: null }),
+        }),
+      }),
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          order: vi.fn().mockResolvedValue({ data: [], error: null }),
+        }),
+      }),
+    }) } as any,
     sendSse: overrides.sendSse ?? vi.fn(),
   };
 }
