@@ -2,6 +2,7 @@
 
 import { useCompartments } from "@/lib/hooks/use-compartments";
 import { useForest } from "@/lib/hooks/use-forest";
+import { useCharts } from "@/lib/hooks/use-charts";
 import { useForestStore } from "@/lib/store";
 import { compartmentsToGeoJSON, fitBoundsToFeatures } from "@/lib/map/geojson";
 import type { CompartmentFeatureCollection } from "@/types/database";
@@ -10,6 +11,8 @@ import dynamic from "next/dynamic";
 import StandLayer from "@/components/map/StandLayer";
 import StandLegend from "@/components/map/StandLegend";
 import ChatPanel from "@/components/chat/ChatPanel";
+import PanelLayout from "@/components/layout/PanelLayout";
+import ChartsPanel from "@/components/charts/ChartsPanel";
 import { testCompartments } from "@/lib/test-data";
 import type maplibregl from "maplibre-gl";
 
@@ -47,6 +50,9 @@ export default function ForestView({ forestId }: ForestViewProps) {
     error: compartmentsError,
   } = useCompartments(forestId);
   const { setForest, setCompartments } = useForestStore();
+
+  // Load chart tabs from Supabase
+  useCharts(forestId);
 
   // Sync Supabase data to Zustand store
   useEffect(() => {
@@ -127,34 +133,35 @@ export default function ForestView({ forestId }: ForestViewProps) {
   }, [map, geojson]);
 
   return (
-    <div className="flex h-full">
-      <div className="flex-1 relative min-w-0">
-        <Suspense
-          fallback={
-            <div className="w-full h-full flex items-center justify-center text-gray-500">
-              Loading map...
-            </div>
-          }
-        >
-          <MapView
-            onMapReady={setMap}
-            onStyleChange={({ styleVersion }) =>
-              setMapStyleVersion(styleVersion)
+    <PanelLayout
+      chartsPanel={<ChartsPanel />}
+      mapPanel={
+        <div className="flex-1 relative min-w-0 h-full">
+          <Suspense
+            fallback={
+              <div className="w-full h-full flex items-center justify-center text-gray-500">
+                Loading map...
+              </div>
             }
-          />
-        </Suspense>
-        <StandLayer map={map} compartments={geojson} styleVersion={mapStyleVersion} />
-        <StandLegend />
+          >
+            <MapView
+              onMapReady={setMap}
+              onStyleChange={({ styleVersion }) =>
+                setMapStyleVersion(styleVersion)
+              }
+            />
+          </Suspense>
+          <StandLayer map={map} compartments={geojson} styleVersion={mapStyleVersion} />
+          <StandLegend />
 
-        {compartmentsError && (
-          <div className="absolute top-4 left-4 z-10 bg-red-50 border border-red-200 rounded-md px-3 py-2 text-xs text-red-700 max-w-xs">
-            {compartmentsError}
-          </div>
-        )}
-      </div>
-      <div className="w-[400px] border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex flex-col shrink-0">
-        <ChatPanel forestId={forestId} />
-      </div>
-    </div>
+          {compartmentsError && (
+            <div className="absolute top-4 left-4 z-10 bg-red-50 border border-red-200 rounded-md px-3 py-2 text-xs text-red-700 max-w-xs">
+              {compartmentsError}
+            </div>
+          )}
+        </div>
+      }
+      chatPanel={<ChatPanel forestId={forestId} />}
+    />
   );
 }

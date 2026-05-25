@@ -31,6 +31,10 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
     setError,
     clearChat,
     triggerRefetch,
+    selectStand,
+    addChartTab,
+    removeChartTab,
+    clearAllCharts,
   } = useForestStore();
 
   // Load existing conversation on mount
@@ -134,6 +138,18 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
           setStreaming(false);
           setToolCall(null);
         },
+        onSelectStand: (standId) => {
+          selectStand(standId);
+        },
+        onCreateChart: (chartConfig) => {
+          addChartTab(chartConfig as unknown as Parameters<typeof addChartTab>[0]);
+        },
+        onRemoveChart: (chartId) => {
+          removeChartTab(chartId);
+        },
+        onClearCharts: () => {
+          clearAllCharts();
+        },
       });
     },
     [
@@ -150,6 +166,10 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
       setError,
       clearChat,
       triggerRefetch,
+      selectStand,
+      addChartTab,
+      removeChartTab,
+      clearAllCharts,
     ]
   );
 

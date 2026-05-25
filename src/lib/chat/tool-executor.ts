@@ -19,12 +19,28 @@ export interface ToolContext {
   forestId: string;
   userId: string;
   supabase: SupabaseClient;
+  sendSse?: (event: string, data: unknown) => void;
 }
 
 type ToolHandler = (
   args: Record<string, unknown>,
   context: ToolContext
 ) => Promise<ToolResult>;
+
+/** Shared helper: invalidate all chart tabs for a forest after data mutations. */
+export async function invalidateChartTabs(ctx: ToolContext): Promise<void> {
+  try {
+    await ctx.supabase.from("chart_tabs").delete().eq("forest_id", ctx.forestId);
+  } catch (err) {
+    console.error("Failed to invalidate chart tabs:", err);
+  }
+  ctx.sendSse?.("clear_charts", {});
+}
+
+const VALID_CHART_TYPES = [
+  "bar", "pie", "line", "area", "stacked_bar", "scatter",
+  "radar", "donut", "horizontal_bar", "composed", "waterfall",
+];
 
 const toolHandlers: Record<string, ToolHandler> = {
   generate_plan: async (args, ctx) => {
@@ -42,6 +58,100 @@ const toolHandlers: Record<string, ToolHandler> = {
   remove_operation: async (args, ctx) => removeOperation(ctx.supabase, ctx.forestId, args.stand_id as string, args.year as number),
   check_harvest_sustainability: async (args, ctx) => checkSustainability(ctx.supabase, ctx.forestId, args.year as number | undefined),
   validate_plan: async (_args, ctx) => validatePlan(ctx.supabase, ctx.forestId),
+
+  // Phase 4: Visualization tools
+  create_chart: async (args, ctx) => {
+    const { chart_id, title, type, data, x_key, y_key, name_key, color_key, stand_dimension, y_key2 } = args;
+
+    if (!chart_id || typeof chart_id !== "string") {
+      return { success: false, result: "", error: "chart_id is required" };
+    }
+    if (!VALID_CHART_TYPES.includes(type as string)) {
+      return { success: false, result: "", error: `Invalid chart type: ${type}` };
+    }
+    if (!Array.isArray(data) || data.length === 0) {
+      return { success: false, result: "", error: "data must be a non-empty array" };
+    }
+
+    const chartTab = {
+      id: chart_id as string,
+      title: title as string,
+      type: type as string,
+      data: data as Record<string, unknown>[],
+      xKey: (x_key as string) ?? null,
+      yKey: y_key as string,
+      yKey2: (y_key2 as string) ?? null,
+      nameKey: (name_key as string) ?? null,
+      colorKey: (color_key as string) ?? null,
+      standDimension: (stand_dimension as string) ?? null,
+    };
+
+    // Persist to Supabase
+    try {
+      await ctx.supabase.from("chart_tabs").upsert({
+        forest_id: ctx.forestId,
+        chart_id: chartTab.id,
+        title: chartTab.title,
+        type: chartTab.type,
+        data: chartTab.data,
+        x_key: chartTab.xKey,
+        y_key: chartTab.yKey,
+        y_key2: chartTab.yKey2,
+        name_key: chartTab.nameKey,
+        color_key: chartTab.colorKey,
+        stand_dimension: chartTab.standDimension,
+      }, { onConflict: "forest_id, chart_id" });
+    } catch (err) {
+      console.error("Failed to persist chart tab:", err);
+    }
+
+    ctx.sendSse?.("create_chart", chartTab);
+
+    return {
+      success: true,
+      result: `✅ Chart "${title}" created (${type}, ${data.length} data points). The chart is now visible in the visualization panel.`,
+    };
+  },
+
+  select_stand: async (args, ctx) => {
+    const { stand_id } = args;
+    if (!stand_id || typeof stand_id !== "string") {
+      return { success: false, result: "", error: "stand_id is required" };
+    }
+    ctx.sendSse?.("select_stand", { stand_id });
+    return {
+      success: true,
+      result: `✅ Stand ${stand_id} selected on map.`,
+    };
+  },
+
+  remove_chart: async (args, ctx) => {
+    const { chart_id } = args;
+    if (!chart_id || typeof chart_id !== "string") {
+      return { success: false, result: "", error: "chart_id is required" };
+    }
+    try {
+      await ctx.supabase.from("chart_tabs")
+        .delete()
+        .eq("forest_id", ctx.forestId)
+        .eq("chart_id", chart_id);
+    } catch (err) {
+      console.error("Failed to remove chart tab:", err);
+    }
+    ctx.sendSse?.("remove_chart", { chart_id });
+    return {
+      success: true,
+      result: `✅ Chart "${chart_id}" removed.`,
+    };
+  },
+
+  clear_charts: async (_args, ctx) => {
+    await invalidateChartTabs(ctx);
+    return {
+      success: true,
+      result: "✅ All charts cleared from the visualization panel.",
+    };
+  },
 };
 
 export async function executeTool(

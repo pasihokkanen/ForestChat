@@ -5,7 +5,7 @@ import { updateSessionModel } from "@/lib/repos/chat-sessions";
 import { addMessage, getMessagesBySession as getChatMessages } from "@/lib/repos/chat-messages";
 import { createSseStream } from "@/lib/chat/sse";
 import { streamChat, resolveModel } from "@/lib/chat/openrouter";
-import { executeTool } from "@/lib/chat/tool-executor";
+import { executeTool, invalidateChartTabs, type ToolContext } from "@/lib/chat/tool-executor";
 import { getForestById } from "@/lib/repos/forests";
 import { env } from "@/lib/env";
 import { buildSystemPrompt } from "@/lib/chat/system-prompt";
@@ -130,6 +130,24 @@ export async function POST(request: NextRequest) {
       let finalContent = "";
       const maxIterations = 10;
 
+      const sendSse = (event: string, data: unknown) => {
+        send({ event, data } as { event: string; data: unknown });
+      };
+
+      const ctx: ToolContext = {
+        forestId: forest_id,
+        userId: user.id,
+        supabase,
+        sendSse,
+      };
+
+      const DATA_MUTATION_TOOLS = new Set([
+        "add_operation",
+        "remove_operation",
+        "batch_update_operations",
+        "generate_plan",
+      ]);
+
       for (let iteration = 0; iteration < maxIterations; iteration++) {
         const toolResults: Array<{ role: string; content: string }> = [];
 
@@ -152,7 +170,13 @@ export async function POST(request: NextRequest) {
               forestId: forest_id,
               userId: user.id,
               supabase,
+              sendSse,
             });
+
+            // Auto-invalidate charts when operations are modified
+            if (result.success && DATA_MUTATION_TOOLS.has(chunk.name)) {
+              await invalidateChartTabs(ctx);
+            }
 
             send({ event: "tool_end", data: { name: chunk.name, result: result.result, error: result.error } });
 

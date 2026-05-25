@@ -11,7 +11,16 @@
  */
 
 export interface SseEvent {
-  event: "chunk" | "tool_start" | "tool_end" | "done" | "error";
+  event:
+    | "chunk"
+    | "tool_start"
+    | "tool_end"
+    | "done"
+    | "error"
+    | "select_stand"
+    | "create_chart"
+    | "remove_chart"
+    | "clear_charts";
   data: {
     content?: string;
     name?: string;
@@ -21,6 +30,9 @@ export interface SseEvent {
     session_id?: string;
     model?: string | null;
     error?: string;
+    stand_id?: string;
+    chart_id?: string;
+    [key: string]: unknown;
   };
 }
 

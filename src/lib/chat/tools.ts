@@ -231,5 +231,78 @@ Returns issues list or "Plan looks good."`,
         },
       },
     },
+    {
+      type: "function",
+      function: {
+        name: "create_chart",
+        description: `Create a new chart tab in the visualization panel. Call this after computing chart data using query_operations, search_stands, or plan_summary.
+
+Supported chart types: bar, pie, line, area, stacked_bar, scatter, radar, donut, horizontal_bar, composed, waterfall.
+
+For bar/line/area: provide x_key (category axis) and y_key (value axis). Add color_key for stacked_bar.
+For pie/donut: provide name_key (slice label) and y_key (value).
+For scatter: x_key and y_key define the two numeric axes.
+For radar: x_key is the attribute dimension, y_key is the value.
+For composed: line+bar combo. y_key for bars, y_key2 for line.
+For waterfall: x_key=step labels, y_key=values (positive=gain, negative=loss).
+
+If chart categories map to stands, set stand_dimension to the key containing stand_id values — enables click-to-highlight-on-map.`,
+        parameters: {
+          type: "object",
+          properties: {
+            chart_id: { type: "string", description: "Unique ID, e.g. 'chart-yearly-income'" },
+            title: { type: "string", description: "Chart title" },
+            type: { type: "string", enum: ["bar", "pie", "line", "area", "stacked_bar", "scatter", "radar", "donut", "horizontal_bar", "composed", "waterfall"] },
+            data: { type: "array", items: { type: "object" }, description: "Array of data objects" },
+            x_key: { type: "string", description: "X-axis/category key" },
+            y_key: { type: "string", description: "Y-axis/value key" },
+            y_key2: { type: "string", description: "Secondary Y-axis key (composed charts)" },
+            name_key: { type: "string", description: "Slice label key (pie/donut)" },
+            color_key: { type: "string", description: "Color grouping key" },
+            stand_dimension: { type: "string", description: "Key mapping to stand_id for cross-panel interaction" },
+          },
+          required: ["chart_id", "title", "type", "data", "y_key"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "select_stand",
+        description: `Select and zoom to a stand on the map. The stand is highlighted with a gold outline and overlay, and a popup with stand data appears. The AI should call get_stand first to verify the stand exists.`,
+        parameters: {
+          type: "object",
+          properties: {
+            stand_id: { type: "string", description: "Stand ID to select, e.g. '7'" },
+          },
+          required: ["stand_id"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "remove_chart",
+        description: `Remove a single chart tab by its chart_id. Use when the user asks to remove a specific chart.`,
+        parameters: {
+          type: "object",
+          properties: {
+            chart_id: { type: "string", description: "Chart ID to remove, e.g. 'chart-species-distribution'" },
+          },
+          required: ["chart_id"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "clear_charts",
+        description: `Remove all chart tabs from the visualization panel. Use when the user wants to start over with charts.`,
+        parameters: {
+          type: "object",
+          properties: {},
+        },
+      },
+    },
   ];
 }

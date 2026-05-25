@@ -7,6 +7,7 @@ import type { CompartmentFeatureCollection } from "@/types/database";
 import StandPopup from "./StandPopup";
 import { fitBoundsToFeatures } from "@/lib/map/geojson";
 import { DEVELOPMENT_CLASS_COLORS } from "@/lib/map/styles";
+import { useForestStore } from "@/lib/store";
 
 // Age-based color palette (warm=young → cool=old)
 const AGE_COLORS = [
@@ -68,6 +69,12 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
   const popupRef = useRef<maplibregl.Popup | null>(null);
   const hasZoomed = useRef(false);
   const useAgeColor = shouldUseAgeColoring(compartments.features);
+
+  // Zustand state for cross-panel interaction
+  const selectedStandId = useForestStore((s) => s.selectedStandId);
+  const highlightedStandIds = useForestStore((s) => s.highlightedStandIds);
+  const selectStand = useForestStore((s) => s.selectStand);
+  const setHighlightedStands = useForestStore((s) => s.setHighlightedStands);
 
   // Build MapLibre match expression for fill-color
   const buildMatchExpression = useCallback((): maplibregl.Expression => {
@@ -140,7 +147,17 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
       if (!feature) return;
 
       const props = feature.properties as Record<string, unknown>;
+      const standId = props.stand_id as string;
       const lngLat: [number, number] = [e.lngLat.lng, e.lngLat.lat];
+
+      // Toggle selection — clicking same stand deselects
+      if (selectedStandId === standId) {
+        selectStand(null);
+        setHighlightedStands([]);
+      } else {
+        selectStand(standId);
+        setHighlightedStands([standId]);
+      }
 
       if (!popupRef.current) {
         popupRef.current = new maplibregl.Popup({
@@ -180,6 +197,8 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
       });
       if (features.length === 0) {
         popupRef.current?.remove();
+        selectStand(null);
+        setHighlightedStands([]);
       }
     };
 
@@ -201,6 +220,30 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
           "fill-color": buildMatchExpression() as any,
           "fill-opacity": 0.6,
           "fill-outline-color": "#333",
+        },
+      });
+
+      // Highlight layers — gold outline and overlay on selected/highlighted stands
+      map.addLayer({
+        id: "stands-highlight-fill",
+        type: "fill",
+        source: SOURCE_ID,
+        filter: ["==", ["get", "stand_id"], ""], // empty initially
+        paint: {
+          "fill-color": "#FFD700",
+          "fill-opacity": 0.3,
+        },
+      });
+
+      map.addLayer({
+        id: "stands-highlight",
+        type: "line",
+        source: SOURCE_ID,
+        filter: ["==", ["get", "stand_id"], ""], // empty initially
+        paint: {
+          "line-color": "#FFD700",
+          "line-width": 4,
+          "line-opacity": 0.9,
         },
       });
     };
@@ -235,6 +278,57 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
       source.setData(compartments);
     }
   }, [map, compartments]);
+
+  // Update highlight layer filters when selection changes (P4.6)
+  useEffect(() => {
+    if (!map) return;
+    if (!map.getLayer("stands-highlight")) return;
+
+    const ids = highlightedStandIds.length > 0
+      ? highlightedStandIds
+      : selectedStandId
+        ? [selectedStandId]
+        : [];
+
+    const filter = ids.length > 0
+      ? (
+          ["match", ["get", "stand_id"], ["literal", ids], true, false] as maplibregl.Expression
+        )
+      : (["==", ["get", "stand_id"], ""] as maplibregl.Expression);
+
+    map.setFilter("stands-highlight", filter);
+    map.setFilter("stands-highlight-fill", filter);
+  }, [map, selectedStandId, highlightedStandIds, styleVersion]);
+
+  // Zoom to selected stand when selection changes via AI or chart click
+  useEffect(() => {
+    if (!map || !selectedStandId) return;
+
+    // Find the feature for this stand
+    const source = map.getSource("stands") as maplibregl.GeoJSONSource | undefined;
+    if (!source) return;
+
+    try {
+      const features = map.querySourceFeatures("stands", {
+        filter: ["==", ["get", "stand_id"], selectedStandId],
+      });
+      if (features.length > 0 && features[0].geometry) {
+        // Compute bounds from feature geometry
+        const bounds = new maplibregl.LngLatBounds();
+        const geom = features[0].geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
+        const coords =
+          geom.type === "Polygon"
+            ? geom.coordinates[0]
+            : geom.coordinates.flatMap((ring) => ring[0]);
+        for (const [lng, lat] of coords as [number, number][]) {
+          bounds.extend([lng, lat]);
+        }
+        map.fitBounds(bounds, { padding: 80, maxZoom: 16, duration: 800 });
+      }
+    } catch {
+      // Silently handle geometry format issues
+    }
+  }, [map, selectedStandId]);
 
   // Auto-zoom to fit stands on first load
   useEffect(() => {

@@ -1,6 +1,15 @@
 // src/lib/chat/sse-client.ts — Browser-side SSE parser
 
-export type SseEventType = "chunk" | "tool_start" | "tool_end" | "done" | "error";
+export type SseEventType =
+  | "chunk"
+  | "tool_start"
+  | "tool_end"
+  | "done"
+  | "error"
+  | "select_stand"
+  | "create_chart"
+  | "remove_chart"
+  | "clear_charts";
 
 interface SseCallbacks {
   onChunk?: (text: string) => void;
@@ -8,6 +17,10 @@ interface SseCallbacks {
   onToolEnd?: (name: string, result: string, error?: string) => void;
   onDone?: (messageId: string, sessionId: string, model?: string | null) => void;
   onError?: (error: string) => void;
+  onSelectStand?: (standId: string) => void;
+  onCreateChart?: (chartConfig: Record<string, unknown>) => void;
+  onRemoveChart?: (chartId: string) => void;
+  onClearCharts?: () => void;
 }
 
 export async function streamChat(
@@ -67,6 +80,18 @@ export async function streamChat(
               break;
             case "error":
               callbacks.onError?.(data.error);
+              break;
+            case "select_stand":
+              callbacks.onSelectStand?.(data.stand_id as string);
+              break;
+            case "create_chart":
+              callbacks.onCreateChart?.(data);
+              break;
+            case "remove_chart":
+              callbacks.onRemoveChart?.(data.chart_id as string);
+              break;
+            case "clear_charts":
+              callbacks.onClearCharts?.();
               break;
           }
         } catch {
