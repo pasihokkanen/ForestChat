@@ -204,7 +204,7 @@ add_operation / remove_operation / batch_update_operations / generate_plan
   → User can ask AI to recreate charts with fresh data
 ```
 
-The invalidation is implemented as a shared `invalidateCharts(ctx)` helper in `tool-executor.ts`, called by each mutation handler after a successful operation. This centralizes the logic and ensures consistency — no tool can forget to invalidate.
+The invalidation is implemented as a shared `invalidateChartTabs(ctx)` helper in `tool-executor.ts`, called by each mutation handler after a successful operation. This centralizes the logic and ensures consistency — no tool can forget to invalidate.
 
 **User experience:** When the user says "add a thinning for stand 7 in 2028," the charts briefly disappear. The AI's response can optionally recreate the most relevant chart(s) in the same turn. If not, the user simply asks "show yearly income as a bar chart again" and gets the refreshed data.
 
@@ -582,9 +582,6 @@ export interface VisualizationSlice {
   
   highlightedStandIds: string[];
   setHighlightedStands: (ids: string[]) => void;
-  
-  // Chart tabs loaded from API (page mount)
-  setChartTabs: (tabs: ChartTab[]) => void;
 }
 ```
 
@@ -1636,7 +1633,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
 - Modify: `src/components/charts/ChartsPanel.tsx` — tabs + content + fullscreen
 - Modify: `src/components/charts/ChartTabBar.tsx` — interactive tabs
 
-|**ChartsPanel:**
+**ChartsPanel:**
 
 ```tsx
 export default function ChartsPanel() {
