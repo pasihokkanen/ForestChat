@@ -2,7 +2,7 @@
 -- ForestChat Phase 4: Interactive Visualization Dashboard
 -- Adds chart_tabs table for persisting AI-generated charts across devices/sessions
 
-CREATE TABLE chart_tabs (
+CREATE TABLE IF NOT EXISTS chart_tabs (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   forest_id       UUID NOT NULL REFERENCES forests(id) ON DELETE CASCADE,
   chart_id        TEXT NOT NULL,               -- AI-generated chart ID, e.g. "chart-yearly-income"
