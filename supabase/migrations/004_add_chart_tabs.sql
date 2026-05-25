@@ -24,8 +24,10 @@ CREATE INDEX IF NOT EXISTS idx_chart_tabs_forest ON chart_tabs(forest_id);
 
 ALTER TABLE chart_tabs ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Owner full access on chart_tabs" ON chart_tabs;
 CREATE POLICY "Owner full access on chart_tabs" ON chart_tabs
   FOR ALL USING (forest_id IN (SELECT id FROM forests WHERE owner_id = auth.uid()));
 
+DROP POLICY IF EXISTS "Shared read on chart_tabs" ON chart_tabs;
 CREATE POLICY "Shared read on chart_tabs" ON chart_tabs
   FOR SELECT USING (forest_id IN (SELECT forest_id FROM plan_shares WHERE shared_with = auth.uid()));
