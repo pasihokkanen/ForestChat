@@ -269,7 +269,7 @@ If chart categories map to stands, set stand_dimension to the key containing sta
       type: "function",
       function: {
         name: "select_stand",
-        description: `Select and zoom to a stand on the map. The stand is highlighted with a gold outline and overlay, and a popup with stand data appears. The AI should call get_stand first to verify the stand exists.`,
+        description: `Select and zoom to a stand on the map. The stand is highlighted with a gold outline and a popup with all stand data appears. Just select the stand — don't also call get_stand or describe the stand data in text, the map popup already shows everything.`,
         parameters: {
           type: "object",
           properties: {
