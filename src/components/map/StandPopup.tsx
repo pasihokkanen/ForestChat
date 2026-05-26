@@ -8,13 +8,14 @@ import {
 export interface StandPopupProps {
   properties: CompartmentFeature["properties"];
   lngLat: [number, number];
+  onClose?: () => void;
 }
 
 /**
  * Popup content for a clicked forest stand.
  * Displays key attributes in a compact card.
  */
-export default function StandPopup({ properties }: StandPopupProps) {
+export default function StandPopup({ properties, onClose }: StandPopupProps) {
   const {
     stand_id,
     main_species,
@@ -26,7 +27,15 @@ export default function StandPopup({ properties }: StandPopupProps) {
   } = properties;
 
   return (
-    <div className="bg-white dark:bg-gray-900 rounded-lg shadow-lg p-3 min-w-[200px] text-sm text-gray-900 dark:text-gray-100">
+    <div className="bg-white dark:bg-gray-900 rounded-lg shadow-lg p-3 min-w-[200px] text-sm text-gray-900 dark:text-gray-100 relative">
+      {onClose && (
+        <button
+          onClick={onClose}
+          className="absolute top-1 right-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-lg leading-none w-5 h-5 flex items-center justify-center rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+        >
+          ×
+        </button>
+      )}
       <h3 className="font-semibold text-base mb-2 border-b pb-1">
         Stand {stand_id}
       </h3>

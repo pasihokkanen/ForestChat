@@ -113,6 +113,7 @@ function showCustomPopup(
         volume_m3: (props.volume_m3 as number) ?? null,
       }}
       lngLat={lngLat}
+      onClose={() => hideCustomPopup(popupRef)}
     />,
   );
 
