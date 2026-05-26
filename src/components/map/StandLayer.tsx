@@ -57,8 +57,8 @@ function shouldUseAgeColoring(
 }
 
 /**
- * Create or update a popup for a given stand at the specified coordinates.
- * Handles React root lifecycle internally.
+ * Create a fresh popup for a given stand at the specified coordinates.
+ * Always creates a new popup instance (avoids stale ref issues after removal).
  */
 function showPopupForStand(
   map: maplibregl.Map,
@@ -66,13 +66,14 @@ function showPopupForStand(
   props: Record<string, unknown>,
   lngLat: [number, number],
 ) {
-  if (!popupRef.current) {
-    popupRef.current = new maplibregl.Popup({
-      closeButton: true,
-      closeOnClick: false,
-      maxWidth: "300px",
-    });
-  }
+  // Remove any existing popup first
+  popupRef.current?.remove();
+
+  const popup = new maplibregl.Popup({
+    closeButton: true,
+    closeOnClick: false,
+    maxWidth: "300px",
+  });
 
   const container = document.createElement("div");
   const root = createRoot(container);
@@ -93,7 +94,8 @@ function showPopupForStand(
     />,
   );
 
-  popupRef.current.setLngLat(lngLat).setDOMContent(container).addTo(map);
+  popup.setLngLat(lngLat).setDOMContent(container).addTo(map);
+  popupRef.current = popup;
 }
 
 /**
@@ -178,38 +180,37 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
       map.getCanvas().style.cursor = "";
     };
 
-    const handleStandClick = (e: maplibregl.MapLayerMouseEvent) => {
-      const feature = e.features?.[0];
-      if (!feature) return;
-
-      const props = feature.properties as Record<string, unknown>;
-      const standId = props.stand_id as string;
-      const lngLat: [number, number] = [e.lngLat.lng, e.lngLat.lat];
-
-      // Track that this selection came from a map click (prevents zoom)
-      clickedStandRef.current = standId;
-
-      // Toggle selection — clicking same stand deselects
-      if (selectedStandId === standId) {
-        selectStand(null);
-        setHighlightedStands([]);
-        return; // popup already removed by handleBackgroundClick
-      }
-
-      selectStand(standId);
-      setHighlightedStands([standId]);
-
-      // Show popup at click coordinates immediately (no zoom)
-      showPopupForStand(map, popupRef, props, lngLat);
-    };
-
-    const handleBackgroundClick = (e: maplibregl.MapMouseEvent) => {
-      // Only query if layer exists (avoids race condition on first load)
+    const handleMapClick = (e: maplibregl.MapMouseEvent) => {
+      // Query features at click point — works reliably for both stands and background
       if (!map.getLayer(LAYER_ID)) return;
       const features = map.queryRenderedFeatures(e.point, {
         layers: [LAYER_ID],
       });
-      if (features.length === 0) {
+
+      if (features.length > 0) {
+        // Clicked on a stand
+        const feature = features[0];
+        const props = feature.properties as Record<string, unknown>;
+        const standId = props.stand_id as string;
+        const lngLat: [number, number] = [e.lngLat.lng, e.lngLat.lat];
+
+        // Track that this selection came from a map click (prevents zoom)
+        clickedStandRef.current = standId;
+
+        // Toggle selection — clicking same stand deselects
+        if (selectedStandId === standId) {
+          selectStand(null);
+          setHighlightedStands([]);
+          return; // popup already removed below
+        }
+
+        selectStand(standId);
+        setHighlightedStands([standId]);
+
+        // Show popup at click coordinates immediately (no zoom)
+        showPopupForStand(map, popupRef, props, lngLat);
+      } else {
+        // Clicked on background — close popup and deselect
         popupRef.current?.remove();
         selectStand(null);
         setHighlightedStands([]);
@@ -270,17 +271,15 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
       map.once("style.load", addStandLayer);
     }
 
-    // Event handlers — background click is safe (guards with getLayer)
+    // Event handlers
     map.on("mouseenter", LAYER_ID, setPointer);
     map.on("mouseleave", LAYER_ID, resetCursor);
-    map.on("click", LAYER_ID, handleStandClick);
-    map.on("click", handleBackgroundClick);
+    map.on("click", handleMapClick);
 
     return () => {
       map.off("mouseenter", LAYER_ID, setPointer);
       map.off("mouseleave", LAYER_ID, resetCursor);
-      map.off("click", LAYER_ID, handleStandClick);
-      map.off("click", handleBackgroundClick);
+      map.off("click", handleMapClick);
       popupRef.current?.remove();
     };
   }, [map, compartments, buildMatchExpression, styleVersion]);
