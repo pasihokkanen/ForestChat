@@ -69,19 +69,21 @@ function showPopupForStand(
   // Remove any existing popup first
   popupRef.current?.remove();
 
+  const standId = props.stand_id as string;
   const popup = new maplibregl.Popup({
     closeButton: true,
     closeOnClick: false,
     maxWidth: "300px",
   });
 
+  // Use React to render the popup content
   const container = document.createElement("div");
   const root = createRoot(container);
   root.render(
     <StandPopup
       properties={{
         id: props.id as string,
-        stand_id: props.stand_id as string,
+        stand_id: standId,
         main_species: (props.main_species as string) ?? null,
         development_class:
           (props.development_class as string) ?? null,
@@ -96,6 +98,9 @@ function showPopupForStand(
 
   popup.setLngLat(lngLat).setDOMContent(container).addTo(map);
   popupRef.current = popup;
+
+  // Debug: log popup creation (visible in browser console)
+  console.log("[StandLayer] Popup created for stand", standId, "at", lngLat);
 }
 
 /**
@@ -181,11 +186,17 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
     };
 
     const handleMapClick = (e: maplibregl.MapMouseEvent) => {
+      console.log("[StandLayer] Map clicked at", e.lngLat, "point", e.point);
+
       // Query features at click point — works reliably for both stands and background
-      if (!map.getLayer(LAYER_ID)) return;
+      if (!map.getLayer(LAYER_ID)) {
+        console.log("[StandLayer] No layer yet");
+        return;
+      }
       const features = map.queryRenderedFeatures(e.point, {
         layers: [LAYER_ID],
       });
+      console.log("[StandLayer] Features at click:", features.length);
 
       if (features.length > 0) {
         // Clicked on a stand
