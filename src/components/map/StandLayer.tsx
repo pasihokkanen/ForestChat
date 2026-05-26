@@ -68,6 +68,7 @@ function shouldUseAgeColoring(
 export default function StandLayer({ map, compartments, styleVersion = 0 }: StandLayerProps) {
   const popupRef = useRef<maplibregl.Popup | null>(null);
   const hasZoomed = useRef(false);
+  const skipZoomRef = useRef(false);
   const useAgeColor = shouldUseAgeColoring(compartments.features);
 
   // Zustand state for cross-panel interaction
@@ -152,9 +153,11 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
 
       // Toggle selection — clicking same stand deselects
       if (selectedStandId === standId) {
+        skipZoomRef.current = true;
         selectStand(null);
         setHighlightedStands([]);
       } else {
+        skipZoomRef.current = true;
         selectStand(standId);
         setHighlightedStands([standId]);
       }
@@ -309,8 +312,15 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
   }, [map, selectedStandId, highlightedStandIds, styleVersion]);
 
   // Zoom to selected stand when selection changes via AI or chart click
+  // (NOT on direct map click — those are handled separately with skipZoomRef)
   useEffect(() => {
     if (!map || !selectedStandId) return;
+
+    // If selection came from map click, skip zoom but reset the flag
+    if (skipZoomRef.current) {
+      skipZoomRef.current = false;
+      return;
+    }
 
     // Guard: source must exist (can be missing during layout transitions)
     let source: maplibregl.GeoJSONSource | undefined;
@@ -337,6 +347,39 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
           bounds.extend([lng, lat]);
         }
         map.fitBounds(bounds, { padding: 80, maxZoom: 16, duration: 800 });
+
+        // Also show the popup for AI-initiated selections
+        const center = bounds.getCenter();
+        const props = features[0].properties as Record<string, unknown> | undefined;
+        if (props) {
+          const lngLat: [number, number] = [center.lng, center.lat];
+          if (!popupRef.current) {
+            popupRef.current = new maplibregl.Popup({
+              closeButton: true,
+              closeOnClick: false,
+              maxWidth: "300px",
+            });
+          }
+          const container = document.createElement("div");
+          const root = createRoot(container);
+          root.render(
+            <StandPopup
+              properties={{
+                id: props.id as string,
+                stand_id: props.stand_id as string,
+                main_species: (props.main_species as string) ?? null,
+                development_class:
+                  (props.development_class as string) ?? null,
+                site_type: (props.site_type as string) ?? null,
+                area_ha: (props.area_ha as number) ?? null,
+                age_years: (props.age_years as number) ?? null,
+                volume_m3: (props.volume_m3 as number) ?? null,
+              }}
+              lngLat={lngLat}
+            />,
+          );
+          popupRef.current.setLngLat(lngLat).setDOMContent(container).addTo(map);
+        }
       }
     } catch {
       // Silently handle geometry format issues
