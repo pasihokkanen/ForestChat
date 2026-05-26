@@ -84,7 +84,7 @@ Returns: operations per stand, key metrics.`,
       type: "function",
       function: {
         name: "plan_summary",
-        description: "Get a comprehensive summary of the current forest plan: total volume, annual growth, stumpage value, operations by period (P1: 2026-2035, P2: 2036-2045), income, costs, and net return.",
+        description: "Get plan summary data (volume, growth, income, costs). Returns structured data — don't repeat the numbers in text as they're already shown in the plan summary UI panel. Just acknowledge briefly.",
         parameters: {
           type: "object",
           properties: {},
@@ -235,7 +235,7 @@ Returns issues list or "Plan looks good."`,
       type: "function",
       function: {
         name: "create_chart",
-        description: `Create a new chart tab in the visualization panel. Call this after computing chart data using query_operations, search_stands, or plan_summary.
+        description: `Create a new chart tab in the visualization panel. Call this after computing chart data using query_operations, search_stands, or plan_summary. Just create the chart — don't also describe its contents in text, the chart is already visible in the UI.
 
 Supported chart types: bar, pie, line, area, stacked_bar, scatter, radar, donut, horizontal_bar, composed, waterfall.
 
