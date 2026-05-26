@@ -126,7 +126,12 @@ function showCustomPopup(
   map.getContainer().appendChild(el);
   popupRef.current = el;
 
-  console.log("[StandLayer] Custom popup shown for stand", standId, "at pixel", point.x, point.y, "lngLat", lngLat);
+  console.log("[StandLayer] Custom popup shown for stand", standId, "at pixel", Math.round(point.x), Math.round(point.y), "el in DOM:", !!el.parentElement);
+  // Debug: log popup dimensions
+  requestAnimationFrame(() => {
+    const rect = el.getBoundingClientRect();
+    console.log("[StandLayer] Popup rect:", Math.round(rect.left), Math.round(rect.top), Math.round(rect.width), "x", Math.round(rect.height));
+  });
 }
 
 /**
