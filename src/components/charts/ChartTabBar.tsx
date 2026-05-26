@@ -25,6 +25,7 @@ export default function ChartTabBar({
         {tabs.map((tab) => (
           <button
             key={tab.id}
+            title={tab.title}
             onClick={() => onSelect(tab.id)}
             className={`flex items-center gap-1 px-3 py-2 text-xs border-r border-gray-200 dark:border-gray-700 whitespace-nowrap shrink-0 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${
               activeId === tab.id
