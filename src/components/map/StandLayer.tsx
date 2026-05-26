@@ -60,25 +60,45 @@ function shouldUseAgeColoring(
  * Create a fresh popup for a given stand at the specified coordinates.
  * Always creates a new popup instance (avoids stale ref issues after removal).
  */
-function showPopupForStand(
+/**
+ * Show a custom popup overlay for a forest stand.
+ * Uses a fixed-position overlay on the map container instead of MapLibre Popup,
+ * which has proven unreliable in this environment.
+ */
+function showCustomPopup(
   map: maplibregl.Map,
-  popupRef: React.MutableRefObject<maplibregl.Popup | null>,
+  popupRef: React.MutableRefObject<HTMLElement | null>,
   props: Record<string, unknown>,
   lngLat: [number, number],
 ) {
-  // Remove any existing popup first
-  popupRef.current?.remove();
+  // Remove any existing custom popup
+  if (popupRef.current) {
+    popupRef.current.remove();
+    popupRef.current = null;
+  }
 
   const standId = props.stand_id as string;
-  const popup = new maplibregl.Popup({
-    closeButton: true,
-    closeOnClick: false,
-    maxWidth: "300px",
-  });
 
-  // Use React to render the popup content
-  const container = document.createElement("div");
-  const root = createRoot(container);
+  // Create overlay container
+  const el = document.createElement("div");
+  el.className = "forestchat-custom-popup";
+  el.style.cssText = `
+    position: absolute;
+    z-index: 1000;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+    padding: 12px;
+    min-width: 200px;
+    font-size: 13px;
+    color: #111;
+    pointer-events: auto;
+    transform: translate(-50%, -100%);
+    margin-top: -10px;
+  `;
+
+  // Render popup content via React
+  const root = createRoot(el);
   root.render(
     <StandPopup
       properties={{
@@ -96,11 +116,26 @@ function showPopupForStand(
     />,
   );
 
-  popup.setLngLat(lngLat).setDOMContent(container).addTo(map);
-  popupRef.current = popup;
+  // Position the element using map.project()
+  const point = map.project(lngLat);
+  el.style.left = point.x + "px";
+  el.style.top = point.y + "px";
 
-  // Debug: log popup creation (visible in browser console)
-  console.log("[StandLayer] Popup created for stand", standId, "at", lngLat);
+  // Append to map container
+  map.getContainer().appendChild(el);
+  popupRef.current = el;
+
+  console.log("[StandLayer] Custom popup shown for stand", standId, "at pixel", point.x, point.y, "lngLat", lngLat);
+}
+
+/**
+ * Remove the custom popup overlay.
+ */
+function hideCustomPopup(popupRef: React.MutableRefObject<HTMLElement | null>) {
+  if (popupRef.current) {
+    popupRef.current.remove();
+    popupRef.current = null;
+  }
 }
 
 /**
@@ -108,7 +143,7 @@ function showPopupForStand(
  * click-to-inspect via popups.
  */
 export default function StandLayer({ map, compartments, styleVersion = 0 }: StandLayerProps) {
-  const popupRef = useRef<maplibregl.Popup | null>(null);
+  const popupRef = useRef<HTMLElement | null>(null);
   const hasZoomed = useRef(false);
   const clickedStandRef = useRef<string | null>(null); // non-null = selection came from map click
   const useAgeColor = shouldUseAgeColoring(compartments.features);
@@ -220,10 +255,10 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
         setHighlightedStands([standId]);
 
         // Show popup at click coordinates immediately (no zoom)
-        showPopupForStand(map, popupRef, props, lngLat);
+        showCustomPopup(map, popupRef, props, lngLat);
       } else {
         // Clicked on background — close popup and deselect
-        popupRef.current?.remove();
+        hideCustomPopup(popupRef);
         selectStand(null);
         setHighlightedStands([]);
         clickedStandRef.current = null;
@@ -292,7 +327,7 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
       map.off("mouseenter", LAYER_ID, setPointer);
       map.off("mouseleave", LAYER_ID, resetCursor);
       map.off("click", handleMapClick);
-      popupRef.current?.remove();
+      hideCustomPopup(popupRef);
     };
   }, [map, compartments, buildMatchExpression, styleVersion]);
 
@@ -381,7 +416,7 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
           const onMoveEnd = () => {
             // Guard: ignore if a different stand was selected during the animation
             if (useForestStore.getState().selectedStandId !== standId) return;
-            showPopupForStand(map, popupRef, props, lngLat);
+            showCustomPopup(map, popupRef, props, lngLat);
           };
           // Use once() so it auto-removes after firing
           map.once("moveend", onMoveEnd);
