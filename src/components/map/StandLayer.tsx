@@ -312,7 +312,7 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
 
       const filter = ids.length > 0
         ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (["match", ["get", "stand_id"], ["literal", ids], true, false] as any)
+          (["in", ["get", "stand_id"], ["literal", ids]] as any)
         : // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (["==", ["get", "stand_id"], ""] as any);
 
