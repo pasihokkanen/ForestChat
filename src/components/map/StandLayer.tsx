@@ -198,7 +198,8 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
         clickedStandRef.current = standId;
 
         // Toggle selection — clicking same stand deselects
-        if (selectedStandId === standId) {
+        // Read fresh from store (handler closure has stale value)
+        if (useForestStore.getState().selectedStandId === standId) {
           selectStand(null);
           setHighlightedStands([]);
           return; // popup already removed below
