@@ -2,10 +2,7 @@
 
 import { useEffect, useRef, useCallback } from "react";
 import maplibregl from "maplibre-gl";
-import { createRoot } from "react-dom/client";
-import { render } from "react-dom";
 import type { CompartmentFeatureCollection } from "@/types/database";
-import StandPopup from "./StandPopup";
 import { fitBoundsToFeatures } from "@/lib/map/geojson";
 import { DEVELOPMENT_CLASS_COLORS } from "@/lib/map/styles";
 import { useForestStore } from "@/lib/store";
@@ -107,26 +104,37 @@ function showCustomPopup(
   map.getContainer().appendChild(el);
   popupRef.current = el;
 
-  // Render popup content via React (using synchronous legacy render — createRoot
-  // in Next.js 16's React 18 defers DOM commit, resulting in 0x0 dimensions)
-  render(
-    <StandPopup
-      properties={{
-        id: props.id as string,
-        stand_id: standId,
-        main_species: (props.main_species as string) ?? null,
-        development_class:
-          (props.development_class as string) ?? null,
-        site_type: (props.site_type as string) ?? null,
-        area_ha: (props.area_ha as number) ?? null,
-        age_years: (props.age_years as number) ?? null,
-        volume_m3: (props.volume_m3 as number) ?? null,
-      }}
-      lngLat={lngLat}
-      onClose={() => hideCustomPopup(popupRef)}
-    />,
-    el,
-  );
+  // Build popup HTML directly (synchronous — avoids createRoot deferral in this React build)
+  const species = (props.main_species as string) ?? "—";
+  const devClass = (props.development_class as string) ?? "—";
+  const siteType = (props.site_type as string) ?? "—";
+  const area = (props.area_ha as number) != null ? (props.area_ha as number).toFixed(1) : "—";
+  const age = (props.age_years as number) != null ? `${props.age_years as number} yr` : "—";
+  const volume = (props.volume_m3 as number) != null ? (props.volume_m3 as number).toFixed(0) : "—";
+
+  el.innerHTML = `
+    <div style="position:relative">
+      <button class="popup-close" style="position:absolute;top:1px;right:1px;border:none;background:transparent;font-size:18px;cursor:pointer;color:#999;line-height:1;width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:4px">×</button>
+      <h3 style="font-weight:600;font-size:15px;margin:0 0 8px 0;padding-bottom:4px;border-bottom:1px solid #e5e7eb">Stand ${standId}</h3>
+      <dl style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin:0;font-size:13px">
+        <dt style="color:#6b7280">Main species</dt><dd style="margin:0;color:#111">${species}</dd>
+        <dt style="color:#6b7280">Development class</dt><dd style="margin:0;color:#111">${devClass}</dd>
+        <dt style="color:#6b7280">Site type</dt><dd style="margin:0;color:#111">${siteType}</dd>
+        <dt style="color:#6b7280">Area (ha)</dt><dd style="margin:0;color:#111">${area}</dd>
+        <dt style="color:#6b7280">Age</dt><dd style="margin:0;color:#111">${age}</dd>
+        <dt style="color:#6b7280">Volume (m³)</dt><dd style="margin:0;color:#111">${volume}</dd>
+      </dl>
+    </div>
+  `;
+
+  // Wire up close button
+  const closeBtn = el.querySelector(".popup-close") as HTMLElement | null;
+  if (closeBtn) {
+    closeBtn.onclick = (e) => {
+      e.stopPropagation();
+      hideCustomPopup(popupRef);
+    };
+  }
 
   console.log("[StandLayer] Custom popup shown for stand", standId, "at pixel", Math.round(point.x), Math.round(point.y), "el in DOM:", !!el.parentElement);
   // Debug: log popup dimensions
