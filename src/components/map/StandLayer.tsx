@@ -143,7 +143,9 @@ function showCustomPopup(
   // Debug: log popup dimensions and content
   console.log("[StandLayer] Popup childNodes:", el.childNodes.length, "innerHTML length:", el.innerHTML.length);
   console.log("[StandLayer] Popup scrollWidth/Height:", el.scrollWidth, el.scrollHeight);
-  console.log("[StandLayer] Popup computed display:", getComputedStyle(el).display);
+  console.log("[StandLayer] Popup computed display/visibility/opacity:", getComputedStyle(el).display, getComputedStyle(el).visibility, getComputedStyle(el).opacity);
+  console.log("[StandLayer] Popup computed width/height from style:", getComputedStyle(el).width, getComputedStyle(el).height);
+  console.log("[StandLayer] Popup offsetParent:", !!el.offsetParent);
   requestAnimationFrame(() => {
     const rect = el.getBoundingClientRect();
     console.log("[StandLayer] Popup rect:", Math.round(rect.left), Math.round(rect.top), Math.round(rect.width), "x", Math.round(rect.height));
