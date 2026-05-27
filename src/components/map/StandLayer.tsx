@@ -140,10 +140,14 @@ function showCustomPopup(
   }
 
   console.log("[StandLayer] Custom popup shown for stand", standId, "at pixel", Math.round(point.x), Math.round(point.y), "el in DOM:", !!el.parentElement);
-  // Debug: log popup dimensions
+  // Debug: log popup dimensions and content
+  console.log("[StandLayer] Popup childNodes:", el.childNodes.length, "innerHTML length:", el.innerHTML.length);
+  console.log("[StandLayer] Popup scrollWidth/Height:", el.scrollWidth, el.scrollHeight);
+  console.log("[StandLayer] Popup computed display:", getComputedStyle(el).display);
   requestAnimationFrame(() => {
     const rect = el.getBoundingClientRect();
     console.log("[StandLayer] Popup rect:", Math.round(rect.left), Math.round(rect.top), Math.round(rect.width), "x", Math.round(rect.height));
+    console.log("[StandLayer] Popup children rects:", Array.from(el.children).map(c => `${c.tagName}:${c.getBoundingClientRect().width}x${c.getBoundingClientRect().height}`).join(", "));
   });
 }
 
