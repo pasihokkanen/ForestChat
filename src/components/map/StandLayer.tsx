@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useCallback } from "react";
 import maplibregl from "maplibre-gl";
-import { createRoot, flushSync } from "react-dom/client";
+import { createRoot } from "react-dom/client";
+import { flushSync } from "react-dom";
 import type { CompartmentFeatureCollection } from "@/types/database";
 import StandPopup from "./StandPopup";
 import { fitBoundsToFeatures } from "@/lib/map/geojson";
