@@ -49,7 +49,8 @@ export default function ForestView({ forestId }: ForestViewProps) {
     loading: compartmentsLoading,
     error: compartmentsError,
   } = useCompartments(forestId);
-  const { setForest, setCompartments } = useForestStore();
+  const setForest = useForestStore((s) => s.setForest);
+  const setCompartments = useForestStore((s) => s.setCompartments);
 
   // Load chart tabs from Supabase
   useCharts(forestId);
