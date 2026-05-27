@@ -55,13 +55,8 @@ function shouldUseAgeColoring(
 }
 
 /**
- * Create a fresh popup for a given stand at the specified coordinates.
- * Always creates a new popup instance (avoids stale ref issues after removal).
- */
-/**
  * Show a custom popup overlay for a forest stand.
- * Uses a fixed-position overlay on the map container instead of MapLibre Popup,
- * which has proven unreliable in this environment.
+ * Uses a fixed-position overlay on the map container.
  */
 function showCustomPopup(
   map: maplibregl.Map,
@@ -95,9 +90,7 @@ function showCustomPopup(
     margin-top: -10px;
   `;
 
-  // Position and append to DOM BEFORE React render
-  // (createRoot.render may be deferred in this environment — append first ensures
-// Position element using map.project() for pixel coords
+  // Position and append to DOM
   const point = map.project(lngLat);
   // Append to document.body with fixed positioning to avoid MapLibre container stacking issues
   const containerRect = map.getContainer().getBoundingClientRect();
@@ -107,7 +100,7 @@ function showCustomPopup(
   document.body.appendChild(el);
   popupRef.current = el;
 
-  // Build popup HTML directly (synchronous — avoids createRoot deferral in this React build)
+  // Build popup HTML directly (synchronous)
   const species = (props.main_species as string) ?? "—";
   const devClass = (props.development_class as string) ?? "—";
   const siteType = (props.site_type as string) ?? "—";
@@ -138,19 +131,6 @@ function showCustomPopup(
       hideCustomPopup(popupRef);
     };
   }
-
-  console.log("[StandLayer] Custom popup shown for stand", standId, "at pixel", Math.round(point.x), Math.round(point.y), "el in DOM:", !!el.parentElement);
-  // Debug: log popup dimensions and content
-  console.log("[StandLayer] Popup childNodes:", el.childNodes.length, "innerHTML length:", el.innerHTML.length);
-  console.log("[StandLayer] Popup scrollWidth/Height:", el.scrollWidth, el.scrollHeight);
-  console.log("[StandLayer] Popup computed display/visibility/opacity:", getComputedStyle(el).display, getComputedStyle(el).visibility, getComputedStyle(el).opacity);
-  console.log("[StandLayer] Popup computed width/height from style:", getComputedStyle(el).width, getComputedStyle(el).height);
-  console.log("[StandLayer] Popup offsetParent:", !!el.offsetParent);
-  requestAnimationFrame(() => {
-    const rect = el.getBoundingClientRect();
-    console.log("[StandLayer] Popup rect:", Math.round(rect.left), Math.round(rect.top), Math.round(rect.width), "x", Math.round(rect.height));
-    console.log("[StandLayer] Popup children rects:", Array.from(el.children).map(c => `${c.tagName}:${c.getBoundingClientRect().width}x${c.getBoundingClientRect().height}`).join(", "));
-  });
 }
 
 /**
@@ -246,17 +226,11 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
     };
 
     const handleMapClick = (e: maplibregl.MapMouseEvent) => {
-      console.log("[StandLayer] Map clicked at", e.lngLat, "point", e.point);
-
       // Query features at click point — works reliably for both stands and background
-      if (!map.getLayer(LAYER_ID)) {
-        console.log("[StandLayer] No layer yet");
-        return;
-      }
+      if (!map.getLayer(LAYER_ID)) return;
       const features = map.queryRenderedFeatures(e.point, {
         layers: [LAYER_ID],
       });
-      console.log("[StandLayer] Features at click:", features.length);
 
       if (features.length > 0) {
         // Clicked on a stand
