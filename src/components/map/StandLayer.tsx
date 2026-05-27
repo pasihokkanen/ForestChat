@@ -97,11 +97,14 @@ function showCustomPopup(
 
   // Position and append to DOM BEFORE React render
   // (createRoot.render may be deferred in this environment — append first ensures
-  //  the element exists in the DOM tree, and React commits into it asynchronously)
+// Position element using map.project() for pixel coords
   const point = map.project(lngLat);
-  el.style.left = point.x + "px";
-  el.style.top = point.y + "px";
-  map.getContainer().appendChild(el);
+  // Append to document.body with fixed positioning to avoid MapLibre container stacking issues
+  const containerRect = map.getContainer().getBoundingClientRect();
+  el.style.position = "fixed";
+  el.style.left = (containerRect.left + point.x) + "px";
+  el.style.top = (containerRect.top + point.y) + "px";
+  document.body.appendChild(el);
   popupRef.current = el;
 
   // Build popup HTML directly (synchronous — avoids createRoot deferral in this React build)
