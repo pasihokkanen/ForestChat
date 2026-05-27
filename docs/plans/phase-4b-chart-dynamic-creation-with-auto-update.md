@@ -1,8 +1,19 @@
-# ForestChat — Phase 6: Chart Creation & Auto-Update Rethink
+# ForestChat — Phase 4b: Chart Creation & Auto-Update Rethink
 
-**Status:** Draft v1.0
+**Status:** Draft v2.0
 **Date:** 2026-05-27
 **Author:** Systems Architect (via Hermes Agent)
+
+**Changelog v2.0 (2026-05-27):**
+- 🔴 C1: Added computed-field handling to chart engine (`removal_m3` = `volume_m3 × removal_pct / 100` — not a DB column)
+- 🔴 C2: Updated `create_chart` handler to branch on `query_config` vs `data` (validation must skip `data` check when `query_config` present)
+- 🟡 S1: Added `charts_refreshed` to SSE event types in both `sse.ts` (server) and `sse-client.ts`
+- 🟡 S2: Deferred `recomputeAllCharts` to after full AI turn (not per-tool-call); single recompute per user message via `needsRecompute` flag
+- 🟡 S4: Normalized title from "Phase 6" to "Phase 4b" to match filename
+- 🟡 S5: Added database type + ChartTab interface updates to task breakdown (T1b)
+- 🟢 M1: Added safety LIMIT (500 rows) to chart engine PostgREST queries
+- 🟢 M2: Clarified `recompute_charts` tool as v2 extension (not in v1)
+- 🟢 M3: Documented join field prefix mapping (`comp.` → joined table alias)
 
 ---
 
@@ -177,6 +188,39 @@ interface ChartQueryConfig {
 | Harvest volume by species | `operations` | compartments on compartment_id | `["comp.main_species"]` | sum(removal_m3) → "volume" |
 | Plan totals (single row) | `plan_metadata` | — | none | all fields directly |
 
+#### Computed fields
+
+Several user-facing metric names are NOT database columns — they must be computed in JS from source columns. The engine handles this transparently:
+
+| User-facing field | Source columns | Computation |
+|---|---|---|
+| `removal_m3` | `volume_m3` (from compartments) + `removal_pct` (from operations) | `volume_m3 × removal_pct / 100` per row, before aggregation |
+| `area_ha` | Direct DB column on `compartments` | No computation needed |
+
+**Engine behavior for computed fields:** When the Query Config references a computed field in `values`, the engine silently fetches the source columns (via dynamic `.select()`), computes the synthetic column per raw row, then runs the standard aggregate pipeline. The engine maintains a `COMPUTED_FIELDS` map:
+
+```typescript
+// In chart-engine.ts
+const COMPUTED_FIELDS: Record<string, { sources: string[]; compute: (row: Record<string, unknown>) => number }> = {
+  removal_m3: {
+    sources: ["volume_m3", "removal_pct"],
+    compute: (row) => ((row.volume_m3 as number) ?? 0) * ((row.removal_pct as number) ?? 0) / 100,
+  },
+};
+```
+
+**How this flows through the engine:**
+
+```
+1. Parse Query Config → detect removal_m3 in values
+2. Add source columns (volume_m3, removal_pct) to the PostgREST .select()
+3. Fetch raw rows from Supabase
+4. For each row: row.removal_m3 = COMPUTED_FIELDS["removal_m3"].compute(row)
+5. Standard aggregate pipeline (group_by + fn on the now-computed removal_m3)
+```
+
+This means a removal_m3 filter (`filters: { removal_m3_min: 30 }`) is applied as a JS post-filter after computation — never as `.gte("removal_m3", 30)` in PostgREST (which would fail).
+
 #### Why this is safe
 
 1. **No raw SQL** — The engine only generates PostgREST queries, the same way the existing query tools do. RLS is never bypassed.
@@ -202,6 +246,11 @@ interface ChartQueryConfig {
   limit?: number;
 }
 
+/** Map user-facing join prefixes to the actual table alias in PostgREST nested queries. */
+const JOIN_PREFIX_MAP: Record<string, string> = {
+  "comp": "compartments",  // "comp.main_species" → compartments.main_species
+};
+
 interface ChartEngineResult {
   data: Record<string, unknown>[];
   computedAt: string;
@@ -213,10 +262,12 @@ export async function recomputeChartData(
   config: ChartQueryConfig
 ): Promise<ChartEngineResult> {
   // 1. Build PostgREST query from config
-  // 2. Fetch raw rows via authenticated Supabase client (RLS applies)
-  // 3. Aggregate in JS (group_by + values)
-  // 4. Sort + limit
-  // 5. Return structured data
+  // 2. Resolve computed fields → silently add source columns to .select()
+  // 3. Fetch raw rows via authenticated Supabase client (RLS applies), MAX 500 rows
+  // 4. Compute synthetic columns per raw row (e.g., removal_m3)
+  // 5. Aggregate in JS (group_by + values)
+  // 6. Sort + limit
+  // 7. Return structured data
 }
 ```
 
@@ -227,79 +278,161 @@ MUTATION (add_operation, remove_operation, batch_update_operations, generate_pla
   │
   ├── Execute mutation (existing)
   │
-  └── On success:
-       │
-       ├── Fetch all chart_tabs for this forest
-       │
-       ├── For each tab with a query_config:
-       │    ├── recomputeChartData(config) via Supabase client
-       │    └── UPDATE chart_tabs SET data = fresh_data, computed_at = now()
-       │
-       └── Emit SSE event: "charts_refreshed" { chart_ids: [...] }
-            → Client refreshes chart data from Supabase
+  └── Set needsRecompute flag ← (in route handler, not per-tool)
+      
+When AI turn completes (all tool calls for this user message processed):
+  │
+  ├── If needsRecompute is true:
+  │    ├── Fetch all chart_tabs for this forest
+  │    ├── For each tab with a query_config:
+  │    │    ├── recomputeChartData(config) via Supabase client
+  │    │    └── UPDATE chart_tabs SET data = fresh_data, computed_at = now()
+  │    └── Emit SSE event: "charts_refreshed" { chart_ids: [...] }
+  │         → Client refreshes chart data from Supabase
+  │
+  └── If needsRecompute is false:
+       → Charts unchanged (user asked a read-only query)
 ```
 
-This happens **server-side, in the background**, as part of the mutation handler. The AI doesn't need to know about it. The user sees chart data update in-place — no deletion, no recreation.
+**Why deferred, not per-mutation:** If the AI calls 3 mutation tools in one conversation turn, a per-tool recompute runs 3 times — the first 2 are wasted work. By setting a flag during the tool loop and running once after the full agent loop iteration completes, one user message = one recompute at most. The user sees charts update once, after the AI finishes processing their request.
+
+**Route handler integration:**
+
+```typescript
+// In src/app/api/chat/route.ts — updated agent loop
+
+const DATA_MUTATION_TOOLS = new Set([
+  "add_operation", "remove_operation", "batch_update_operations", "generate_plan",
+]);
+
+let needsRecompute = false;
+
+for (let iteration = 0; iteration < maxIterations; iteration++) {
+  // ... tool execution loop (unchanged) ...
+
+  for await (const chunk of streamChat(...)) {
+    if (chunk.type === "tool_call") {
+      const result = await executeTool(chunk.name, chunk.arguments, ctx);
+
+      // Set flag if any mutation happened — but DON'T recompute yet
+      if (result.success && DATA_MUTATION_TOOLS.has(chunk.name)) {
+        needsRecompute = true;
+      }
+      // ... tool_end SSE, toolResults push, etc. ...
+    }
+  }
+
+  if (toolResults.length === 0) break;
+  // ... push results to openRouterMessages ...
+}
+
+// After ALL iterations: recompute once if any mutation happened
+if (needsRecompute) {
+  await recomputeAllCharts(ctx.supabase, ctx.forestId, ctx.sendSse);
+}
+
+// ... store final message, send done event ...
+```
+
+This replaces the old `invalidateChartTabs(ctx)` call that currently runs per-mutation at route.ts line 178-180.
 
 ### 2.6 New/modified tools
 
 #### 2.6.1 `create_chart` — MODIFIED
 
-The existing `create_chart` tool is **extended** — `data` becomes optional when `query_config` is provided:
+The existing `create_chart` tool is **extended** — `data` becomes optional when `query_config` is provided. The handler branches on which mode is used:
 
 ```typescript
-{
-  name: "create_chart",
-  description: `Create a new chart tab. Two modes:
-  
-  A) Query-config based (recommended): Provide a query_config — the backend will
-     fetch data from the database and recompute it automatically when the plan changes.
-     Supported sources: operations, compartments, plan_metadata.
-  
-  B) Static data (legacy): Provide data directly as a JSON array.
-     Charts created this way will NOT auto-update when the plan changes.`,
-  parameters: {
-    type: "object",
-    properties: {
-      chart_id:          { type: "string", description: "Unique ID, e.g. 'chart-yearly-income'" },
-      title:             { type: "string", description: "Chart title" },
-      type:              { type: "string", enum: [...] },
-      query_config: {
-        type: "object",
-        description: `Declarative query spec for auto-updating charts.
-        Example: { source: "operations", aggregate: [{ group_by: "year" },
-        { group_by: "type" }], values: [{ field: "income_eur", as: "income", fn: "sum" }] }`,
-        properties: {
-          source: { type: "string", enum: ["operations", "compartments", "plan_metadata"] },
-          aggregate: { type: "array", items: { type: "object", properties: { group_by: { type: "string" } } } },
-          values: { type: "array", items: { type: "object", properties: {
-            field: { type: "string" }, as: { type: "string" }, fn: { type: "string", enum: ["sum", "count", "avg", "min", "max"] }
-          }}},
-          join: { type: "object" },
-          filters: { type: "object" },
-          sort: { type: "object" },
-          limit: { type: "number" },
-        },
-      },
-      // Legacy static data (alternative to query_config)
-      data:              { type: "array", items: { type: "object" }, description: "Static data (legacy — use query_config instead)" },
-      x_key:             { type: "string" },
-      y_key:             { type: "string" },
-      y_key2:            { type: "string" },
-      name_key:          { type: "string" },
-      color_key:         { type: "string" },
-      stand_dimension:   { type: "string" },
-    },
-    // Require EITHER query_config OR data
-    oneOf: [
-      { required: ["chart_id", "title", "type", "query_config", "y_key"] },
-      { required: ["chart_id", "title", "type", "data", "y_key"] },
-    ],
+// In tool-executor.ts — create_chart handler (UPDATED)
+create_chart: async (args, ctx) => {
+  const { chart_id, title, type, query_config, data, x_key, y_key, ...rest } = args;
+
+  if (!chart_id || typeof chart_id !== "string") {
+    return { success: false, result: "", error: "chart_id is required" };
   }
-}
+  if (!VALID_CHART_TYPES.includes(type as string)) {
+    return { success: false, result: "", error: `Invalid chart type: ${type}` };
+  }
+
+  // BRANCH: query_config mode (recommended)
+  if (query_config) {
+    // Compute initial data from the declarative config
+    const result = await recomputeChartData(ctx.supabase, ctx.forestId, query_config as ChartQueryConfig);
+    
+    const chartTab = {
+      id: chart_id as string,
+      title: title as string,
+      type: type as string,
+      data: result.data,
+      query_config,  // stored for future recomputes
+      xKey: (x_key as string) ?? null,
+      yKey: y_key as string,
+      yKey2: (rest.y_key2 as string) ?? null,
+      nameKey: (rest.name_key as string) ?? null,
+      colorKey: (rest.color_key as string) ?? null,
+      standDimension: (rest.stand_dimension as string) ?? null,
+    };
+
+    await ctx.supabase.from("chart_tabs").upsert({
+      forest_id: ctx.forestId,
+      chart_id: chartTab.id,
+      title: chartTab.title,
+      type: chartTab.type,
+      data: chartTab.data,
+      query_config: chartTab.query_config,
+      computed_at: new Date().toISOString(),
+      x_key: chartTab.xKey,
+      y_key: chartTab.yKey,
+      ...rest,
+    }, { onConflict: "forest_id, chart_id" });
+
+    ctx.sendSse?.("create_chart", chartTab);
+    return {
+      success: true,
+      result: `✅ Chart "${title}" created (${type}, ${result.data.length} data points). Auto-updates when plan changes.`,
+    };
+  }
+
+  // BRANCH: legacy static data mode
+  if (!Array.isArray(data) || data.length === 0) {
+    return { success: false, result: "", error: "data must be a non-empty array" };
+  }
+
+  const chartTab = {
+    id: chart_id as string,
+    title: title as string,
+    type: type as string,
+    data: data as Record<string, unknown>[],
+    xKey: (x_key as string) ?? null,
+    yKey: y_key as string,
+    yKey2: (rest.y_key2 as string) ?? null,
+    nameKey: (rest.name_key as string) ?? null,
+    colorKey: (rest.color_key as string) ?? null,
+    standDimension: (rest.stand_dimension as string) ?? null,
+  };
+
+  await ctx.supabase.from("chart_tabs").upsert({
+    forest_id: ctx.forestId,
+    chart_id: chartTab.id,
+    title: chartTab.title,
+    type: chartTab.type,
+    data: chartTab.data,
+    x_key: chartTab.xKey,
+    y_key: chartTab.yKey,
+    ...rest,
+  }, { onConflict: "forest_id, chart_id" });
+
+  ctx.sendSse?.("create_chart", chartTab);
+  return {
+    success: true,
+    result: `✅ Chart "${title}" created (${type}, ${data.length} data points). The chart is now visible in the visualization panel.`,
+  };
+},
 ```
 
-#### 2.6.2 `recompute_charts` — NEW (optional)
+#### 2.6.2 `recompute_charts` — NEW (future extension, not in v1)
+
+> **Note:** This tool is deferred to a future release. In v1, charts recompute automatically via the `needsRecompute` flag in the route handler. The AI can also call `clear_charts` + `create_chart` with new query_configs if the user explicitly asks to refresh. A dedicated `recompute_charts` tool is a convenience addition for v2.
 
 ```typescript
 {
@@ -352,6 +485,42 @@ When creating charts:
 
 ### 2.8 Frontend changes
 
+#### SSE type updates (server + client)
+
+**Server** (`src/lib/chat/sse.ts`): Add `"charts_refreshed"` to the SseEvent union:
+
+```typescript
+export interface SseEvent {
+  event:
+    | "chunk" | "tool_start" | "tool_end" | "done" | "error"
+    | "select_stand" | "create_chart" | "remove_chart" | "clear_charts"
+    | "charts_refreshed";  // ← NEW
+  data: {
+    // ... existing fields ...
+    chart_ids?: string[];  // ← NEW: list of recomputed chart IDs
+    [key: string]: unknown;
+  };
+}
+```
+
+**Client** (`src/lib/chat/sse-client.ts`): Add `charts_refreshed` to the SseEventType union and the parser switch:
+
+```typescript
+export type SseEventType = "chunk" | "tool_start" | "tool_end" | "done" | "error"
+  | "select_stand" | "create_chart" | "remove_chart" | "clear_charts"
+  | "charts_refreshed";  // ← NEW
+
+// In SSE parser switch:
+case "charts_refreshed":
+  // Re-fetch chart tabs from Supabase to get recomputed data
+  const { data: freshCharts } = await supabase
+    .from("chart_tabs")
+    .select("*")
+    .eq("forest_id", forestId);
+  setChartTabs(freshCharts);
+  break;
+```
+
 #### SSE handler
 
 Replace `clear_charts` event handling with `charts_refreshed`:
@@ -381,15 +550,16 @@ No changes needed — ChartCard already reads from `tab.data` which is now the r
 | # | Task | Files | Est. |
 |---|------|-------|------|
 | **T1** | **Database migration** — Add `query_config` (JSONB), `computed_at` (TIMESTAMPTZ) columns to `chart_tabs`; make `data` nullable | `supabase/migrations/006_add_chart_query_config.sql` | 1h |
-| **T2** | **Chart engine module** — `recomputeChartData()` that translates Query Config into PostgREST queries, fetches data via authenticated Supabase client, aggregates in JS, and returns structured data | `src/lib/ai/chart-engine.ts` | 3h |
+| **T1b** | **Type updates** — Add `query_config` and `computed_at` to `ChartTab` interface in Zustand visualization-slice; add `ChartQueryConfig` type to `src/types/database.ts`; add `ChartTab` interface fields for the new columns in the chart API types | `src/types/database.ts`, `src/lib/store.ts` (visualization slice) | 0.5h |
+| **T2** | **Chart engine module** — `recomputeChartData()` that translates Query Config into PostgREST queries (with 500-row safety LIMIT), handles computed fields (`removal_m3` = `volume_m3 × removal_pct / 100`), fetches data via authenticated Supabase client, aggregates in JS, and returns structured data | `src/lib/ai/chart-engine.ts` | 3h |
 | **T3** | **Modify tool definitions** — Update `create_chart` tool schema to accept `query_config` as alternative to `data` with `oneOf` validation | `src/lib/chat/tools.ts` | 1h |
-| **T4** | **Modify tool executor** — Update `create_chart` handler to store `query_config` + config in `chart_tabs`, run initial `recomputeChartData()`, emit SSE event | `src/lib/chat/tool-executor.ts` | 2h |
-| **T5** | **Auto-update logic** — Replace `invalidateChartTabs()` with `recomputeAllCharts()` that loops through chart_tabs with `query_config`, runs `recomputeChartData()` on each, updates `data` and `computed_at` | `src/lib/ai/chart-engine.ts`, `src/lib/chat/tool-executor.ts`, `src/app/api/chat/route.ts` | 2h |
-| **T6** | **Frontend SSE** — Handle `charts_refreshed` event; update `sse.ts` type union | `src/lib/chat/sse.ts`, `src/lib/chat/sse-client.ts` | 1h |
+| **T4** | **Modify tool executor** — Update `create_chart` handler to branch on `query_config` vs `data`; `query_config` mode calls `recomputeChartData()` for initial data and stores config in DB; legacy mode unchanged | `src/lib/chat/tool-executor.ts` | 2h |
+| **T5** | **Auto-update logic** — Replace per-mutation `invalidateChartTabs()` with deferred `recomputeAllCharts()`: add `needsRecompute` flag in route handler, set it when mutation tools succeed, call `recomputeAllCharts()` once after the full agent loop iteration (not per tool call). Remove old `invalidateChartTabs` import and call site | `src/lib/ai/chart-engine.ts`, `src/lib/chat/tool-executor.ts`, `src/app/api/chat/route.ts` | 2h |
+| **T6** | **Frontend SSE** — Add `charts_refreshed` to `SseEvent` union in `sse.ts` (server) and `SseEventType` in `sse-client.ts` (client); handle `charts_refreshed` event in SSE parser; remove `clear_charts` handler (charts are no longer deleted on mutation) | `src/lib/chat/sse.ts`, `src/lib/chat/sse-client.ts` | 1h |
 | **T7** | **System prompt update** — Add Query Config chart-creation instructions with examples | `src/lib/chat/system-prompt.ts` | 0.5h |
-| **T8** | **Tests** — `chart-engine.test.ts` for each Query Config variant; update `chart-tools.test.ts` for config-based creation; `recomputeAllCharts.test.ts` | `src/lib/ai/__tests__/chart-engine.test.ts`, update existing | 3h |
+| **T8** | **Tests** — `chart-engine.test.ts` for each Query Config variant (including computed field `removal_m3`); update `chart-tools.test.ts` for config-based creation (both query_config and legacy data modes); `recomputeAllCharts.test.ts` | `src/lib/ai/__tests__/chart-engine.test.ts`, update existing | 3h |
 
-**Total: ~13.5h**
+**Total: ~14h**
 
 ### 3.2 Migration SQL
 
