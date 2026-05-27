@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useCallback } from "react";
 import maplibregl from "maplibre-gl";
-import { createRoot } from "react-dom/client";
+import { createRoot, flushSync } from "react-dom/client";
 import type { CompartmentFeatureCollection } from "@/types/database";
 import StandPopup from "./StandPopup";
 import { fitBoundsToFeatures } from "@/lib/map/geojson";
@@ -97,10 +97,11 @@ function showCustomPopup(
     margin-top: -10px;
   `;
 
-  // Render popup content via React
+  // Render popup content via React (flushSync ensures DOM is committed before we append)
   const root = createRoot(el);
-  root.render(
-    <StandPopup
+  flushSync(() => {
+    root.render(
+      <StandPopup
       properties={{
         id: props.id as string,
         stand_id: standId,
@@ -115,7 +116,8 @@ function showCustomPopup(
       lngLat={lngLat}
       onClose={() => hideCustomPopup(popupRef)}
     />,
-  );
+    );
+  });
 
   // Position the element using map.project()
   const point = map.project(lngLat);
