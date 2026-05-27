@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import maplibregl from "maplibre-gl";
 import { createRoot } from "react-dom/client";
+import { render } from "react-dom";
 import type { CompartmentFeatureCollection } from "@/types/database";
 import StandPopup from "./StandPopup";
 import { fitBoundsToFeatures } from "@/lib/map/geojson";
@@ -106,9 +107,9 @@ function showCustomPopup(
   map.getContainer().appendChild(el);
   popupRef.current = el;
 
-  // Render popup content via React (render into the already-attached element)
-  const root = createRoot(el);
-  root.render(
+  // Render popup content via React (using synchronous legacy render — createRoot
+  // in Next.js 16's React 18 defers DOM commit, resulting in 0x0 dimensions)
+  render(
     <StandPopup
       properties={{
         id: props.id as string,
@@ -124,6 +125,7 @@ function showCustomPopup(
       lngLat={lngLat}
       onClose={() => hideCustomPopup(popupRef)}
     />,
+    el,
   );
 
   console.log("[StandLayer] Custom popup shown for stand", standId, "at pixel", Math.round(point.x), Math.round(point.y), "el in DOM:", !!el.parentElement);
