@@ -1,8 +1,16 @@
 # ForestChat — Phase 4b: Chart Creation & Auto-Update Rethink
 
-**Status:** Draft v2.0
+**Status:** Draft v2.1
 **Date:** 2026-05-27
 **Author:** Systems Architect (via Hermes Agent)
+
+**Changelog v2.1 (2026-05-27):**
+- 🔴 C4: Fixed section 2.6.3 body — now describes deferred single-recompute after full AI turn, not per-mutation
+- 🟡 S6: Fixed "Phase 6" → "Phase 4b" in migration SQL comment
+- 🟡 S7: Fixed comparison table effort from "~13.5h" → "~14h"
+- 🟡 S8: Removed duplicate SSE handler code block in section 2.8
+- 🟡 S9: Added `recomputeAllCharts()` function specification (signature, location, error handling)
+- 🟡 S10: Clarified `clear_charts` tool handler — now deletes directly from DB (not via removed `invalidateChartTabs`); client handler stays
 
 **Changelog v2.0 (2026-05-27):**
 - 🔴 C1: Added computed-field handling to chart engine (`removal_m3` = `volume_m3 × removal_pct / 100` — not a DB column)
@@ -269,6 +277,27 @@ export async function recomputeChartData(
   // 6. Sort + limit
   // 7. Return structured data
 }
+
+/**
+ * Recompute all query_config-backed chart tabs for a forest.
+ * Called once per user message after the AI agent loop completes (if any mutation occurred).
+ * Skips legacy charts (those with data but no query_config).
+ * Emits "charts_refreshed" SSE event on success.
+ * Errors for individual charts are caught and logged — one broken chart doesn't block the rest.
+ */
+export async function recomputeAllCharts(
+  supabase: SupabaseClient,
+  forestId: string,
+  sendSse?: (event: string, data: unknown) => void
+): Promise<void> {
+  // 1. SELECT chart_tabs WHERE forest_id = $1 AND query_config IS NOT NULL
+  // 2. For each tab:
+  //    a. Parse config: ChartQueryConfig = tab.query_config (type-cast from JSONB)
+  //    b. Call recomputeChartData(supabase, forestId, config)
+  //    c. On success: UPDATE chart_tabs SET data = result.data, computed_at = result.computedAt
+  //    d. On error: console.error + continue (skip broken chart, don't block others)
+  // 3. Emit "charts_refreshed" SSE with list of recomputed chart_ids
+}
 ```
 
 ### 2.5 Auto-update flow (NEW)
@@ -445,12 +474,13 @@ create_chart: async (args, ctx) => {
 
 #### 2.6.3 `invalidateChartTabs` — REPLACED
 
-No more nuking charts on mutation. Instead, after every successful mutation, the route calls `recomputeAllCharts(ctx)` which:
+The old pattern (delete all chart_tabs on every mutation) is replaced by deferred auto-recomputation. Instead of nuking charts per-mutation, the route handler sets a `needsRecompute` flag during the tool loop and calls `recomputeAllCharts()` **once** after the full AI turn completes (see section 2.5). This means:
 
-1. Fetches all chart_tabs with a `query_config` for this forest
-2. Runs `recomputeChartData()` on each one using the authenticated Supabase client
-3. Updates `chart_tabs.data` and `computed_at` in the DB
-4. Emits `charts_refreshed` SSE event to the client
+1. Charts are never deleted — they stay visible and update in-place
+2. One recompute per user message regardless of how many mutations ran
+3. Charts with `query_config` get fresh data; legacy charts (static data, no `query_config`) are skipped
+
+`invalidateChartTabs` is removed from `tool-executor.ts` entirely. The `clear_charts` tool handler (which previously called it) is rewritten to delete chart_tabs directly from the DB and emit `clear_charts` SSE — the user-facing "clear all my charts" use case is preserved.
 
 ### 2.7 System prompt changes
 
@@ -523,19 +553,7 @@ case "charts_refreshed":
 
 #### SSE handler
 
-Replace `clear_charts` event handling with `charts_refreshed`:
-
-```typescript
-// sse-client.ts — NEW event
-case "charts_refreshed":
-  // Re-fetch chart tabs from Supabase (or trust the updated data from SSE)
-  const { data: freshCharts } = await supabase
-    .from("chart_tabs")
-    .select("*")
-    .eq("forest_id", forestId);
-  setChartTabs(freshCharts);
-  break;
-```
+The `charts_refreshed` handler is shown in the client code above. When received, the client re-fetches all chart tabs from Supabase — the recomputed data is already in the DB by the time this event fires (recomputation happens server-side before the event is emitted).
 
 #### Chart card rendering
 
@@ -553,9 +571,9 @@ No changes needed — ChartCard already reads from `tab.data` which is now the r
 | **T1b** | **Type updates** — Add `query_config` and `computed_at` to `ChartTab` interface in Zustand visualization-slice; add `ChartQueryConfig` type to `src/types/database.ts`; add `ChartTab` interface fields for the new columns in the chart API types | `src/types/database.ts`, `src/lib/store.ts` (visualization slice) | 0.5h |
 | **T2** | **Chart engine module** — `recomputeChartData()` that translates Query Config into PostgREST queries (with 500-row safety LIMIT), handles computed fields (`removal_m3` = `volume_m3 × removal_pct / 100`), fetches data via authenticated Supabase client, aggregates in JS, and returns structured data | `src/lib/ai/chart-engine.ts` | 3h |
 | **T3** | **Modify tool definitions** — Update `create_chart` tool schema to accept `query_config` as alternative to `data` with `oneOf` validation | `src/lib/chat/tools.ts` | 1h |
-| **T4** | **Modify tool executor** — Update `create_chart` handler to branch on `query_config` vs `data`; `query_config` mode calls `recomputeChartData()` for initial data and stores config in DB; legacy mode unchanged | `src/lib/chat/tool-executor.ts` | 2h |
+| **T4** | **Modify tool executor** — Update `create_chart` handler to branch on `query_config` vs `data`; `query_config` mode calls `recomputeChartData()` for initial data and stores config in DB; legacy mode unchanged. Update `clear_charts` handler to delete chart_tabs directly from DB + emit `clear_charts` SSE (no longer calls `invalidateChartTabs` which is removed in T5) | `src/lib/chat/tool-executor.ts` | 2h |
 | **T5** | **Auto-update logic** — Replace per-mutation `invalidateChartTabs()` with deferred `recomputeAllCharts()`: add `needsRecompute` flag in route handler, set it when mutation tools succeed, call `recomputeAllCharts()` once after the full agent loop iteration (not per tool call). Remove old `invalidateChartTabs` import and call site | `src/lib/ai/chart-engine.ts`, `src/lib/chat/tool-executor.ts`, `src/app/api/chat/route.ts` | 2h |
-| **T6** | **Frontend SSE** — Add `charts_refreshed` to `SseEvent` union in `sse.ts` (server) and `SseEventType` in `sse-client.ts` (client); handle `charts_refreshed` event in SSE parser; remove `clear_charts` handler (charts are no longer deleted on mutation) | `src/lib/chat/sse.ts`, `src/lib/chat/sse-client.ts` | 1h |
+| **T6** | **Frontend SSE** — Add `charts_refreshed` to `SseEvent` union in `sse.ts` (server) and `SseEventType` in `sse-client.ts` (client); handle `charts_refreshed` event in SSE parser; keep existing `clear_charts` handler (user-facing tool, not auto-called on mutation anymore); add `onChartsRefreshed` callback to `SseCallbacks` | `src/lib/chat/sse.ts`, `src/lib/chat/sse-client.ts` | 1h |
 | **T7** | **System prompt update** — Add Query Config chart-creation instructions with examples | `src/lib/chat/system-prompt.ts` | 0.5h |
 | **T8** | **Tests** — `chart-engine.test.ts` for each Query Config variant (including computed field `removal_m3`); update `chart-tools.test.ts` for config-based creation (both query_config and legacy data modes); `recomputeAllCharts.test.ts` | `src/lib/ai/__tests__/chart-engine.test.ts`, update existing | 3h |
 
@@ -565,7 +583,7 @@ No changes needed — ChartCard already reads from `tab.data` which is now the r
 
 ```sql
 -- 006_add_chart_query_config.sql
--- ForestChat Phase 6: Chart auto-update via declarative query configs
+-- ForestChat Phase 4b: Chart auto-update via declarative query configs
 
 -- 1. Add query_config and computed_at columns; make data nullable
 ALTER TABLE chart_tabs ADD COLUMN IF NOT EXISTS query_config JSONB;
@@ -614,4 +632,4 @@ CREATE INDEX IF NOT EXISTS idx_chart_tabs_query_config
 | **AI workload** | Must fetch data via `query_operations()` + transform in-memory + call `create_chart(data)` (3-5 tool calls per chart) | Writes one Query Config + calls `create_chart(query_config)` (2 tool calls) |
 | **Error rate** | High — LLM hallucinations: wrong aggregations, data truncation, missing categories, off-by-ones | None — the JS aggregation engine is deterministic and correct |
 | **Security** | Low risk (static data only) | No new risk — same Supabase JS client + RLS as existing tools |
-| **Implementation effort** | Already done | ~13.5h |
+| **Implementation effort** | Already done | ~14h |
