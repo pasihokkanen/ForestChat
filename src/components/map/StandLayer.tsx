@@ -3,7 +3,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import maplibregl from "maplibre-gl";
 import { createRoot } from "react-dom/client";
-import { flushSync } from "react-dom";
 import type { CompartmentFeatureCollection } from "@/types/database";
 import StandPopup from "./StandPopup";
 import { fitBoundsToFeatures } from "@/lib/map/geojson";
@@ -98,11 +97,19 @@ function showCustomPopup(
     margin-top: -10px;
   `;
 
-  // Render popup content via React (flushSync ensures DOM is committed before we append)
+  // Position and append to DOM BEFORE React render
+  // (createRoot.render may be deferred in this environment — append first ensures
+  //  the element exists in the DOM tree, and React commits into it asynchronously)
+  const point = map.project(lngLat);
+  el.style.left = point.x + "px";
+  el.style.top = point.y + "px";
+  map.getContainer().appendChild(el);
+  popupRef.current = el;
+
+  // Render popup content via React (render into the already-attached element)
   const root = createRoot(el);
-  flushSync(() => {
-    root.render(
-      <StandPopup
+  root.render(
+    <StandPopup
       properties={{
         id: props.id as string,
         stand_id: standId,
@@ -117,17 +124,7 @@ function showCustomPopup(
       lngLat={lngLat}
       onClose={() => hideCustomPopup(popupRef)}
     />,
-    );
-  });
-
-  // Position the element using map.project()
-  const point = map.project(lngLat);
-  el.style.left = point.x + "px";
-  el.style.top = point.y + "px";
-
-  // Append to map container
-  map.getContainer().appendChild(el);
-  popupRef.current = el;
+  );
 
   console.log("[StandLayer] Custom popup shown for stand", standId, "at pixel", Math.round(point.x), Math.round(point.y), "el in DOM:", !!el.parentElement);
   // Debug: log popup dimensions
