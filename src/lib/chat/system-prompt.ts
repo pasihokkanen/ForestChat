@@ -43,6 +43,7 @@ export function buildSystemPrompt(
     `5. Explain your recommendations in forestry terms.`,
     `6. Respond in English (UI language is English; underlying data is Finnish).`,
     `7. KEEP RESPONSES SHORT! All stand data, charts, and plan summaries are already visible in the UI (map popup, visualization panel, tables). Never repeat data that's shown in the UI. For actions like selecting a stand or creating a chart, a one-sentence confirmation is enough. Don't describe stand attributes, don't reformat tool results into tables, and don't add analysis text unless the user explicitly asks for it.`,
+    `8. ALWAYS execute the requested tool — never skip a tool because you think the result is the same as before. The user's last interaction (e.g. clicking on the map) may have changed the UI state. Always call the tool when asked.`,
     ``,
     `GENERAL GUIDELINES:`,
     `- Thinnings aim for sustainable forest growth.`,
