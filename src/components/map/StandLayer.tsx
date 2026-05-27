@@ -379,52 +379,48 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
       return;
     }
 
-    // Guard: source must exist (can be missing during layout transitions)
-    let source: maplibregl.GeoJSONSource | undefined;
-    try {
-      source = map.getSource("stands") as maplibregl.GeoJSONSource | undefined;
-    } catch {
-      return;
-    }
-    if (!source) return;
+    // Find the feature in the compartments data directly instead of querying the map source
+    const feature = compartments.features.find(
+      (f) => f.properties?.stand_id === selectedStandId
+    );
+    if (!feature || !feature.geometry) return;
 
     try {
-      const features = map.querySourceFeatures("stands", {
-        filter: ["==", ["get", "stand_id"], selectedStandId],
-      });
-      if (features.length > 0 && features[0].geometry) {
-        // Compute bounds from feature geometry
-        const bounds = new maplibregl.LngLatBounds();
-        const geom = features[0].geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
-        const coords =
-          geom.type === "Polygon"
-            ? geom.coordinates[0]
-            : geom.coordinates.flatMap((ring) => ring[0]);
-        for (const [lng, lat] of coords as [number, number][]) {
-          bounds.extend([lng, lat]);
-        }
-        map.fitBounds(bounds, { padding: 80, maxZoom: 16, duration: 800 });
-
-        // Show popup AFTER the zoom animation completes (moveend)
-        const center = bounds.getCenter();
-        const lngLat: [number, number] = [center.lng, center.lat];
-        const props = features[0].properties as Record<string, unknown> | undefined;
-
-        if (props) {
-          const standId = selectedStandId;
-          const onMoveEnd = () => {
-            // Guard: ignore if a different stand was selected during the animation
-            if (useForestStore.getState().selectedStandId !== standId) return;
-            showCustomPopup(map, popupRef, props, lngLat);
-          };
-          // Use once() so it auto-removes after firing
-          map.once("moveend", onMoveEnd);
-        }
+      // Compute bounds from feature geometry
+      const bounds = new maplibregl.LngLatBounds();
+      const geom = feature.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
+      const coords =
+        geom.type === "Polygon"
+          ? geom.coordinates[0]
+          : geom.coordinates.flatMap((ring) => ring[0]);
+      for (const [lng, lat] of coords as [number, number][]) {
+        bounds.extend([lng, lat]);
       }
+
+      // Cancel any in-progress animation before fitting
+      map.stop();
+      map.fitBounds(bounds, { padding: 80, maxZoom: 16, duration: 800 });
+
+      // Show popup AFTER the zoom animation completes (moveend)
+      const center = bounds.getCenter();
+      const lngLat: [number, number] = [center.lng, center.lat];
+      const props = feature.properties as Record<string, unknown>;
+
+      const onMoveEnd = () => {
+        if (useForestStore.getState().selectedStandId !== selectedStandId) return;
+        showCustomPopup(map, popupRef, props, lngLat);
+      };
+      // Use once() so it auto-removes after firing
+      map.once("moveend", onMoveEnd);
+
+      return () => {
+        map.stop();
+        map.off("moveend", onMoveEnd);
+      };
     } catch {
       // Silently handle geometry format issues
     }
-  }, [map, selectedStandId]);
+  }, [map, selectedStandId, compartments]);
 
   // Auto-zoom to fit stands on first load
   useEffect(() => {

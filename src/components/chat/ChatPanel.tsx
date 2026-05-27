@@ -32,6 +32,7 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
     clearChat,
     triggerRefetch,
     selectStand,
+    setHighlightedStands,
     addChartTab,
     removeChartTab,
     clearAllCharts,
@@ -140,6 +141,7 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
         },
         onSelectStand: (standId) => {
           selectStand(standId);
+          setHighlightedStands([standId]);
         },
         onCreateChart: (chartConfig) => {
           addChartTab(chartConfig as unknown as Parameters<typeof addChartTab>[0]);
