@@ -181,6 +181,7 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
       <ChatMessages
         messages={messages}
         streamingContent={streamingContent}
+        isStreaming={isStreaming}
         toolCallStatus={toolCallStatus}
         error={error}
       />

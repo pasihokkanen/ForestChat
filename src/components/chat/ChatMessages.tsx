@@ -8,6 +8,7 @@ import ToolCallCard from "./ToolCallCard";
 interface ChatMessagesProps {
   messages: ChatMessageType[];
   streamingContent: string;
+  isStreaming?: boolean;
   toolCallStatus: {
     name: string;
     status: "running" | "done" | "error";
@@ -19,6 +20,7 @@ interface ChatMessagesProps {
 export default function ChatMessages({
   messages,
   streamingContent,
+  isStreaming: storeIsStreaming = false,
   toolCallStatus,
   error,
 }: ChatMessagesProps) {
@@ -29,11 +31,11 @@ export default function ChatMessages({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingContent]);
 
-  const isStreaming = streamingContent.length > 0;
+  const hasStreamContent = streamingContent.length > 0;
 
   return (
     <div className="flex-1 overflow-y-auto px-3 py-4 space-y-3 dark:bg-gray-900">
-      {messages.length === 0 && !isStreaming && !error && (
+      {messages.length === 0 && !hasStreamContent && !storeIsStreaming && !error && (
         <div className="flex flex-col items-center justify-center h-full text-center text-gray-400 dark:text-gray-500">
           <svg
             width="40"
@@ -68,12 +70,23 @@ export default function ChatMessages({
         />
       )}
 
-      {/* Streaming content */}
-      {isStreaming && (
+      {/* Streaming content — show after first token arrives */}
+      {hasStreamContent && !toolCallStatus && (
         <div className="flex justify-start">
           <div className="max-w-[85%] rounded-2xl px-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm text-gray-800 dark:text-gray-200 leading-relaxed whitespace-pre-wrap">
             {streamingContent}
             <span className="inline-block w-2 h-4 bg-blue-500 ml-0.5 animate-pulse rounded-sm" />
+          </div>
+        </div>
+      )}
+
+      {/* Thinking indicator — bouncing dots while waiting for AI */}
+      {storeIsStreaming && streamingContent === "" && toolCallStatus === null && (
+        <div className="flex justify-start">
+          <div className="max-w-[120px] rounded-2xl px-5 py-3.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center gap-1">
+            <span className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+            <span className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+            <span className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
           </div>
         </div>
       )}
