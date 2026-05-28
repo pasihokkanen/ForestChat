@@ -23,6 +23,8 @@ function mapTabToRow(forestId: string, tab: ChartTab) {
     name_key: tab.nameKey,
     color_key: tab.colorKey,
     stand_dimension: tab.standDimension,
+    ...(tab.query_config ? { query_config: tab.query_config } : {}),
+    ...(tab.computed_at ? { computed_at: tab.computed_at } : {}),
   };
 }
 
@@ -68,10 +70,17 @@ export async function POST(
     const { id: forestId } = await params;
     const body = await request.json();
 
-    // Validate required fields
-    if (!body.id || !body.title || !body.type || !body.data || !body.yKey) {
+    // Validate required fields — data is optional when query_config is present
+    const hasQueryConfig = !!body.query_config;
+    if (!body.id || !body.title || !body.type || !body.yKey) {
       return NextResponse.json(
-        { error: "Missing required fields: id, title, type, data, yKey" },
+        { error: "Missing required fields: id, title, type, yKey" },
+        { status: 400 }
+      );
+    }
+    if (!hasQueryConfig && (!body.data || !Array.isArray(body.data))) {
+      return NextResponse.json(
+        { error: "data must be a non-empty array (or provide query_config)" },
         { status: 400 }
       );
     }

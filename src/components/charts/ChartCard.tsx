@@ -129,10 +129,34 @@ export default function ChartCard({ tab }: ChartCardProps) {
       );
 
     case "stacked_bar":
+      // Pivot data: rows like [{year, type, income}] → [{year, "Päätehakkuu": 120k, "Harvennus": 34k}]
+      const pivotStacked = () => {
+        if (!tab.colorKey) return { pivoted: tab.data, stackKeys: [tab.yKey] };
+        const colorValues = new Set<string>();
+        const pivotMap = new Map<string, Record<string, unknown>>();
+        for (const row of tab.data) {
+          const xVal = String(row[tab.xKey ?? "x"] ?? "");
+          const colorVal = String(tab.colorKey ?? "");
+          colorValues.add(colorVal);
+          if (!pivotMap.has(xVal)) {
+            const entry: Record<string, unknown> = {};
+            if (tab.xKey) entry[tab.xKey] = row[tab.xKey];
+            pivotMap.set(xVal, entry);
+          }
+          pivotMap.get(xVal)![colorVal] = row[tab.yKey];
+        }
+        // Sort alphabetically for stable color assignment across recomputes
+        const sorted = Array.from(colorValues).sort((a, b) => a.localeCompare(b));
+        return {
+          pivoted: Array.from(pivotMap.values()),
+          stackKeys: sorted,
+        };
+      };
+      const { pivoted, stackKeys } = pivotStacked();
       return (
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
-            data={tab.data}
+            data={pivoted}
             onClick={(e) =>
               handleChartClick(
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -145,10 +169,14 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <YAxis tick={{ fontSize: 12 }} />
             <Tooltip />
             <Legend />
-            <Bar dataKey={tab.yKey} stackId="a" fill="#4CAF50" />
-            {tab.colorKey && (
-              <Bar dataKey={tab.colorKey} stackId="a" fill="#2196F3" />
-            )}
+            {stackKeys.map((key, i) => (
+              <Bar
+                key={key}
+                dataKey={key}
+                stackId="a"
+                fill={CHART_COLORS[i % CHART_COLORS.length]}
+              />
+            ))}
           </BarChart>
         </ResponsiveContainer>
       );

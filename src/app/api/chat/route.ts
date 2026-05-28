@@ -5,7 +5,8 @@ import { updateSessionModel } from "@/lib/repos/chat-sessions";
 import { addMessage, getMessagesBySession as getChatMessages } from "@/lib/repos/chat-messages";
 import { createSseStream } from "@/lib/chat/sse";
 import { streamChat, resolveModel } from "@/lib/chat/openrouter";
-import { executeTool, invalidateChartTabs, type ToolContext } from "@/lib/chat/tool-executor";
+import { executeTool, type ToolContext } from "@/lib/chat/tool-executor";
+import { recomputeAllCharts } from "@/lib/ai/chart-engine";
 import { getForestById } from "@/lib/repos/forests";
 import { env } from "@/lib/env";
 import { buildSystemPrompt } from "@/lib/chat/system-prompt";
@@ -149,6 +150,8 @@ export async function POST(request: NextRequest) {
         "generate_plan",
       ]);
 
+      let needsRecompute = false;
+
       for (let iteration = 0; iteration < maxIterations; iteration++) {
         const toolResults: Array<{ role: string; content: string }> = [];
 
@@ -174,9 +177,9 @@ export async function POST(request: NextRequest) {
               sendSse,
             });
 
-            // Auto-invalidate charts when operations are modified
+            // Phase 4b: Set recompute flag instead of nuking charts
             if (result.success && DATA_MUTATION_TOOLS.has(chunk.name)) {
-              await invalidateChartTabs(ctx);
+              needsRecompute = true;
             }
 
             send({ event: "tool_end", data: { name: chunk.name, result: result.result, error: result.error } });
@@ -200,6 +203,11 @@ export async function POST(request: NextRequest) {
         for (const tr of toolResults) {
           openRouterMessages.push(tr);
         }
+      }
+
+      // Phase 4b: After ALL iterations — recompute charts once if any mutation happened
+      if (needsRecompute) {
+        await recomputeAllCharts(ctx.supabase, ctx.forestId, sendSse);
       }
 
       // Store final assistant message

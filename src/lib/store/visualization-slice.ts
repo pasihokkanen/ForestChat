@@ -22,6 +22,8 @@ export interface ChartTab {
   nameKey: string | null;
   colorKey: string | null;
   standDimension: string | null;
+  query_config?: Record<string, unknown> | null;
+  computed_at?: string | null;
 }
 
 export interface VisualizationSlice {

@@ -20,7 +20,8 @@ export interface SseEvent {
     | "select_stand"
     | "create_chart"
     | "remove_chart"
-    | "clear_charts";
+    | "clear_charts"
+    | "charts_refreshed";
   data: {
     content?: string;
     name?: string;
@@ -32,6 +33,7 @@ export interface SseEvent {
     error?: string;
     stand_id?: string;
     chart_id?: string;
+    chart_ids?: string[];
     [key: string]: unknown;
   };
 }

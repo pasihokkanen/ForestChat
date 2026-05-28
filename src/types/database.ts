@@ -82,6 +82,28 @@ export interface ChatMessage {
   created_at: string;
 }
 
+// ── Chart Query Config (Phase 4b) ──
+
+export interface ChartQueryConfig {
+  source: "operations" | "compartments" | "plan_metadata";
+  join?: {
+    table: "compartments";
+    on: "compartment_id";
+    fields: string[];
+  };
+  aggregate: Array<{ group_by: string }>;
+  values: Array<{
+    field: string;
+    as: string;
+    fn: "sum" | "count" | "avg" | "min" | "max";
+    /** Multiply result by this factor (e.g. -1 for costs to show below zero). */
+    multiply?: number;
+  }>;
+  filters?: Record<string, unknown>;
+  sort?: { by: string; dir?: "asc" | "desc" };
+  limit?: number;
+}
+
 // ── GeoJSON feature wrapper (for MapLibre layers) ──
 
 export interface CompartmentFeature extends GeoJSON.Feature<GeoJSON.MultiPolygon> {

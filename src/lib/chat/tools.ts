@@ -237,6 +237,8 @@ Returns issues list or "Plan looks good."`,
         name: "create_chart",
         description: `Create a new chart tab in the visualization panel. Call this after computing chart data using query_operations, search_stands, or plan_summary. Just create the chart — don't also describe its contents in text, the chart is already visible in the UI.
 
+PREFERRED: Use query_config for auto-updating charts. The chart engine will fetch and aggregate data deterministically from the database, so the chart auto-refreshes when the plan changes. Static data (no query_config) is also supported for one-off charts.
+
 Supported chart types: bar, pie, line, area, stacked_bar, scatter, radar, donut, horizontal_bar, composed, waterfall.
 
 For bar/line/area: provide x_key (category axis) and y_key (value axis). Add color_key for stacked_bar.
@@ -246,14 +248,27 @@ For radar: x_key is the attribute dimension, y_key is the value.
 For composed: line+bar combo. y_key for bars, y_key2 for line.
 For waterfall: x_key=step labels, y_key=values (positive=gain, negative=loss).
 
-If chart categories map to stands, set stand_dimension to the key containing stand_id values — enables click-to-highlight-on-map.`,
+If chart categories map to stands, set stand_dimension to the key containing stand_id values — enables click-to-highlight-on-map.
+
+QUERY_CONFIG format:
+- source: "operations" | "compartments" | "plan_metadata"
+- aggregate: array of { group_by: "column_name" }
+- values: array of { field: "column", as: "output_name", fn: "sum"|"count"|"avg"|"min"|"max" }
+  - Optional multiply: number — e.g. multiply: -1 for costs to display below zero
+- filters (optional): object with column:value pairs (arrays for IN filters)
+- sort (optional): { by: "column", dir: "asc"|"desc" }
+- limit (optional): max rows (default 500)
+- join (optional): { table: "compartments", on: "compartment_id", fields: ["main_species", ...] }
+
+For joined fields in aggregate, prefix with "comp." (e.g. "comp.main_species"). The computed field "removal_m3" (volume_m3 × removal_pct / 100) is available for operations with a join.`,
         parameters: {
           type: "object",
           properties: {
             chart_id: { type: "string", description: "Unique ID, e.g. 'chart-yearly-income'" },
             title: { type: "string", description: "Chart title" },
             type: { type: "string", enum: ["bar", "pie", "line", "area", "stacked_bar", "scatter", "radar", "donut", "horizontal_bar", "composed", "waterfall"] },
-            data: { type: "array", items: { type: "object" }, description: "Array of data objects" },
+            query_config: { type: "object", description: "Declarative query config for auto-updating charts (preferred). Must specify source, aggregate, and values." },
+            data: { type: "array", items: { type: "object" }, description: "Array of data objects (required if no query_config)" },
             x_key: { type: "string", description: "X-axis/category key" },
             y_key: { type: "string", description: "Y-axis/value key" },
             y_key2: { type: "string", description: "Secondary Y-axis key (composed charts)" },
@@ -261,7 +276,7 @@ If chart categories map to stands, set stand_dimension to the key containing sta
             color_key: { type: "string", description: "Color grouping key" },
             stand_dimension: { type: "string", description: "Key mapping to stand_id for cross-panel interaction" },
           },
-          required: ["chart_id", "title", "type", "data", "y_key"],
+          required: ["chart_id", "title", "type", "y_key"],
         },
       },
     },

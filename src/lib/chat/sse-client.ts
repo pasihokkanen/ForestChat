@@ -9,7 +9,8 @@ export type SseEventType =
   | "select_stand"
   | "create_chart"
   | "remove_chart"
-  | "clear_charts";
+  | "clear_charts"
+  | "charts_refreshed";
 
 interface SseCallbacks {
   onChunk?: (text: string) => void;
@@ -21,6 +22,7 @@ interface SseCallbacks {
   onCreateChart?: (chartConfig: Record<string, unknown>) => void;
   onRemoveChart?: (chartId: string) => void;
   onClearCharts?: () => void;
+  onChartsRefreshed?: (chartIds: string[]) => void;
 }
 
 export async function streamChat(
@@ -92,6 +94,9 @@ export async function streamChat(
               break;
             case "clear_charts":
               callbacks.onClearCharts?.();
+              break;
+            case "charts_refreshed":
+              callbacks.onChartsRefreshed?.(data.chart_ids as string[] ?? []);
               break;
           }
         } catch {

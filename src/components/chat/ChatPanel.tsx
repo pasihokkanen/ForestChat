@@ -36,6 +36,7 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
     addChartTab,
     removeChartTab,
     clearAllCharts,
+    setChartTabs,
   } = useForestStore();
 
   // Load existing conversation on mount
@@ -152,6 +153,18 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
         onClearCharts: () => {
           clearAllCharts();
         },
+        onChartsRefreshed: async (chartIds) => {
+          // Re-fetch all chart tabs to get recomputed data from DB
+          try {
+            const res = await fetch(`/api/forest/${encodeURIComponent(forestId)}/charts`);
+            const freshTabs = await res.json();
+            if (Array.isArray(freshTabs)) {
+              setChartTabs(freshTabs);
+            }
+          } catch {
+            // Silently fail — charts will update on next page load
+          }
+        },
       });
     },
     [
@@ -172,6 +185,7 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
       addChartTab,
       removeChartTab,
       clearAllCharts,
+      setChartTabs,
     ]
   );
 

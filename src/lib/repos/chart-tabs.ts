@@ -32,6 +32,8 @@ export async function upsertChartTab(
       name_key: tab.nameKey,
       color_key: tab.colorKey,
       stand_dimension: tab.standDimension,
+      ...(tab.query_config ? { query_config: tab.query_config } : {}),
+      ...(tab.computed_at ? { computed_at: tab.computed_at } : {}),
     },
     { onConflict: "forest_id, chart_id" }
   );
@@ -59,12 +61,14 @@ function mapRowToChartTab(row: Record<string, unknown>): ChartTab {
     id: row.chart_id as string,
     title: row.title as string,
     type: row.type as ChartTab["type"],
-    data: row.data as Record<string, unknown>[],
+    data: (row.data as Record<string, unknown>[]) ?? [],
     xKey: (row.x_key as string) ?? null,
     yKey: row.y_key as string,
     yKey2: (row.y_key2 as string) ?? null,
     nameKey: (row.name_key as string) ?? null,
     colorKey: (row.color_key as string) ?? null,
     standDimension: (row.stand_dimension as string) ?? null,
+    query_config: (row.query_config as Record<string, unknown>) ?? null,
+    computed_at: (row.computed_at as string) ?? null,
   };
 }
