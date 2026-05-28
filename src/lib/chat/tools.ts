@@ -251,7 +251,7 @@ For waterfall: x_key=step labels, y_key=values (positive=gain, negative=loss).
 If chart categories map to stands, set stand_dimension to the key containing stand_id values — enables click-to-highlight-on-map.
 
 QUERY_CONFIG format:
-- source: "operations" | "compartments" | "plan_metadata"
+- source: "operations" | "compartments" | "compartment_species" | "plan_metadata"
 - aggregate: array of { group_by: "column_name" }
 - values: array of { field: "column", as: "output_name", fn: "sum"|"count"|"avg"|"min"|"max" }
   - Optional multiply: number — e.g. multiply: -1 for costs to display below zero

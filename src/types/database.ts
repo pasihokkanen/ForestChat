@@ -34,6 +34,18 @@ export interface Compartment {
   updated_at: string;
 }
 
+export interface CompartmentSpecies {
+  id: string;
+  forest_id: string;
+  compartment_id: string;
+  stand_id: string;
+  puulaji: string;
+  volume_m3: number;
+  tukkiprosentti: number | null;
+  area_ha: number;
+  created_at: string;
+}
+
 export interface Operation {
   id: string;
   compartment_id: string;

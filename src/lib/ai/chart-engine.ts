@@ -60,6 +60,7 @@ const COMPUTED_FIELDS: Record<string, ComputedFieldDef> = {
 const WHITELISTED_SOURCES = new Set([
   "operations",
   "compartments",
+  "compartment_species",
   "plan_metadata",
 ]);
 
@@ -69,15 +70,47 @@ const JOIN_PREFIX_MAP: Record<string, string> = {
 
 const MAX_ROWS = 500; // safety limit — charts get cluttered beyond this
 
+// ─── Field Aliases ───────────────────────────────────────────────────
+// AI models sometimes use semantic names instead of DB column names.
+// These aliases translate common mistakes before query building.
+// Source-aware: some aliases only apply to specific sources.
+
+const FIELD_ALIASES: Record<string, string> = {
+  // operations table
+  income: "income_eur",
+  cost: "cost_eur",
+  removal: "removal_pct",
+  // compartments table (also work when joined via comp.prefix)
+  area: "area_ha",
+  volume: "volume_m3",
+  age: "age_years",
+  height: "avg_height",
+  diameter: "avg_diameter",
+  growth: "growth_m3_per_ha",
+  // compartment_species table
+  species: "puulaji",
+  "tree_species": "puulaji",
+  "total_ha": "area_ha",
+  "total_m3": "volume_m3",
+};
+
+/** Translate a field name through the alias map (source-aware).
+ *  Returns the resolved field name — either the original or its alias. */
+function resolveFieldAlias(field: string): string {
+  return FIELD_ALIASES[field] ?? field;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────
 
-/** Resolve a join-prefixed field name (e.g. "comp.main_species") to { table, field } */
+/** Resolve a join-prefixed field name (e.g. "comp.main_species") to { table, field }.
+ *  Also applies FIELD_ALIASES to the field portion (after prefix stripping). */
 function resolveJoinField(field: string): { table: string | null; field: string } {
   const dotIdx = field.indexOf(".");
-  if (dotIdx === -1) return { table: null, field };
+  if (dotIdx === -1) return { table: null, field: resolveFieldAlias(field) };
   const prefix = field.slice(0, dotIdx);
   const resolved = JOIN_PREFIX_MAP[prefix] ?? prefix;
-  return { table: resolved, field: field.slice(dotIdx + 1) };
+  const fieldPart = field.slice(dotIdx + 1);
+  return { table: resolved, field: resolveFieldAlias(fieldPart) };
 }
 
 /** Build the Supabase .select() string from config fields */
@@ -158,17 +191,19 @@ function buildQuery(
   // Apply filters
   if (config.filters) {
     for (const [key, val] of Object.entries(config.filters)) {
+      const resolvedKey = resolveFieldAlias(key);
       if (Array.isArray(val)) {
-        query = query.in(key, val);
+        query = query.in(resolvedKey, val);
       } else if (val !== undefined && val !== null) {
-        query = query.eq(key, val);
+        query = query.eq(resolvedKey, val);
       }
     }
   }
 
   // Apply sort
   if (config.sort) {
-    query = query.order(config.sort.by, {
+    const resolvedSortBy = resolveFieldAlias(config.sort.by);
+    query = query.order(resolvedSortBy, {
       ascending: config.sort.dir !== "desc",
     });
   }

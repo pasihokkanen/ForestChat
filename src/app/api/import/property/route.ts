@@ -76,13 +76,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 6. Fetch stands from Metsäkeskus WFS
-    const { fetchStandsByBbox, bboxFromGeometry, bbox4326to3067 } = await import(
+    // 6. Fetch stands and gridcells from Metsäkeskus WFS (parallel)
+    const { fetchStandsByBbox, fetchGridcellsByBbox, bboxFromGeometry, bbox4326to3067 } = await import(
       "@/lib/import/wfs-client"
     );
     const bbox4326 = bboxFromGeometry(boundary.geometry);
     const bbox = bbox4326to3067(bbox4326);
-    const stands = await fetchStandsByBbox(bbox);
+    const [stands, gridcells] = await Promise.all([
+      fetchStandsByBbox(bbox),
+      fetchGridcellsByBbox(bbox).catch((err) => {
+        console.warn("Gridcell fetch failed (non-fatal):", err.message);
+        return [];
+      }),
+    ]);
+
+    console.log(`Fetched ${stands.length} stands, ${gridcells.length} gridcells`);
 
     if (stands.length === 0) {
       // Update forest with area even if no stands
@@ -110,7 +118,8 @@ export async function POST(request: NextRequest) {
     const filteredStands = await filterStandsWithinProperty(
       boundary.geometry,
       stands,
-      forest.id
+      forest.id,
+      gridcells
     );
 
     const finalCount = filteredStands.length;
