@@ -7,6 +7,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Compartment, Operation } from "@/types/database";
+import { calculateOperationIncome } from "./income-calculator";
 
 const VALID_TYPES = [
   "Päätehakkuu", "Clear_cut",
@@ -63,10 +64,10 @@ export async function addOperation(
     return { success: false, result: "", error: "Required: stand_id, year, type" };
   }
 
-  // Get compartment
+  // Get compartment (Phase 4b: fetch full data for income calculation)
   const { data: compartment } = await supabase
     .from("compartments")
-    .select("id, development_class, main_species")
+    .select("id, development_class, main_species, volume_m3, area_ha, attributes")
     .eq("forest_id", forestId)
     .eq("stand_id", standId)
     .single();
@@ -80,7 +81,7 @@ export async function addOperation(
     .from("operations")
     .select("id")
     .eq("forest_id", forestId)
-    .eq("compartment_id", (compartment as { id: string }).id)
+    .eq("compartment_id", (compartment as Record<string, unknown>).id as string)
     .eq("year", year)
     .eq("type", type)
     .single();
@@ -89,18 +90,33 @@ export async function addOperation(
     return { success: false, result: "", error: `Operation ${type} already exists for stand ${standId} in ${year}.` };
   }
 
-  // Insert
+  // Phase 4b: Compute income_eur for the operation
+  const compartmentData = compartment as Record<string, unknown>;
+  const incomeEur = await calculateOperationIncome(
+    supabase,
+    {
+      volume_m3: compartmentData.volume_m3 as number | null,
+      main_species: compartmentData.main_species as string | null,
+      area_ha: compartmentData.area_ha as number | null,
+      attributes: compartmentData.attributes as Record<string, unknown> | null,
+    },
+    type,
+    removalPct
+  );
+
+  // Insert with computed income
   const { error } = await supabase.from("operations").insert({
-    compartment_id: (compartment as { id: string }).id,
+    compartment_id: compartmentData.id as string,
     forest_id: forestId,
     type,
     year,
     removal_pct: removalPct,
+    income_eur: incomeEur,
     created_by: "ai",
   });
 
   if (error) return { success: false, result: "", error: error.message };
-  return { success: true, result: `✅ Added ${type} to stand ${standId} in ${year} (removal: ${removalPct}%).` };
+  return { success: true, result: `✅ Added ${type} to stand ${standId} in ${year} (removal: ${removalPct}%, income: ${incomeEur.toLocaleString()} €).` };
 }
 
 export async function removeOperation(

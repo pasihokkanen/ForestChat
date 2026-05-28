@@ -298,26 +298,23 @@ function aggregateFn(
 }
 
 /** Fill missing years in aggregated data with zero-value rows.
- *  When group_by is exactly ["year"] (simple single-group), this ensures every
- *  year between min/max gets a zero row so charts don't lose bars when
- *  operations are moved between years.
+ *  Works for both single-group (e.g. [{group_by: "year"}]) and multi-group
+ *  configs (e.g. [{group_by: "year"}, {group_by: "type"}] for stacked bars).
+ *  For multi-group configs, fills all (year × group_dim_value) combinations
+ *  so stacked bars render correctly across the full year range.
  *
- *  Does NOT fill gaps for multi-group configs (e.g., year + type for stacked
- *  bars) — those are rendered differently and gap filling would create spurious
- *  grouped bars in non-stacked chart types. */
+ *  Only fills gaps when the first group_by is "year". Other configs are
+ *  returned as-is. */
 function fillYearGaps(
   rows: Record<string, unknown>[],
   config: ChartQueryConfig
 ): Record<string, unknown>[] {
-  // Only fill when the sole group_by is "year"
-  if (
-    config.aggregate.length !== 1 ||
-    config.aggregate[0].group_by !== "year"
-  ) {
-    return rows;
-  }
+  if (config.aggregate.length === 0) return rows;
 
-  if (rows.length < 2) return rows; // Need at least 2 rows for a range
+  // Only fill when first group_by is "year"
+  if (config.aggregate[0].group_by !== "year") return rows;
+
+  if (rows.length < 1) return rows;
 
   const existingYears = new Set<number>();
   for (const row of rows) {
@@ -325,20 +322,91 @@ function fillYearGaps(
     if (!isNaN(y)) existingYears.add(y);
   }
 
-  if (existingYears.size < 2) return rows;
+  if (existingYears.size < 1) return rows;
 
   const yearsArr = Array.from(existingYears);
   const minYear = Math.min(...yearsArr);
   const maxYear = Math.max(...yearsArr);
 
-  const result = [...rows];
-  for (let y = minYear; y <= maxYear; y++) {
-    if (existingYears.has(y)) continue;
-    const zeroRow: Record<string, unknown> = { year: y };
-    for (const v of config.values) {
-      zeroRow[v.as] = 0;
+  // Single-group: [{group_by: "year"}] — simple gap fill
+  if (config.aggregate.length === 1) {
+    const result = [...rows];
+    for (let y = minYear; y <= maxYear; y++) {
+      if (existingYears.has(y)) continue;
+      const zeroRow: Record<string, unknown> = { year: y };
+      for (const v of config.values) {
+        zeroRow[v.as] = 0;
+      }
+      result.push(zeroRow);
     }
-    result.push(zeroRow);
+    return result;
+  }
+
+  // Multi-group: [{group_by: "year"}, {group_by: "X"}, ...] — fill all combinations
+  // Collect distinct values for each additional group dimension
+  const groupValues: Map<string, Set<string>> = new Map();
+  for (let i = 1; i < config.aggregate.length; i++) {
+    groupValues.set(config.aggregate[i].group_by, new Set());
+  }
+
+  for (const row of rows) {
+    for (let i = 1; i < config.aggregate.length; i++) {
+      const key = config.aggregate[i].group_by;
+      const val = String(row[key] ?? "");
+      groupValues.get(key)!.add(val);
+    }
+  }
+
+  // Build existing year+group keys for dedup
+  const existingKeys = new Set<string>();
+  for (const row of rows) {
+    const parts = [String(row["year"] ?? "")];
+    for (let i = 1; i < config.aggregate.length; i++) {
+      parts.push(String(row[config.aggregate[i].group_by] ?? ""));
+    }
+    existingKeys.add(parts.join("|"));
+  }
+
+  // Generate zero rows for all missing (year × group values) combinations
+  const result = [...rows];
+
+  // Build cartesian product of group dimension values
+  const dimValues: string[][] = [];
+  for (let i = 1; i < config.aggregate.length; i++) {
+    dimValues.push(Array.from(groupValues.get(config.aggregate[i].group_by)!));
+  }
+
+  function cartesianProduct(arrays: string[][]): string[][] {
+    if (arrays.length === 0) return [[]];
+    const [first, ...rest] = arrays;
+    const restProduct = cartesianProduct(rest);
+    const result: string[][] = [];
+    for (const val of first) {
+      for (const r of restProduct) {
+        result.push([val, ...r]);
+      }
+    }
+    return result;
+  }
+
+  for (let y = minYear; y <= maxYear; y++) {
+    if (existingYears.has(y)) {
+      continue;
+    }
+
+    for (const combo of cartesianProduct(dimValues)) {
+      const key = [String(y), ...combo].join("|");
+      if (existingKeys.has(key)) continue;
+
+      const zeroRow: Record<string, unknown> = { year: y };
+      for (let i = 1; i < config.aggregate.length; i++) {
+        zeroRow[config.aggregate[i].group_by] = combo[i - 1];
+      }
+      for (const v of config.values) {
+        zeroRow[v.as] = 0;
+      }
+      result.push(zeroRow);
+    }
   }
 
   return result;

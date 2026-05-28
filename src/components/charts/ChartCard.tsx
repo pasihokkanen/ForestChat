@@ -136,7 +136,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
         const pivotMap = new Map<string, Record<string, unknown>>();
         for (const row of tab.data) {
           const xVal = String(row[tab.xKey ?? "x"] ?? "");
-          const colorVal = String(tab.colorKey ?? "");
+          const colorVal = String(row[tab.colorKey ?? ""] ?? "");
           colorValues.add(colorVal);
           if (!pivotMap.has(xVal)) {
             const entry: Record<string, unknown> = {};
