@@ -45,3 +45,4 @@
 .next
 .next
 /node_modules
+tsconfig.tsbuildinfo
