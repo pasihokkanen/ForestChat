@@ -31,6 +31,64 @@ import type { ChartTab } from "@/lib/store/visualization-slice";
 import { useForestStore } from "@/lib/store";
 import { displayOperationType } from "@/lib/ai/config";
 
+// Format number with space as thousand separator (Finnish/SI convention: 10 000)
+function formatEuro(value: number): string {
+  const formatted = Math.abs(value)
+    .toFixed(0)
+    .replace(/\B(?=(\d{3})+(?!\d))/g, "\u00A0"); // non-breaking space
+  return value < 0 ? `−${formatted}` : formatted;
+}
+
+// Detect if a key likely holds euro values by name heuristics
+function isEuroKey(key: string): boolean {
+  const lower = key.toLowerCase();
+  return lower.includes("euro") || lower.includes("eur") || lower.includes("income") || lower.includes("cost") || lower.includes("revenue") || lower.includes("price");
+}
+
+// Detect if a key likely holds year values
+function isYearKey(key: string | null | undefined): boolean {
+  return key?.toLowerCase() === "year" || key?.toLowerCase() === "vuosi";
+}
+
+// Custom tooltip that formats currency values with thousand separators
+function EuroTooltip({ active, payload, label }: Record<string, unknown>) {
+  if (!active || !payload) return null;
+  return (
+    <div style={{
+      backgroundColor: "white",
+      border: "1px solid #e5e7eb",
+      borderRadius: "6px",
+      padding: "8px 12px",
+      fontSize: "13px",
+      boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+    }}>
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>{String(label)}</div>
+      {(payload as Array<Record<string, unknown>>).map((entry, i) => {
+        const val = entry.value as number;
+        const name = entry.name as string;
+        const color = entry.color as string;
+        if (val === undefined || val === null) return null;
+        return (
+          <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <span style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: color, display: "inline-block" }} />
+            <span>{name}:</span>
+            <span style={{ fontWeight: 500 }}>
+              {isEuroKey(name) || isEuroKey(entry.dataKey as string)
+                ? `${formatEuro(val)} €`
+                : typeof val === "number" && !Number.isInteger(val)
+                  ? val.toFixed(1)
+                  : String(val)}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const EURO_AXIS_LABEL = { value: "€", position: "insideTopLeft" as const, offset: -4, style: { fontSize: 11, fill: "#6b7280" } };
+const YEAR_AXIS_LABEL = { value: "Year", position: "insideBottomRight" as const, offset: -6, style: { fontSize: 11, fill: "#6b7280" } };
+
 const CHART_COLORS = [
   "#4CAF50",
   "#2196F3",
@@ -139,9 +197,17 @@ export default function ChartCard({ tab }: ChartCardProps) {
             }
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey={effectiveXKey ?? undefined} tick={{ fontSize: 12 }} />
-            <YAxis tick={{ fontSize: 12 }} />
-            <Tooltip />
+            <XAxis
+              dataKey={effectiveXKey ?? undefined}
+              tick={{ fontSize: 12 }}
+              label={isYearKey(effectiveXKey) ? YEAR_AXIS_LABEL : undefined}
+            />
+            <YAxis
+              tick={{ fontSize: 12 }}
+              tickFormatter={(v: number) => isEuroKey(tab.yKey) ? formatEuro(v) : String(v)}
+              label={isEuroKey(tab.yKey) ? EURO_AXIS_LABEL : undefined}
+            />
+            <Tooltip content={<EuroTooltip />} />
             <Bar
               dataKey={tab.yKey}
               fill="#4CAF50"
@@ -234,9 +300,23 @@ export default function ChartCard({ tab }: ChartCardProps) {
             }
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey={effectiveXKey ?? undefined} tick={{ fontSize: 12 }} />
-            <YAxis tick={{ fontSize: 12 }} />
-            <Tooltip />
+            <XAxis
+              dataKey={effectiveXKey ?? undefined}
+              tick={{ fontSize: 12 }}
+              label={isYearKey(effectiveXKey) ? YEAR_AXIS_LABEL : undefined}
+            />
+            <YAxis
+              tick={{ fontSize: 12 }}
+              tickFormatter={(v: number) => {
+                const anyEuro = stackKeys.some((k) => isEuroKey(k)) || isEuroKey(tab.yKey) || isEuroKey(tab.yKey2 ?? "");
+                return anyEuro ? formatEuro(v) : String(v);
+              }}
+              label={(() => {
+                const anyEuro = stackKeys.some((k) => isEuroKey(k)) || isEuroKey(tab.yKey) || isEuroKey(tab.yKey2 ?? "");
+                return anyEuro ? EURO_AXIS_LABEL : undefined;
+              })()}
+            />
+            <Tooltip content={<EuroTooltip />} />
             <Legend />
             {dual
               ? stackKeys.flatMap((cat, i) => {
@@ -291,14 +371,19 @@ export default function ChartCard({ tab }: ChartCardProps) {
             }
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis type="number" tick={{ fontSize: 12 }} />
+            <XAxis
+              type="number"
+              tick={{ fontSize: 12 }}
+              tickFormatter={(v: number) => isEuroKey(tab.yKey) ? formatEuro(v) : String(v)}
+              label={isEuroKey(tab.yKey) ? EURO_AXIS_LABEL : undefined}
+            />
             <YAxis
               dataKey={effectiveXKey ?? undefined}
               type="category"
               width={100}
               tick={{ fontSize: 12 }}
             />
-            <Tooltip />
+            <Tooltip content={<EuroTooltip />} />
             <Bar
               dataKey={tab.yKey}
               fill="#FF9800"
@@ -320,14 +405,15 @@ export default function ChartCard({ tab }: ChartCardProps) {
               cx="50%"
               cy="50%"
               outerRadius={100}
-              label={({ name, value }) => `${name}: ${value}`}
+              label={({ name, value }) => `${name}: ${isEuroKey(tab.yKey) ? formatEuro(value) + " €" : typeof value === "number" && !Number.isInteger(value) ? value.toFixed(1) : value}`}
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
+
             >
               {translatedData.map((_, i) => (
                 <Cell key={i} fill={getCellFill(i)} />
               ))}
             </Pie>
-            <Tooltip />
+            <Tooltip content={<EuroTooltip />} />
             <Legend />
           </PieChart>
         </ResponsiveContainer>
@@ -345,14 +431,15 @@ export default function ChartCard({ tab }: ChartCardProps) {
               cy="50%"
               innerRadius={50}
               outerRadius={100}
-              label={({ name, value }) => `${name}: ${value}`}
+              label={({ name, value }) => `${name}: ${isEuroKey(tab.yKey) ? formatEuro(value) + " €" : typeof value === "number" && !Number.isInteger(value) ? value.toFixed(1) : value}`}
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
+
             >
               {translatedData.map((_, i) => (
                 <Cell key={i} fill={getCellFill(i)} />
               ))}
             </Pie>
-            <Tooltip />
+            <Tooltip content={<EuroTooltip />} />
             <Legend />
           </PieChart>
         </ResponsiveContainer>
@@ -371,9 +458,17 @@ export default function ChartCard({ tab }: ChartCardProps) {
             }
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey={effectiveXKey ?? undefined} tick={{ fontSize: 12 }} />
-            <YAxis tick={{ fontSize: 12 }} />
-            <Tooltip />
+            <XAxis
+              dataKey={effectiveXKey ?? undefined}
+              tick={{ fontSize: 12 }}
+              label={isYearKey(effectiveXKey) ? YEAR_AXIS_LABEL : undefined}
+            />
+            <YAxis
+              tick={{ fontSize: 12 }}
+              tickFormatter={(v: number) => isEuroKey(tab.yKey) ? formatEuro(v) : String(v)}
+              label={isEuroKey(tab.yKey) ? EURO_AXIS_LABEL : undefined}
+            />
+            <Tooltip content={<EuroTooltip />} />
             <Line
               type="monotone"
               dataKey={tab.yKey}
@@ -398,9 +493,17 @@ export default function ChartCard({ tab }: ChartCardProps) {
             }
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey={effectiveXKey ?? undefined} tick={{ fontSize: 12 }} />
-            <YAxis tick={{ fontSize: 12 }} />
-            <Tooltip />
+            <XAxis
+              dataKey={effectiveXKey ?? undefined}
+              tick={{ fontSize: 12 }}
+              label={isYearKey(effectiveXKey) ? YEAR_AXIS_LABEL : undefined}
+            />
+            <YAxis
+              tick={{ fontSize: 12 }}
+              tickFormatter={(v: number) => isEuroKey(tab.yKey) ? formatEuro(v) : String(v)}
+              label={isEuroKey(tab.yKey) ? EURO_AXIS_LABEL : undefined}
+            />
+            <Tooltip content={<EuroTooltip />} />
             <Area
               type="monotone"
               dataKey={tab.yKey}
@@ -429,14 +532,18 @@ export default function ChartCard({ tab }: ChartCardProps) {
               type="number"
               name={effectiveXKey ?? "x"}
               tick={{ fontSize: 12 }}
+              tickFormatter={(v: number) => isEuroKey(effectiveXKey ?? "") ? formatEuro(v) : String(v)}
+              label={isEuroKey(effectiveXKey ?? "") ? EURO_AXIS_LABEL : isYearKey(effectiveXKey) ? YEAR_AXIS_LABEL : undefined}
             />
             <YAxis
               dataKey={tab.yKey}
               type="number"
               name={tab.yKey}
               tick={{ fontSize: 12 }}
+              tickFormatter={(v: number) => isEuroKey(tab.yKey) ? formatEuro(v) : String(v)}
+              label={isEuroKey(tab.yKey) ? EURO_AXIS_LABEL : undefined}
             />
-            <Tooltip cursor={{ strokeDasharray: "3 3" }} />
+            <Tooltip cursor={{ strokeDasharray: "3 3" }} content={<EuroTooltip />} />
             <Scatter
               data={translatedData}
               fill="#E91E63"
@@ -452,8 +559,11 @@ export default function ChartCard({ tab }: ChartCardProps) {
           <RadarChart data={translatedData}>
             <PolarGrid />
             <PolarAngleAxis dataKey={effectiveXKey ?? undefined} tick={{ fontSize: 11 }} />
-            <PolarRadiusAxis tick={{ fontSize: 11 }} />
-            <Tooltip />
+            <PolarRadiusAxis
+              tick={{ fontSize: 11 }}
+              tickFormatter={(v: number) => isEuroKey(tab.yKey) ? formatEuro(v) : String(v)}
+            />
+            <Tooltip content={<EuroTooltip />} />
             <Radar
               name={tab.title}
               dataKey={tab.yKey}
@@ -478,9 +588,17 @@ export default function ChartCard({ tab }: ChartCardProps) {
             }
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey={effectiveXKey ?? undefined} tick={{ fontSize: 12 }} />
-            <YAxis tick={{ fontSize: 12 }} />
-            <Tooltip />
+            <XAxis
+              dataKey={effectiveXKey ?? undefined}
+              tick={{ fontSize: 12 }}
+              label={isYearKey(effectiveXKey) ? YEAR_AXIS_LABEL : undefined}
+            />
+            <YAxis
+              tick={{ fontSize: 12 }}
+              tickFormatter={(v: number) => isEuroKey(tab.yKey) || isEuroKey(tab.yKey2 ?? "") ? formatEuro(v) : String(v)}
+              label={isEuroKey(tab.yKey) || isEuroKey(tab.yKey2 ?? "") ? EURO_AXIS_LABEL : undefined}
+            />
+            <Tooltip content={<EuroTooltip />} />
             <Legend />
             <Bar dataKey={tab.yKey} fill="#4CAF50" radius={[4, 4, 0, 0]} />
             <Line
@@ -506,9 +624,17 @@ export default function ChartCard({ tab }: ChartCardProps) {
             }
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey={effectiveXKey ?? undefined} tick={{ fontSize: 12 }} />
-            <YAxis tick={{ fontSize: 12 }} />
-            <Tooltip />
+            <XAxis
+              dataKey={effectiveXKey ?? undefined}
+              tick={{ fontSize: 12 }}
+              label={isYearKey(effectiveXKey) ? YEAR_AXIS_LABEL : undefined}
+            />
+            <YAxis
+              tick={{ fontSize: 12 }}
+              tickFormatter={(v: number) => isEuroKey(tab.yKey) ? formatEuro(v) : String(v)}
+              label={isEuroKey(tab.yKey) ? EURO_AXIS_LABEL : undefined}
+            />
+            <Tooltip content={<EuroTooltip />} />
             <Bar
               dataKey={tab.yKey}
               shape={<WaterfallBar />}
