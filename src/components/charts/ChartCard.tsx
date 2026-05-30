@@ -51,18 +51,20 @@ function isYearKey(key: string | null | undefined): boolean {
 }
 
 // Custom tooltip that formats currency values with thousand separators
+// Uses CSS variables for dark mode support
 function EuroTooltip({ active, payload, label }: Record<string, unknown>) {
   if (!active || !payload) return null;
   return (
     <div style={{
-      backgroundColor: "white",
-      border: "1px solid #e5e7eb",
+      backgroundColor: "var(--background, #ffffff)",
+      border: "1px solid var(--color-border, #e5e7eb)",
       borderRadius: "6px",
       padding: "8px 12px",
       fontSize: "13px",
-      boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+      boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+      color: "var(--foreground, #171717)",
     }}>
-      <div style={{ fontWeight: 600, marginBottom: 4 }}>{String(label)}</div>
+      <div style={{ fontWeight: 600, marginBottom: 4, color: "var(--foreground, #171717)" }}>{String(label)}</div>
       {(payload as Array<Record<string, unknown>>).map((entry, i) => {
         const val = entry.value as number;
         const name = entry.name as string;
@@ -71,8 +73,8 @@ function EuroTooltip({ active, payload, label }: Record<string, unknown>) {
         return (
           <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <span style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: color, display: "inline-block" }} />
-            <span>{name}:</span>
-            <span style={{ fontWeight: 500 }}>
+            <span style={{ color: "var(--foreground, #171717)" }}>{name}:</span>
+            <span style={{ fontWeight: 500, color: "var(--foreground, #171717)" }}>
               {isEuroKey(name) || isEuroKey(entry.dataKey as string)
                 ? `${formatEuro(val)} €`
                 : typeof val === "number" && !Number.isInteger(val)
