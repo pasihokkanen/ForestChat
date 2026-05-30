@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useForestStore } from "@/lib/store";
+import { persistActiveTab } from "@/lib/store/visualization-slice";
 import ChartTabBar from "./ChartTabBar";
 import ChartCard from "./ChartCard";
 
@@ -49,7 +50,10 @@ export default function ChartsPanel() {
       <ChartTabBar
         tabs={chartTabs.map((t) => ({ id: t.id, title: t.title }))}
         activeId={activeChartTab}
-        onSelect={setActiveChartTab}
+        onSelect={(id) => {
+          setActiveChartTab(id);
+          if (forest?.id) persistActiveTab(forest.id, id);
+        }}
         onClose={handleClose}
         onFullscreenToggle={() => setChartsFullscreen(!chartsFullscreen)}
         isFullscreen={chartsFullscreen}
