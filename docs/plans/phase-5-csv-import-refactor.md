@@ -3,10 +3,14 @@
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 > **P5.10 (chart engine alias fix) is committed separately — not part of this plan.**
 
-**Version:** 7.0
+**Version:** 8.0
 **Date:** 2026-05-29
 
-**Changelog v7.0 (from v6.0):**
+**Changelog v8.0 (from v7.0):**
+- Added Finnish text value → English translation maps: `FI_DEVCLASS_TEXT_MAP`, `FI_SITETYPE_TEXT_MAP`, `FI_DRAINAGE_TEXT_MAP` — CSV data values are now English, matching WFS output
+- Made CSV importer self-cleaning: deletes forest on internal failure (no `forestId` error attachment needed)
+- Noted WFS species data loss after gridcell removal — fallback to `main_species` exists
+- Aligned species detection algorithm description between §0 and P5.1
 - Restored all "Same as v5.0" stubs — plan is fully self-contained (P5.5, P5.7, P5.8, P5.9, P5.14, §2)
 - Fixed FI_TO_EN_COLUMN: removed dead bare-suffix entries; added separate SPECIES_FIELD_SUFFIX_MAP for species column detection
 - Added proper species column detection logic: handles Finnish prefix, English prefix, and mixed Finnish-prefix+English-suffix combos
@@ -130,12 +134,61 @@ const ENGLISH_SPECIES_SET = new Set([
 ]);
 ```
 
+### Value Translation Maps
+
+CSV data values are in Finnish text. These maps translate Finnish text values to English (matching the English values produced by the WFS import path via `code-tables.ts`). Unknown values pass through unchanged (stored in Finnish — acceptable for rare/edge-case terms).
+
+**FI_DEVCLASS_TEXT_MAP** — Finnish development class text → English:
+
+```typescript
+const FI_DEVCLASS_TEXT_MAP: Record<string, string> = {
+  "Aukea": "open_area",
+  "Taimikko": "seedling",
+  "Nuori kasvatusmetsikkö": "young_thinning",
+  "Varttunut kasvatusmetsikkö": "mature_thinning",
+  "Uudistuskypsä metsikkö": "regeneration_ready",
+  "Eri-ikäisrakenteinen": "uneven_aged",
+  "Suojuspuusto": "shelterwood",
+};
+```
+
+**FI_SITETYPE_TEXT_MAP** — Finnish site type text → English:
+
+```typescript
+const FI_SITETYPE_TEXT_MAP: Record<string, string> = {
+  "lehto": "herb-rich",
+  "lehtomainen kangas": "herb-rich heath",
+  "tuore kangas": "mesic",
+  "kuivahko kangas": "sub-xeric",
+  "kuiva kangas": "xeric",
+  "karukkokangas": "barren",
+};
+```
+
+**FI_DRAINAGE_TEXT_MAP** — Finnish drainage status text → English:
+
+```typescript
+const FI_DRAINAGE_TEXT_MAP: Record<string, string> = {
+  "Ojitettu": "drained",
+  "Ojittamaton": "undrained",
+  "Turvekangas": "peatland_forest",
+  "Luonnontilainen": "natural_state",
+};
+```
+
+**Soil type** (`maalaji`) values are descriptive Finnish terms with no standardized English equivalents (e.g., "Hieno hieta", "Karkea moreeni"). These are stored as-is in the `soil_type` column. This is consistent with the WFS path which also stores raw `SOILTYPE` values.
+
+The parser applies these maps when building `CsvStandRow`:
+- `FI_DEVCLASS_TEXT_MAP[value] ?? value` → `development_class`
+- `FI_SITETYPE_TEXT_MAP[value] ?? value` → `site_type`
+- `FI_DRAINAGE_TEXT_MAP[value] ?? value` → `drainage_status`
+
 ### Species Column Detection Logic
 
 The parser detects species columns by scanning headers for `{prefix}_{suffix}` patterns:
 
 1. Split each header on the **last** underscore: `mänty_basal_area` → prefix=`mänty`, suffix=`basal_area`
-2. Check if suffix is a known species field (via `SPECIES_FIELD_SUFFIX_MAP`)
+2. Check if suffix is a known species field: in `SPECIES_FIELD_SUFFIX_MAP` (Finnish) or already an English field name (check values of `SPECIES_FIELD_SUFFIX_MAP`)
 3. If yes, check if prefix is a known species:
    - Finnish: `mänty` is in `SPECIES_NAME_MAP` → species is `"pine"`
    - English: `pine` is in `ENGLISH_SPECIES_SET` → species is `"pine"`
@@ -332,6 +385,33 @@ const ENGLISH_SPECIES_SET = new Set([
   "larch", "silver_birch", "rowan",
 ]);
 
+// Finnish text values → English (matching code-tables.ts WFS output)
+const FI_DEVCLASS_TEXT_MAP: Record<string, string> = {
+  "Aukea": "open_area",
+  "Taimikko": "seedling",
+  "Nuori kasvatusmetsikkö": "young_thinning",
+  "Varttunut kasvatusmetsikkö": "mature_thinning",
+  "Uudistuskypsä metsikkö": "regeneration_ready",
+  "Eri-ikäisrakenteinen": "uneven_aged",
+  "Suojuspuusto": "shelterwood",
+};
+
+const FI_SITETYPE_TEXT_MAP: Record<string, string> = {
+  "lehto": "herb-rich",
+  "lehtomainen kangas": "herb-rich heath",
+  "tuore kangas": "mesic",
+  "kuivahko kangas": "sub-xeric",
+  "kuiva kangas": "xeric",
+  "karukkokangas": "barren",
+};
+
+const FI_DRAINAGE_TEXT_MAP: Record<string, string> = {
+  "Ojitettu": "drained",
+  "Ojittamaton": "undrained",
+  "Turvekangas": "peatland_forest",
+  "Luonnontilainen": "natural_state",
+};
+
 // ─── Types ─────────────────────────────────────────────────────────
 
 export interface CsvSpeciesRow {
@@ -525,11 +605,12 @@ export async function importStandsFromCsv(
 
 **Flow:**
 1. Fetch MML boundary → `fetchPropertyBoundary(propertyId, mmlApiKey)`
-2. Create forest via `supabase.from("forests").insert({ owner_id: userId, name, property_id, data_source: "csv" })` — RLS verifies `owner_id = auth.uid()`
-3. Store boundary via `supabase.from("property_boundaries").insert(...)`
-4. Map each `CsvStandRow` to compartment columns (see table below), insert via `upsert({ onConflict: "forest_id, stand_id" })`
-5. Map each `CsvSpeciesRow` to `compartment_species` columns (see table below), batch insert
-6. Update forest totals
+2. Create forest via `supabase.from("forests").insert(...)` → get `forest.id`
+3. **If any subsequent step fails, delete the forest (cascade removes all dependent rows) and re-throw.** This makes the importer self-cleaning — the caller doesn't need to track `forestId`.
+4. Store boundary via `supabase.from("property_boundaries").insert(...)`
+5. Map each `CsvStandRow` to compartment columns (see table below), insert via `upsert({ onConflict: "forest_id, stand_id" })`
+6. Map each `CsvSpeciesRow` to `compartment_species` columns (see table below), batch insert
+7. Update forest totals
 
 **Column mapping — CsvStandRow → compartments columns:**
 
@@ -680,30 +761,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "CSV contains no stand data" }, { status: 400 });
     }
 
-    // 4. Import with all-or-nothing
-    try {
-      const result = await importStandsFromCsv(
-        csvData, propertyId,
-        name || `Forest ${propertyId}`,
-        user.id, env.mmlApiKey, supabase
-      );
+    // 4. Import (importer is self-cleaning: deletes forest on failure)
+    const result = await importStandsFromCsv(
+      csvData, propertyId,
+      name || `Forest ${propertyId}`,
+      user.id, env.mmlApiKey, supabase
+    );
 
-      return NextResponse.json({
-        forest_id: result.forestId,
-        property_id: result.propertyId,
-        stands_imported: result.standsImported,
-        stands_with_geometry: result.standsWithGeometry,
-        species_rows: result.speciesRowsImported,
-        total_volume_m3: result.totalVolumeM3,
-        warnings: result.warnings,
-      });
-    } catch (importErr) {
-      // All-or-nothing: delete forest on failure (cascade removes everything)
-      if ((importErr as any).forestId) {
-        await supabase.from("forests").delete().eq("id", (importErr as any).forestId);
-      }
-      throw importErr;
-    }
+    return NextResponse.json({
+      forest_id: result.forestId,
+      property_id: result.propertyId,
+      stands_imported: result.standsImported,
+      stands_with_geometry: result.standsWithGeometry,
+      species_rows: result.speciesRowsImported,
+      total_volume_m3: result.totalVolumeM3,
+      warnings: result.warnings,
+    });
   } catch (error) {
     console.error("CSV import error:", error);
     return NextResponse.json(
@@ -753,7 +826,7 @@ export async function POST(request: NextRequest) {
 
 #### P5.9: Remove all gridcell code
 
-**Objective:** Delete all gridcell-related code. Gridcells were a WFS-specific hack for species data; the CSV path provides species data directly from columns.
+**Objective:** Delete all gridcell-related code. Gridcells were a WFS-specific hack for species data; the CSV path provides species data directly from columns. After this removal, WFS-imported forests will have no `compartment_species` rows — the income calculator and species charts fall back to `main_species` (existing fallback behavior).
 
 **Files:**
 - `src/lib/import/wfs-client.ts` — Delete: `WfsGridcell` interface, `fetchGridcellsByBbox()` function. Keep: `WfsStand`, `fetchStandsByBbox()`, helpers (`bboxFromGeometry`, `toMultiPolygon`, `bbox4326to3067`).
@@ -917,6 +990,9 @@ try {
 - [ ] Totals: `total_ika` → `total_age`; `total_ppa` → `total_basal_area`
 - [ ] `CsvSpeciesRow` fields: all English snake_case
 - [ ] `CsvStandRow` fields: all English snake_case
+- [ ] `development_class` translated: "Nuori kasvatusmetsikkö" → "young_thinning"
+- [ ] `site_type` translated: "tuore kangas" → "mesic"
+- [ ] `drainage_status` translated: "Ojitettu" → "drained"
 - [ ] `MAINGROUP_MAP`: snake_case values
 - [ ] `POST /api/import/csv` imports with geometry (no admin client)
 - [ ] Forest owner = authenticated user (RLS verified)
@@ -938,6 +1014,7 @@ try {
 | classify.ts species comparison uses old values | Species matching breaks | Updated to snake_case English comparisons |
 | MAINGROUP_MAP consumers expect Title Case | WFS import species names change | Updated in P5.13; data reimported after migration |
 | Mixed-language CSV headers (Finnish+English) | Parser misses some columns | Species detection logic handles all combos; P5.2 tests mixed headers |
+| WFS forests lose per-species data after gridcell removal | Species charts show only main_species for WFS forests | Income calculator + charts fall back to `main_species`; CSV becomes primary import path |
 
 ## 7. Out of Scope
 
