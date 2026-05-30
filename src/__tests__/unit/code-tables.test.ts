@@ -9,9 +9,9 @@ import {
 
 describe("Code Tables", () => {
   it("maps main group codes to species names", () => {
-    expect(mapWfsNumericCode(MAINGROUP_MAP, 1)).toBe("Pine");
-    expect(mapWfsNumericCode(MAINGROUP_MAP, 2)).toBe("Spruce");
-    expect(mapWfsNumericCode(MAINGROUP_MAP, 3)).toBe("Broadleaf");
+    expect(mapWfsNumericCode(MAINGROUP_MAP, 1)).toBe("pine");
+    expect(mapWfsNumericCode(MAINGROUP_MAP, 2)).toBe("spruce");
+    expect(mapWfsNumericCode(MAINGROUP_MAP, 3)).toBe("broadleaf");
     expect(mapWfsNumericCode(MAINGROUP_MAP, 99)).toBeNull();
   });
 
@@ -30,6 +30,6 @@ describe("Code Tables", () => {
   });
 
   it("handles string input for numeric codes", () => {
-    expect(mapWfsNumericCode(MAINGROUP_MAP, "2")).toBe("Spruce");
+    expect(mapWfsNumericCode(MAINGROUP_MAP, "2")).toBe("spruce");
   });
 });

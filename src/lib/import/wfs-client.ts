@@ -41,20 +41,6 @@ export interface WfsStand {
   attributes: Record<string, unknown>;
 }
 
-/** A single 16×16 m grid cell with per-species volume data.
- *  VOLUMEPINE/VOLUMESPRUCE/VOLUMEDECIDUOUS are m³/ha — must be
- *  scaled by cell area (0.0256 ha for 16×16m cells) to get actual m³. */
-export interface WfsGridcell {
-  gridcellNumber: string;
-  /** m³/ha — multiply by cellAreaHa for actual m³ */
-  volumePine: number;
-  volumeSpruce: number;
-  volumeDeciduous: number;
-  volumeTotal: number;
-  cellAreaHa: number;
-  geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon;
-}
-
 const WFS_URL = "https://avoin.metsakeskus.fi/geoserver/v1/ows";
 
 /** Bounding box from a GeoJSON Polygon or MultiPolygon. */
@@ -149,66 +135,6 @@ export async function fetchStandsByBbox(
         reproject3067to4326(rawGeom) as GeoJSON.Polygon | GeoJSON.MultiPolygon
       ),
       attributes: p,
-    };
-  });
-}
-
-/**
- * Fetch grid cells (16×16 m raster cells) within a bounding box.
- * Grid cells contain per-species volume data (VOLUMEPINE, VOLUMESPRUCE,
- * VOLUMEDECIDUOUS) that stands lack. Used for species-area charts.
- */
-export async function fetchGridcellsByBbox(
-  bbox: [number, number, number, number],
-  srsName: string = "EPSG:3067"
-): Promise<WfsGridcell[]> {
-  const [minX, minY, maxX, maxY] = bbox;
-
-  const url = new URL(WFS_URL);
-  url.searchParams.set("service", "WFS");
-  url.searchParams.set("version", "2.0.0");
-  url.searchParams.set("request", "GetFeature");
-  url.searchParams.set("typeNames", "v1:gridcell");
-  url.searchParams.set("srsName", `urn:x-ogc:def:crs:${srsName}`);
-  url.searchParams.set(
-    "bbox",
-    `${minX},${minY},${maxX},${maxY},urn:x-ogc:def:crs:${srsName}`
-  );
-  url.searchParams.set("outputFormat", "application/json");
-  url.searchParams.set("count", "10000"); // gridcells are small — may need many
-
-  const response = await fetch(url.toString(), {
-    headers: { Accept: "application/json" },
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      `WFS gridcell returned ${response.status}: ${await response
-        .text()
-        .then((t) => t.slice(0, 200))}`
-    );
-  }
-
-  const geojson = await response.json();
-  if (!geojson.features?.length) return [];
-
-  return geojson.features.map((f: GeoJSON.Feature) => {
-    const p = f.properties ?? {};
-    const rawGeom = f.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
-    // Gridcells are 16×16m = 0.0256 ha. VOLUME* fields are m³/ha,
-    // so actual volume per cell = value × 0.0256.
-    const cellAreaHa = 0.0256;
-
-    return {
-      gridcellNumber: String(p.GRIDCELLNUMBER ?? ""),
-      volumePine: parseFloat(p.VOLUMEPINE) || 0,
-      volumeSpruce: parseFloat(p.VOLUMESPRUCE) || 0,
-      volumeDeciduous: parseFloat(p.VOLUMEDECIDUOUS) || 0,
-      volumeTotal: parseFloat(p.VOLUME) || 0,
-      cellAreaHa,
-      geometry: toMultiPolygon(
-        reproject3067to4326(rawGeom) as GeoJSON.Polygon | GeoJSON.MultiPolygon
-      ),
     };
   });
 }

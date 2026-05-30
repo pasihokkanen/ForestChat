@@ -50,12 +50,12 @@ function compartmentToKuviotData(c: Compartment): KuviotData {
 /**
  * Get species breakdown from compartment attributes.
  * The raw data has an array under attributes.species with objects
- * { puulaji: string, m3: number, tukkiprosentti: number }.
+ * { species: string, m3: number, log_pct: number }.
  */
 interface RawSpecies {
-  puulaji: string;
+  species: string;
   m3: number;
-  tukkiprosentti: number;
+  log_pct: number;
 }
 
 function getSpeciesData(c: Compartment): RawSpecies[] {
@@ -70,7 +70,7 @@ function getSpeciesData(c: Compartment): RawSpecies[] {
  * Calculate stumpage value (arvo) for a stand.
  *
  * For each species:
- *   tukki_m3 = m3 * tukkiprosentti / 100
+ *   tukki_m3 = m3 * log_pct / 100
  *   kuitu_m3 = m3 - tukki_m3
  *   value = tukki_m3 * tukki_hinta + kuitu_m3 * kuitu_hinta
  *
@@ -87,9 +87,9 @@ function calculateValue(k: KuviotData, species: RawSpecies[]): {
 
   if (species.length > 0) {
     for (const sp of species) {
-      const spKey = sp.puulaji === "Koivu" ? "Rauduskoivu" : sp.puulaji;
+      const spKey = sp.species === "birch" ? "silver_birch" : sp.species;
       const spPrices = PRICES["uudistushakkuu"]?.[spKey] ?? PRICES["uudistushakkuu"]?.["Mänty"] ?? { tukki: 70, kuitu: 20 };
-      const tukkiM3 = sp.m3 * sp.tukkiprosentti / 100;
+      const tukkiM3 = sp.m3 * sp.log_pct / 100;
       const kuituM3 = sp.m3 - tukkiM3;
       totalTukki += tukkiM3;
       totalKuitu += kuituM3;

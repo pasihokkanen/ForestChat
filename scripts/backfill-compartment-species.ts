@@ -38,9 +38,9 @@ if (!supabaseUrl || !serviceRoleKey) {
 const supabase = createClient(supabaseUrl, serviceRoleKey);
 
 interface RawSpecies {
-  puulaji: string;
+  species: string;
   m3: number;
-  tukkiprosentti: number;
+  log_pct: number;
 }
 
 interface CompRow {
@@ -78,9 +78,9 @@ async function main() {
     forest_id: string;
     compartment_id: string;
     stand_id: string;
-    puulaji: string;
+    species: string;
     volume_m3: number;
-    tukkiprosentti: number | null;
+    log_pct: number | null;
     area_ha: number;
   }[] = [];
 
@@ -107,9 +107,9 @@ async function main() {
           forest_id: comp.forest_id,
           compartment_id: comp.id,
           stand_id: comp.stand_id,
-          puulaji: sp.puulaji ?? comp.main_species ?? "Unknown",
+          species: sp.species ?? comp.main_species ?? "Unknown",
           volume_m3: m3,
-          tukkiprosentti: sp.tukkiprosentti ?? null,
+          log_pct: sp.log_pct ?? null,
           area_ha: Math.round(areaProportion * 1000) / 1000, // 3 decimals
         });
       }
@@ -120,9 +120,9 @@ async function main() {
         forest_id: comp.forest_id,
         compartment_id: comp.id,
         stand_id: comp.stand_id,
-        puulaji: comp.main_species ?? "Unknown",
+        species: comp.main_species ?? "Unknown",
         volume_m3: comp.volume_m3 ?? 0,
-        tukkiprosentti: null,
+        log_pct: null,
         area_ha: comp.area_ha ?? 0,
       });
     }
@@ -166,15 +166,15 @@ async function main() {
   // 5. Summary
   const { data: summary, error: summaryError } = await supabase
     .from("compartment_species")
-    .select("puulaji, volume_m3.sum(), area_ha.sum()")
-    .order("puulaji");
+    .select("species, volume_m3.sum(), area_ha.sum()")
+    .order("species");
 
   if (summaryError) {
     console.error("Summary query failed:", summaryError);
   } else {
     console.log("\nSpecies distribution:");
     for (const row of summary as any[]) {
-      console.log(`  ${row.puulaji}: ${Math.round(row.sum ?? 0).toLocaleString()} m³, ${(row.sum_area_ha ?? 0).toFixed(1)} ha`);
+      console.log(`  ${row.species}: ${Math.round(row.sum ?? 0).toLocaleString()} m³, ${(row.sum_area_ha ?? 0).toFixed(1)} ha`);
     }
   }
 }

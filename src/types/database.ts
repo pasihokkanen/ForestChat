@@ -39,9 +39,9 @@ export interface CompartmentSpecies {
   forest_id: string;
   compartment_id: string;
   stand_id: string;
-  puulaji: string;
+  species: string;
   volume_m3: number;
-  tukkiprosentti: number | null;
+  log_pct: number | null;
   area_ha: number;
   created_at: string;
 }

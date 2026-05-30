@@ -94,7 +94,7 @@ function computeIncome(
   if (totalM3 <= 0) return 0;
 
   const attrs = comp.attributes;
-  let speciesData: { puulaji?: string; m3?: number; tukkiprosentti?: number }[] = [];
+  let speciesData: { species?: string; m3?: number; log_pct?: number }[] = [];
 
   if (attrs && Array.isArray(attrs["species"])) {
     speciesData = attrs["species"] as typeof speciesData;
@@ -104,9 +104,9 @@ function computeIncome(
 
   if (speciesData.length > 0) {
     for (const sp of speciesData) {
-      const spName = sp.puulaji ?? species;
+      const spName = sp.species ?? species;
       const spM3 = sp.m3 ?? 0;
-      const tukkiPct = sp.tukkiprosentti ?? 0;
+      const tukkiPct = sp.log_pct ?? 0;
       const prices = getPrices(tier, spName);
       const tukkiM3 = spM3 * (tukkiPct / 100);
       const kuituM3 = spM3 - tukkiM3;

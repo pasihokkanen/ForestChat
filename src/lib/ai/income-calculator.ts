@@ -8,9 +8,9 @@ import { getPrices, PRICES } from "./config";
 
 /** Species breakdown from compartment.attributes.species */
 interface RawSpecies {
-  puulaji: string;
+  species: string;
   m3: number;
-  tukkiprosentti: number;
+  log_pct: number;
 }
 
 /** Map operation type to price tier */
@@ -77,9 +77,9 @@ export async function calculateOperationIncome(
   if (speciesData.length > 0) {
     // Compute per-species value
     for (const sp of speciesData) {
-      const spName = sp.puulaji ?? species;
+      const spName = sp.species ?? species;
       const spM3 = sp.m3 ?? 0;
-      const tukkiPct = sp.tukkiprosentti ?? 0;
+      const tukkiPct = sp.log_pct ?? 0;
       totalValue += speciesValue(spM3, tukkiPct, tier, spName);
     }
   } else {

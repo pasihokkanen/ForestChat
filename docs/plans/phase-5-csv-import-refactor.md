@@ -988,29 +988,29 @@ try {
 
 ## 5. Verification Checklist
 
-- [ ] Migration 008 runs: `puulaji`→`species`, `tukkiprosentti`→`log_pct`
-- [ ] `grep -rn "puulaji\|tukkiprosentti" src/` → zero matches
-- [ ] `grep -rn '"Pine"\|"Spruce"\|"Broadleaf"' src/` → zero matches
-- [ ] `parseForestDataCsv()` Finnish headers → all fields English snake_case
-- [ ] `parseForestDataCsv()` English headers → passes through
-- [ ] `parseForestDataCsv()` mixed headers (e.g. `mänty_age`) → correct
-- [ ] Species: `mänty_m3` → `species = "pine"`; `mänty_tukki_pct` → `log_pct`
-- [ ] Totals: `total_ika` → `total_age`; `total_ppa` → `total_basal_area`
-- [ ] `CsvSpeciesRow` fields: all English snake_case
-- [ ] `CsvStandRow` fields: all English snake_case
-- [ ] `development_class` translated: "Nuori kasvatusmetsikkö" → "young_thinning"
-- [ ] `site_type` translated: "tuore kangas" → "mesic"
-- [ ] `drainage_status` translated: "Ojitettu" → "drained"
-- [ ] `MAINGROUP_MAP`: snake_case values
-- [ ] `POST /api/import/csv` imports with geometry (no admin client)
-- [ ] Forest owner = authenticated user (RLS verified)
-- [ ] Species stored with English column names + English snake_case values
-- [ ] Failed CSV import cleans up forest (no orphans)
-- [ ] API import path still works (WFS stands on map)
-- [ ] API import path all-or-nothing on failure (P5.14)
-- [ ] `grep -ri gridcell src/` → zero matches
-- [ ] `npm run build` passes
-- [ ] `npx vitest run` passes
+- [x] Migration 008 runs: `puulaji`→`species`, `tukkiprosentti`→`log_pct` ✅ 2026-05-30
+- [x] `grep -rn "puulaji\|tukkiprosentti" src/` → zero matches ✅ 2026-05-30
+- [x] `grep -rn '"Pine"\|"Spruce"\|"Broadleaf"' src/` → zero matches ✅ 2026-05-30
+- [x] `parseForestDataCsv()` Finnish headers → all fields English snake_case ✅ 2026-05-30
+- [x] `parseForestDataCsv()` English headers → passes through ✅ 2026-05-30
+- [x] `parseForestDataCsv()` mixed headers (e.g. `mänty_age`) → correct ✅ 2026-05-30
+- [x] Species: `mänty_m3` → `species = "pine"`; `mänty_tukki_pct` → `log_pct` ✅ 2026-05-30
+- [x] Totals: `total_ika` → `total_age`; `total_ppa` → `total_basal_area` ✅ 2026-05-30
+- [x] `CsvSpeciesRow` fields: all English snake_case ✅ 2026-05-30
+- [x] `CsvStandRow` fields: all English snake_case ✅ 2026-05-30
+- [x] `development_class` translated: "Nuori kasvatusmetsikkö" → "young_thinning" ✅ 2026-05-30
+- [x] `site_type` translated: "tuore kangas" → "mesic" ✅ 2026-05-30
+- [x] `drainage_status` translated: "Ojitettu" → "drained" ✅ 2026-05-30
+- [x] `MAINGROUP_MAP`: snake_case values ✅ 2026-05-30
+- [x] `POST /api/import/csv` imports with geometry (no admin client) ✅ 2026-05-30
+- [x] Forest owner = authenticated user (RLS verified) ✅ 2026-05-30
+- [x] Species stored with English column names + English snake_case values ✅ 2026-05-30
+- [x] Failed CSV import cleans up forest (no orphans) ✅ 2026-05-30
+- [x] API import path still works (WFS stands on map) ✅ 2026-05-30
+- [x] API import path all-or-nothing on failure (P5.14) ✅ 2026-05-30
+- [x] `grep -ri gridcell src/` → zero matches ✅ 2026-05-30
+- [x] `npm run build` passes ✅ 2026-05-30
+- [x] `npx vitest run` passes ✅ 2026-05-30
 
 ## 6. Risks
 

@@ -76,21 +76,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 6. Fetch stands and gridcells from Metsäkeskus WFS (parallel)
-    const { fetchStandsByBbox, fetchGridcellsByBbox, bboxFromGeometry, bbox4326to3067 } = await import(
+    // 6. Fetch stands from Metsäkeskus WFS
+    const { fetchStandsByBbox, bboxFromGeometry, bbox4326to3067 } = await import(
       "@/lib/import/wfs-client"
     );
     const bbox4326 = bboxFromGeometry(boundary.geometry);
     const bbox = bbox4326to3067(bbox4326);
-    const [stands, gridcells] = await Promise.all([
-      fetchStandsByBbox(bbox),
-      fetchGridcellsByBbox(bbox).catch((err) => {
-        console.warn("Gridcell fetch failed (non-fatal):", err.message);
-        return [];
-      }),
-    ]);
+    const stands = await fetchStandsByBbox(bbox);
 
-    console.log(`Fetched ${stands.length} stands, ${gridcells.length} gridcells`);
+    console.log(`Fetched ${stands.length} stands`);
 
     if (stands.length === 0) {
       // Update forest with area even if no stands
@@ -111,39 +105,44 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 7. Spatial filter and store stands
-    const { filterStandsWithinProperty } = await import(
-      "@/lib/import/spatial-service"
-    );
-    const filteredStands = await filterStandsWithinProperty(
-      boundary.geometry,
-      stands,
-      forest.id,
-      gridcells
-    );
+    // 7. Spatial filter and store stands (all-or-nothing)
+    try {
+      const { filterStandsWithinProperty } = await import(
+        "@/lib/import/spatial-service"
+      );
+      const filteredStands = await filterStandsWithinProperty(
+        boundary.geometry,
+        stands,
+        forest.id
+      );
 
-    const finalCount = filteredStands.length;
-    const totalAreaHa = boundary.areaM2
-      ? Math.round((boundary.areaM2 / 10000) * 100) / 100
-      : null;
+      const finalCount = filteredStands.length;
+      const totalAreaHa = boundary.areaM2
+        ? Math.round((boundary.areaM2 / 10000) * 100) / 100
+        : null;
 
-    await admin
-      .from("forests")
-      .update({
+      await admin
+        .from("forests")
+        .update({
+          total_area_ha: totalAreaHa,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", forest.id);
+
+      return NextResponse.json({
+        forest_id: forest.id,
+        property_id,
         total_area_ha: totalAreaHa,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", forest.id);
-
-    return NextResponse.json({
-      forest_id: forest.id,
-      property_id,
-      total_area_ha: totalAreaHa,
-      compartment_count: finalCount,
-      fetched_stands: stands.length,
-      filtered_out: stands.length - finalCount,
-      plot_count: boundary.plotCount,
-    });
+        compartment_count: finalCount,
+        fetched_stands: stands.length,
+        filtered_out: stands.length - finalCount,
+        plot_count: boundary.plotCount,
+      });
+    } catch (err) {
+      // P5.14: All-or-nothing — delete forest on any failure after creation
+      await admin.from("forests").delete().eq("id", forest.id);
+      throw err;
+    }
   } catch (error) {
     console.error("Import error:", error);
     return NextResponse.json(

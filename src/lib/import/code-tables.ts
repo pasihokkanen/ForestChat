@@ -1,9 +1,9 @@
 // Finnish Forest Centre code→text mappings (Metsätietostandardi)
 
 export const MAINGROUP_MAP: Record<number, string> = {
-  1: "Pine",
-  2: "Spruce",
-  3: "Broadleaf",
+  1: "pine",
+  2: "spruce",
+  3: "broadleaf",
 };
 
 export const FERTILITYCLASS_MAP: Record<number, string> = {

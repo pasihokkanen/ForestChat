@@ -88,8 +88,8 @@ const FIELD_ALIASES: Record<string, string> = {
   diameter: "avg_diameter",
   growth: "growth_m3_per_ha",
   // compartment_species table
-  species: "puulaji",
-  "tree_species": "puulaji",
+  species: "species",
+  "tree_species": "species",
   "total_ha": "area_ha",
   "total_m3": "volume_m3",
 };

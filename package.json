@@ -25,6 +25,7 @@
     "dexie": "^4.4.2",
     "maplibre-gl": "^5.24.0",
     "next": "16.2.6",
+    "papaparse": "^5.5.3",
     "pg": "^8.21.0",
     "proj4": "^2.20.8",
     "react": "19.2.4",
@@ -40,6 +41,7 @@
     "@testing-library/user-event": "^14.6.1",
     "@types/geojson": "^7946.0.16",
     "@types/node": "^20",
+    "@types/papaparse": "^5.5.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6.0.2",
@@ -49,6 +51,7 @@
     "msw": "^2.14.6",
     "serwist": "^9.5.11",
     "tailwindcss": "^4",
+    "tsx": "^4.22.3",
     "typescript": "^5",
     "vitest": "^4.1.7"
   }
