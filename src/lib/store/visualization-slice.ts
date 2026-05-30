@@ -45,6 +45,26 @@ export interface VisualizationSlice {
   setHighlightedStands: (ids: string[]) => void;
 }
 
+function persistActiveTab(forestId: string, tabId: string | null) {
+  try {
+    if (tabId) {
+      localStorage.setItem("forestchat_activeChart_" + forestId, tabId);
+    } else {
+      localStorage.removeItem("forestchat_activeChart_" + forestId);
+    }
+  } catch {
+    // ignore quota errors
+  }
+}
+
+function restoreActiveTab(forestId: string): string | null {
+  try {
+    return localStorage.getItem("forestchat_activeChart_" + forestId);
+  } catch {
+    return null;
+  }
+}
+
 export const createVisualizationSlice: StateCreator<VisualizationSlice> = (
   set,
   _get
@@ -83,18 +103,41 @@ export const createVisualizationSlice: StateCreator<VisualizationSlice> = (
   clearAllCharts: () =>
     set({ chartTabs: [], activeChartTab: null }),
 
-  setActiveChartTab: (id) => set({ activeChartTab: id }),
+  setActiveChartTab: (id) => {
+    // Persist to localStorage for page reload resilience
+    if (typeof window !== "undefined") {
+      const match = document.cookie.match(/forest_id=([^;]+)/);
+      if (match) {
+        persistActiveTab(match[1], id);
+      }
+    }
+    set({ activeChartTab: id });
+  },
 
   setChartTabs: (tabs) =>
-    set((state) => ({
-      chartTabs: tabs,
-      // Preserve active tab unless the previously active tab was removed
-      activeChartTab: tabs.some((t) => t.id === state.activeChartTab)
-        ? state.activeChartTab
-        : tabs.length > 0
-          ? tabs[tabs.length - 1].id
-          : null,
-    })),
+    set((state) => {
+      let activeId = state.activeChartTab;
+      // If the persisted active tab is still in the list, use it
+      if (activeId === null || !tabs.some((t) => t.id === activeId)) {
+        // Try to restore from localStorage
+        if (typeof window !== "undefined") {
+          const match = document.cookie.match(/forest_id=([^;]+)/);
+          if (match) {
+            const saved = restoreActiveTab(match[1]);
+            if (saved && tabs.some((t) => t.id === saved)) {
+              activeId = saved;
+            } else {
+              activeId = tabs.length > 0 ? tabs[tabs.length - 1].id : null;
+            }
+          } else {
+            activeId = tabs.length > 0 ? tabs[tabs.length - 1].id : null;
+          }
+        } else {
+          activeId = tabs.length > 0 ? tabs[tabs.length - 1].id : null;
+        }
+      }
+      return { chartTabs: tabs, activeChartTab: activeId };
+    }),
 
   setChartsFullscreen: (v) => set({ chartsFullscreen: v }),
 
