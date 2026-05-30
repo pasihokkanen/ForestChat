@@ -3,34 +3,26 @@
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 > **P5.10 (chart engine alias fix) is committed separately — not part of this plan.**
 
-**Version:** 6.0
+**Version:** 7.0
 **Date:** 2026-05-29
+
+**Changelog v7.0 (from v6.0):**
+- Restored all "Same as v5.0" stubs — plan is fully self-contained (P5.5, P5.7, P5.8, P5.9, P5.14, §2)
+- Fixed FI_TO_EN_COLUMN: removed dead bare-suffix entries; added separate SPECIES_FIELD_SUFFIX_MAP for species column detection
+- Added proper species column detection logic: handles Finnish prefix, English prefix, and mixed Finnish-prefix+English-suffix combos
+- P5.13 table cleaned up: removed gridcell-removal items (belong in P5.9); kept only English rename changes
+- Deduplicated constants: §0 shows them once; P5.1 references them (no duplicate definitions)
 
 **Changelog v6.0 (from v5.0):**
 - Renamed all CsvSpeciesRow fields to English snake_case: `ika`→`age`, `ppa`→`basal_area`, `runkoluku`→`stem_count`, `kpituus`→`mean_height`, `klapimitta`→`mean_diameter`
-- Renamed all CsvStandRow total_* fields to English snake_case: `total_ika`→`total_age`, `total_ppa`→`total_basal_area`, `total_runkoluku`→`total_stem_count`, `total_kpituus`→`total_mean_height`, `total_klapimitta`→`total_mean_diameter`, `total_tukki_pct`→`total_log_pct`
-- Added English CSV header equivalents for all total_* and species_* fields
-- `SPECIES_NAME_MAP` values now use snake_case: `"pine"`, `"spruce"`, `"aspen"`, etc.
-- `MAINGROUP_MAP` in code-tables.ts updated to snake_case for consistency (in P5.13 task)
-- `classify.ts` species comparisons updated to snake_case values
+- Renamed all CsvStandRow total_* fields to English snake_case: `total_ika`→`total_age`, etc.
+- Added English CSV header equivalents; SPECIES_NAME_MAP values now snake_case; MAINGROUP_MAP updated
 
 **Changelog v5.0 (from v4.0):**
-- Renamed `compartment_species.puulaji` → `species` (English), `tukkiprosentti` → `log_pct` (English) — migration 008
-- Updated all plan interfaces: `CsvSpeciesRow.puulaji` → `species`, added `log_pct` field
-- Added P5.13 task to update all existing source file references (10 files)
-- Updated all plan references to use English column names throughout
-- `FIELD_ALIASES` in chart-engine.ts simplified: `species`/`tree_species` → `"species"` (no-op alias removed)
-- `system-prompt.ts` chart templates updated: `puulaji` → `species`
-- `classify.ts` species comparison updated: Finnish values → English values
-- No existing data migration needed (development phase, data will be reimported)
+- Renamed `compartment_species` columns: `puulaji`→`species`, `tukkiprosentti`→`log_pct`; P5.13 updates 10+ source files
 
 **Changelog v4.0 (from v3.0):**
-- Removed all `createAdminClient` usage from CSV importer — uses `createServerSupabase` (user auth via RLS) instead
-- Species names use English internally with a Finnish→English mapping table
-- CSV parser accepts both Finnish and English column headers
-- Resolved P5.4/P5.9 contradiction
-- Added all-or-nothing error handling; WFS path fix as P5.14
-- Removed P5.10, P5.11; added WKT tests; upsert for duplicates; generic stand counts
+- Removed `createAdminClient`, English species names, bilingual CSV headers, all-or-nothing, upsert duplicates
 
 **Goal:** Add CSV stand data import alongside the existing Metsäkeskus API import. All data names, field names, column names, and species values use English snake_case throughout — Finnish only appears at the CSV header layer and is translated on parse.
 
@@ -73,13 +65,14 @@ English species prefixes: `pine`, `spruce`, `aspen`, `grey_alder`, `downy_birch`
 
 Empty species cells = stand doesn't have that species. Polygon WKT is in EPSG:4326 (`lon lat` order).
 
-### English↔Finnish Column Mapping
+### Mapping Tables
 
-The parser auto-detects header language. Finnish headers are mapped to internal English field names:
+These constants are defined once in `src/lib/import/csv-parser.ts` (see P5.1). Documented here for reference:
+
+**FI_TO_EN_COLUMN** — maps full Finnish CSV headers to internal English field names:
 
 ```typescript
 const FI_TO_EN_COLUMN: Record<string, string> = {
-  // Stand attributes
   pinta_ala_ha: "area_ha",
   maaluokka: "land_class",
   kehitysluokka: "development_class",
@@ -87,26 +80,33 @@ const FI_TO_EN_COLUMN: Record<string, string> = {
   maalaji: "soil_type",
   ojitustilanne: "drainage_status",
   paapuulaji: "main_species",
-  // Stand totals
   total_ika: "total_age",
   total_ppa: "total_basal_area",
   total_runkoluku: "total_stem_count",
   total_kpituus: "total_mean_height",
   total_klapimitta: "total_mean_diameter",
   total_tukki_pct: "total_log_pct",
-  // Species field suffixes (used when detecting species columns)
+};
+```
+Note: Only **full-header matches** go here. Species field suffixes (`ika`, `ppa`, etc.) are handled separately by `SPECIES_FIELD_SUFFIX_MAP` — see P5.1.
+
+**SPECIES_FIELD_SUFFIX_MAP** — maps Finnish species field suffixes to English suffixes (used during species column detection):
+
+```typescript
+const SPECIES_FIELD_SUFFIX_MAP: Record<string, string> = {
   ika: "age",
   ppa: "basal_area",
   runkoluku: "stem_count",
   kpituus: "mean_height",
   klapimitta: "mean_diameter",
   tukki_pct: "log_pct",
+  m3_ha: "m3_ha",   // already English
+  m3: "m3",          // already English
+  pct: "pct",        // already English
 };
 ```
 
-### Species Name Mapping
-
-Species column prefixes are detected from the CSV header. Finnish prefixes are mapped to English snake_case species names:
+**SPECIES_NAME_MAP** — Finnish species prefix → English snake_case species name:
 
 ```typescript
 const SPECIES_NAME_MAP: Record<string, string> = {
@@ -121,7 +121,31 @@ const SPECIES_NAME_MAP: Record<string, string> = {
 };
 ```
 
-Species names are stored as snake_case in `compartment_species.species` and `compartments.main_species`. The existing `MAINGROUP_MAP` in `code-tables.ts` is updated to use snake_case for consistency (see P5.13).
+**ENGLISH_SPECIES_SET** — English species names (for detecting English-header CSVs):
+
+```typescript
+const ENGLISH_SPECIES_SET = new Set([
+  "pine", "spruce", "aspen", "grey_alder", "downy_birch",
+  "larch", "silver_birch", "rowan",
+]);
+```
+
+### Species Column Detection Logic
+
+The parser detects species columns by scanning headers for `{prefix}_{suffix}` patterns:
+
+1. Split each header on the **last** underscore: `mänty_basal_area` → prefix=`mänty`, suffix=`basal_area`
+2. Check if suffix is a known species field (via `SPECIES_FIELD_SUFFIX_MAP`)
+3. If yes, check if prefix is a known species:
+   - Finnish: `mänty` is in `SPECIES_NAME_MAP` → species is `"pine"`
+   - English: `pine` is in `ENGLISH_SPECIES_SET` → species is `"pine"`
+   - Mixed: `mänty` prefix + `basal_area` suffix → species is `"pine"`, field is `"basal_area"` (the suffix map handles the Finnish→English suffix translation)
+4. If recognized: map the suffix to English (via `SPECIES_FIELD_SUFFIX_MAP`), collect all 9 fields for this species
+
+This handles all combinations:
+- `mänty_ika` → species=`pine`, field=`age` (Finnish+Finnish)
+- `pine_age` → species=`pine`, field=`age` (English+English)
+- `mänty_age` → species=`pine`, field=`age` (Finnish+English)
 
 ### Key design decisions
 
@@ -129,8 +153,8 @@ Species names are stored as snake_case in `compartment_species.species` and `com
 - **Polygon geometry is already in the CSV** as WKT — no WFS stand fetch needed for CSV import.
 - **Species data is already in the CSV** as columns — no gridcell population needed.
 - **No admin client** — all writes go through the authenticated user's `createServerSupabase()` client, enforced by RLS policies.
-- **English snake_case everywhere** — all DB column names, TypeScript field names, data values, and species names use English snake_case. Finnish only exists at the CSV header layer (translated on parse).
-- **CSV headers bilingual** — parser accepts Finnish or English headers. Internal representation is always English.
+- **English snake_case everywhere** — all DB column names, TypeScript field names, data values, and species names use English snake_case.
+- **CSV headers bilingual** — parser accepts Finnish, English, or mixed headers.
 
 ---
 
@@ -153,7 +177,7 @@ User uploads CSV file + enters property ID
   → MML API → property boundary
   → Create forest record (data_source: 'csv', via user's auth session)
   → Store compartments (English field names + WKT→GeoJSON geometry)
-  → Store species breakdown (Finnish/English CSV columns → English species names → compartment_species)
+  → Store species breakdown (CSV columns → English species names → compartment_species)
   → On any failure: delete forest (cascade removes compartments, species, boundary)
 ```
 
@@ -161,7 +185,83 @@ User uploads CSV file + enters property ID
 
 ## 2. UI Design
 
-Same as v5.0 (two-tab layout: Metsäkeskus API | CSV File). See v5.0 changelog for details.
+The existing `/forest/new` page gets a **two-tab layout**:
+
+```
+┌──────────────────────────────────────────────────┐
+│  Import Stand Data                                │
+│                                                    │
+│  [ Metsäkeskus API ]  |  [ CSV File ]              │  ← tabs
+│  ──────────────────────────────────────────────    │
+│                                                    │
+│  Import stand data from the Finnish Forest         │  ← description per tab
+│  Centre (Metsäkeskus) open WFS API. Enter          │
+│  your property ID to fetch stands automatically.   │
+│                                                    │
+│  Property ID                                       │
+│  ┌──────────────────────────────────────────────┐  │
+│  │ 989-405-0001-0405                            │  │
+│  └──────────────────────────────────────────────┘  │
+│                                                    │
+│  Forest name (optional)                            │
+│  ┌──────────────────────────────────────────────┐  │
+│  │ Hokkala                                      │  │
+│  └──────────────────────────────────────────────┘  │
+│                                                    │
+│  [ Import Stand Data ]                             │
+└──────────────────────────────────────────────────┘
+```
+
+**CSV tab:**
+
+```
+┌──────────────────────────────────────────────────┐
+│  Import Stand Data                                │
+│                                                    │
+│  [ Metsäkeskus API ]  |  [ CSV File ]              │
+│  ──────────────────────────────────────────────    │
+│                                                    │
+│  Import stand data from a CSV file. The file       │
+│  must contain stand attributes, species breakdown, │
+│  and polygon geometry in WKT format.               │
+│                                                    │
+│  Property ID                                       │
+│  ┌──────────────────────────────────────────────┐  │
+│  │ 989-405-0001-0405                            │  │
+│  └──────────────────────────────────────────────┘  │
+│                                                    │
+│  Stand data CSV file                               │
+│  ┌──────────────────────────────────────────────┐  │
+│  │ 📁 forest_data.csv                           │  │  ← file input
+│  └──────────────────────────────────────────────┘  │
+│  N stands · 8 species · X m³ total volume          │  ← parsed preview
+│                                                    │
+│  Forest name (optional)                            │
+│  ┌──────────────────────────────────────────────┐  │
+│  │ Hokkala                                      │  │
+│  └──────────────────────────────────────────────┘  │
+│                                                    │
+│  [ Import Stand Data ]                             │
+└──────────────────────────────────────────────────┘
+```
+
+### Progress stages (CSV path)
+
+```
+○ Parsing CSV file...              → client-side parse
+  ✓ N stands, X m³ found
+○ Fetching property boundary...    → MML API
+○ Storing compartments...          → Supabase insert (user auth)
+○ Importing species data...        → Supabase insert (user auth)
+```
+
+### Progress stages (API path — unchanged)
+
+```
+○ Fetching property boundary...    → MML API
+○ Fetching stand data...           → WFS API
+○ Storing data...                  → Supabase insert
+```
 
 ---
 
@@ -173,7 +273,7 @@ Same as v5.0 (two-tab layout: Metsäkeskus API | CSV File). See v5.0 changelog f
 
 #### P5.1: Install Papa Parse and create CSV parser
 
-**Objective:** Parse the semicolon-delimited CSV format into typed TypeScript structures. Accepts both Finnish and English column headers, outputs English snake_case field names.
+**Objective:** Parse the semicolon-delimited CSV format into typed TypeScript structures. Accepts Finnish, English, or mixed column headers, outputs English snake_case field names.
 
 **Files:**
 - `package.json` — add `papaparse`, `@types/papaparse`, `tsx` (devDep)
@@ -182,9 +282,10 @@ Same as v5.0 (two-tab layout: Metsäkeskus API | CSV File). See v5.0 changelog f
 ```typescript
 // src/lib/import/csv-parser.ts
 
-// Finnish CSV header → internal English snake_case field name
+// ─── Mapping Tables ─────────────────────────────────────────────────
+
+// Finnish CSV header → internal English field name (full-header matches only)
 const FI_TO_EN_COLUMN: Record<string, string> = {
-  // Stand attributes
   pinta_ala_ha: "area_ha",
   maaluokka: "land_class",
   kehitysluokka: "development_class",
@@ -192,23 +293,28 @@ const FI_TO_EN_COLUMN: Record<string, string> = {
   maalaji: "soil_type",
   ojitustilanne: "drainage_status",
   paapuulaji: "main_species",
-  // Stand totals
   total_ika: "total_age",
   total_ppa: "total_basal_area",
   total_runkoluku: "total_stem_count",
   total_kpituus: "total_mean_height",
   total_klapimitta: "total_mean_diameter",
   total_tukki_pct: "total_log_pct",
-  // Species field suffixes
+};
+
+// Finnish species field suffix → English suffix
+const SPECIES_FIELD_SUFFIX_MAP: Record<string, string> = {
   ika: "age",
   ppa: "basal_area",
   runkoluku: "stem_count",
   kpituus: "mean_height",
   klapimitta: "mean_diameter",
   tukki_pct: "log_pct",
+  m3_ha: "m3_ha",
+  m3: "m3",
+  pct: "pct",
 };
 
-// Finnish CSV species prefix → English snake_case species name
+// Finnish species prefix → English species name
 const SPECIES_NAME_MAP: Record<string, string> = {
   mänty: "pine",
   kuusi: "spruce",
@@ -219,6 +325,14 @@ const SPECIES_NAME_MAP: Record<string, string> = {
   rauduskoivu: "silver_birch",
   pihlaja: "rowan",
 };
+
+// English species names (for detecting English headers)
+const ENGLISH_SPECIES_SET = new Set([
+  "pine", "spruce", "aspen", "grey_alder", "downy_birch",
+  "larch", "silver_birch", "rowan",
+]);
+
+// ─── Types ─────────────────────────────────────────────────────────
 
 export interface CsvSpeciesRow {
   species: string;          // English snake_case: "pine", "spruce", "aspen", etc.
@@ -241,7 +355,7 @@ export interface CsvStandRow {
   site_type: string;
   soil_type: string;
   drainage_status: string;
-  main_species: string;       // English snake_case from SPECIES_NAME_MAP: "pine", "spruce", etc.
+  main_species: string;       // English: "pine", "spruce", etc.
   center_lat: number;
   center_lon: number;
   polygon_wkt: string;        // MULTIPOLYGON WKT in EPSG:4326
@@ -254,7 +368,7 @@ export interface CsvStandRow {
   total_m3_ha: number | null;
   total_m3: number | null;
   total_pct: number | null;
-  species: CsvSpeciesRow[];   // parsed from species columns
+  species: CsvSpeciesRow[];
 }
 
 export interface ParsedCsvData {
@@ -264,31 +378,49 @@ export interface ParsedCsvData {
   speciesList: string[];      // English snake_case species names found
 }
 
+// ─── Parser ─────────────────────────────────────────────────────────
+
 /**
- * Resolve a CSV header to its internal English field name.
- * Accepts Finnish or English headers.
+ * Resolve a full CSV header to its internal English field name.
+ * Only matches full-header entries in FI_TO_EN_COLUMN.
+ * English headers pass through unchanged.
  */
 function resolveField(csvHeader: string): string {
-  if (csvHeader in FI_TO_EN_COLUMN) return FI_TO_EN_COLUMN[csvHeader];
-  return csvHeader; // English headers pass through unchanged
+  return FI_TO_EN_COLUMN[csvHeader] ?? csvHeader;
 }
 
 /**
  * Parse forest compartment CSV format.
- * Auto-detects language from headers. Outputs English snake_case field names.
+ * Handles Finnish, English, or mixed headers.
+ * Outputs English snake_case field names and species names.
  */
-export function parseForestDataCsv(csvContent: string): ParsedCsvData;
+export function parseForestDataCsv(csvContent: string): ParsedCsvData {
+  // 1. Parse with Papa Parse
+  // 2. Scan headers: detect species columns via {prefix}_{suffix} pattern
+  // 3. For each data row: map stand fields, collect species rows
+  // 4. Aggregate totals
+}
 ```
 
-**Parser logic:**
-1. Papa Parse with `delimiter: ";"`, `header: true`, `skipEmptyLines: true`
-2. Read header row → for stand attribute/total columns, map through `resolveField()`
-3. Detect species columns: any header matching `{prefix}_{suffix}` where prefix is in `SPECIES_NAME_MAP` (Finnish) or is an English species name
-4. For each data row:
-   a. Parse stand attribute and total columns (Finnish or English → internal field)
-   b. For each detected species prefix, collect all 9 fields into a `CsvSpeciesRow`
-   c. Skip species rows where `m3` is null or 0
-5. Return `ParsedCsvData` with typed stand rows and summary stats
+**Species column detection algorithm:**
+
+```
+For each CSV header:
+  1. Try FI_TO_EN_COLUMN lookup → stand attribute or total field, done.
+  2. Split on last underscore: "mänty_basal_area" → prefix="mänty", suffix="basal_area"
+  3. Check if suffix is in SPECIES_FIELD_SUFFIX_MAP (Finnish) or is already an English field name
+  4. If suffix is recognized:
+     a. Resolve species prefix: SPECIES_NAME_MAP[prefix] OR prefix if in ENGLISH_SPECIES_SET
+     b. Resolve field suffix: SPECIES_FIELD_SUFFIX_MAP[suffix] ?? suffix
+     c. Register {species, field} pair for this column
+  5. Unknown headers are ignored
+```
+
+This handles all combinations:
+- `mänty_ika` → species=`pine`, field=`age` (Finnish+Finnish)
+- `pine_age` → species=`pine`, field=`age` (English+English)
+- `mänty_age` → species=`pine`, field=`age` (Finnish+English mixed)
+- `pine_ika` → species=`pine`, field=`age` (English+Finnish mixed)
 
 **Verification:**
 ```bash
@@ -319,19 +451,22 @@ console.log('  species[0].age:', s.species[0]?.age, 'log_pct:', s.species[0]?.lo
 **Test cases:**
 1. Parse CSV with Finnish headers → all fields mapped to English snake_case names
 2. Parse CSV with English headers → passes through unchanged
-3. Species name mapping: `mänty_m3` column → `CsvSpeciesRow.species = "pine"`
+3. Species name mapping: `mänty_m3` → `CsvSpeciesRow.species = "pine"`
 4. Finnish total fields: `total_ika` → `total_age`, `total_ppa` → `total_basal_area`, etc.
 5. English total fields: `total_age`, `total_basal_area` pass through
 6. Finnish species fields: `mänty_ika` → `age`, `mänty_ppa` → `basal_area`, `mänty_tukki_pct` → `log_pct`
 7. English species fields: `pine_age`, `pine_basal_area` pass through
-8. Empty species columns → `null` values, not zero
-9. Stand with missing `polygon_wkt` → `polygon_wkt = ""` (handled gracefully)
-10. Stand with `total_m3 = 0` → still imported
-11. Valid WKT string → contains `MULTIPOLYGON(((...)))`
-12. Malformed WKT → string still stored (PostGIS will reject on insert)
-13. CSV with different species columns → auto-detected from header
-14. Total volume aggregation matches sum of `total_m3`
-15. Both Finnish (`mänty`) and English (`pine`) species prefixes detected
+8. **Mixed headers**: `mänty_age` (Finnish prefix + English suffix) → species=`pine`, field=`age`
+9. **Mixed headers**: `pine_ika` (English prefix + Finnish suffix) → species=`pine`, field=`age`
+10. Empty species columns → `null` values, not zero
+11. Stand with missing `polygon_wkt` → `polygon_wkt = ""` (handled gracefully)
+12. Stand with `total_m3 = 0` → still imported
+13. Valid WKT string → contains `MULTIPOLYGON(((...)))`
+14. Malformed WKT → string still stored (PostGIS will reject on insert)
+15. CSV with different species columns → auto-detected from header
+16. Total volume aggregation matches sum of `total_m3`
+17. Both Finnish (`mänty`) and English (`pine`) species prefixes detected
+18. Unknown headers silently ignored
 
 ---
 
@@ -343,10 +478,11 @@ console.log('  species[0].age:', s.species[0]?.age, 'log_pct:', s.species[0]?.lo
 - Duplicate `stand_id` → handled by UPSERT
 - CSV with Finnish headers → all fields mapped to English via `FI_TO_EN_COLUMN`
 - CSV with English headers → pass through unchanged
-- CSV with mixed Finnish/English headers → handled per-column
+- CSV with mixed Finnish/English headers → handled per-column (species detection logic)
 - Species with volume 0 → not inserted into `compartment_species`
 - Main species values → mapped through `SPECIES_NAME_MAP` (snake_case English)
 - `total_m3_ha` (standing volume/ha) → stored in `attributes` JSONB, NOT in `growth_m3_per_ha`
+- Unrecognized headers → silently ignored (allows CSVs with extra metadata columns)
 
 ---
 
@@ -383,9 +519,17 @@ export async function importStandsFromCsv(
   forestName: string,
   userId: string,
   mmlApiKey: string,
-  supabase: SupabaseClient  // authenticated user client (NOT admin)
+  supabase: SupabaseClient
 ): Promise<CsvImportResult>;
 ```
+
+**Flow:**
+1. Fetch MML boundary → `fetchPropertyBoundary(propertyId, mmlApiKey)`
+2. Create forest via `supabase.from("forests").insert({ owner_id: userId, name, property_id, data_source: "csv" })` — RLS verifies `owner_id = auth.uid()`
+3. Store boundary via `supabase.from("property_boundaries").insert(...)`
+4. Map each `CsvStandRow` to compartment columns (see table below), insert via `upsert({ onConflict: "forest_id, stand_id" })`
+5. Map each `CsvSpeciesRow` to `compartment_species` columns (see table below), batch insert
+6. Update forest totals
 
 **Column mapping — CsvStandRow → compartments columns:**
 
@@ -403,13 +547,7 @@ export async function importStandsFromCsv(
 | `total_mean_height` | `avg_height` | |
 | `total_m3` | `volume_m3` | |
 | `polygon_wkt` | `geometry` | WKT→GeoJSON via wktToGeoJSON() |
-| `land_class` | `attributes` JSONB | |
-| `total_m3_ha` | `attributes` JSONB | standing volume/ha; NOT growth |
-| `total_stem_count` | `attributes` JSONB | |
-| `total_log_pct` | `attributes` JSONB | |
-| `total_pct` | `attributes` JSONB | |
-| `center_lat` | `attributes` JSONB | |
-| `center_lon` | `attributes` JSONB | |
+| `land_class`, `total_m3_ha`, `total_stem_count`, `total_log_pct`, `total_pct`, `center_lat`, `center_lon` | `attributes` JSONB | |
 
 **Column mapping — CsvSpeciesRow → compartment_species columns:**
 
@@ -419,13 +557,61 @@ export async function importStandsFromCsv(
 | `m3` | `volume_m3` | |
 | `log_pct` | `log_pct` | |
 | (computed) | `area_ha` | proportional: species.m3 / total_m3 × area_ha |
-| `age`, `basal_area`, `stem_count`, `mean_height`, `mean_diameter`, `m3_ha`, `pct` | `attributes` JSONB on compartment | stored for reference |
+| `age`, `basal_area`, `stem_count`, `mean_height`, `mean_diameter`, `m3_ha`, `pct` | stored in compartment `attributes` JSONB | for reference |
 
 ---
 
 #### P5.5: WKT → GeoJSON geometry conversion
 
-Same as v5.0. No field name changes.
+**Objective:** Convert `MULTIPOLYGON(((lon lat,...)))` WKT from the CSV to GeoJSON for Supabase/PostGIS storage.
+
+**Approach:** Parse WKT in TypeScript, convert to GeoJSON. This matches the existing WFS import pattern where GeoJSON objects are passed directly to Supabase — PostGIS handles SRID conversion via `ST_GeomFromGeoJSON`.
+
+```typescript
+/**
+ * Parse MULTIPOLYGON WKT string to GeoJSON MultiPolygon.
+ * WKT format: MULTIPOLYGON(((lon lat, lon lat,...)),((...)))
+ * GeoJSON:    { type: "MultiPolygon", coordinates: [[[[lon, lat],...]]] }
+ *
+ * WKT uses "lon lat" order. GeoJSON uses [lon, lat] order. They match — no swap needed.
+ * Returns null if the WKT is empty or unparseable.
+ */
+function wktToGeoJSON(wkt: string): GeoJSON.MultiPolygon | null {
+  if (!wkt || !wkt.trim()) return null;
+
+  try {
+    const match = wkt.match(/^MULTIPOLYGON\s*\(\(\((.+)\)\)\)$/i);
+    if (!match) return null;
+
+    const polygonStrings = match[1].split(/\s*\)\s*\)\s*,\s*\(\s*\(\s*/);
+    const coordinates: GeoJSON.Position[][][] = polygonStrings.map(polyStr => {
+      const ringStrs = polyStr.split(/\s*\)\s*,\s*\(\s*/);
+      return ringStrs.map(ringStr =>
+        ringStr.trim().split(/\s*,\s*/).map(pair => {
+          const [lon, lat] = pair.trim().split(/\s+/).map(Number);
+          return [lon, lat] as GeoJSON.Position;
+        })
+      );
+    });
+
+    return { type: "MultiPolygon", coordinates };
+  } catch {
+    return null; // malformed WKT → stand stored without geometry
+  }
+}
+```
+
+**⚠️ Pitfalls:**
+- WKT uses `lon lat` order, GeoJSON uses `[lon, lat]` — they match, no coordinate swap needed.
+- Malformed WKT returns `null` — the stand is stored without geometry (graceful degradation).
+- Empty `polygon_wkt` → `null` → geometry column set to `null` in DB.
+
+**In the importer (P5.4):**
+```typescript
+const geom = wktToGeoJSON(stand.polygon_wkt);
+if (!geom) warnings.push(`Stand ${stand.stand_id}: no valid geometry`);
+// Insert with geometry: geom (may be null)
+```
 
 ---
 
@@ -433,31 +619,131 @@ Same as v5.0. No field name changes.
 
 **Objective:** Store per-species breakdown from CSV columns into `compartment_species`. All column names, field names, and values use English snake_case.
 
-Species values stored in `compartment_species.species`:
+Species values (already English from parser):
 ```
-CSV mänty_* columns  →  CsvSpeciesRow { species: "pine", ... }
-CSV pine_* columns   →  CsvSpeciesRow { species: "pine", ... }  (English headers)
-CSV kuusi_* columns  →  CsvSpeciesRow { species: "spruce", ... }
+CSV mänty_*  →  CsvSpeciesRow { species: "pine", ... }
+CSV pine_*   →  CsvSpeciesRow { species: "pine", ... }
+CSV kuusi_*  →  CsvSpeciesRow { species: "spruce", ... }
 ...etc for all 8 species
 ```
 
-Only insert rows where `m3 > 0`. The importer iterates `CsvStandRow.species[]` directly — no DB re-query.
+Only insert rows where `m3 > 0`. Iterate `CsvStandRow.species[]` directly — no DB re-query needed.
 
 **Area calculation:** `area_ha = (species.m3 / stand.total_m3) × stand.area_ha` (proportional to volume share).
 
-**Batch insert:** 500 rows per batch.
+**Batch insert:** 500 rows per batch (matching existing pattern).
 
 ---
 
 #### P5.7: Create CSV upload API route (all-or-nothing)
 
-Same structure as v5.0. No field name changes in the route itself.
+**Files:**
+- Create: `src/app/api/import/csv/route.ts`
+
+```typescript
+import { createServerSupabase } from "@/lib/supabase/server";
+import { env } from "@/lib/env";
+import { NextResponse, type NextRequest } from "next/server";
+import { parseForestDataCsv } from "@/lib/import/csv-parser";
+import { importStandsFromCsv } from "@/lib/import/csv-importer";
+
+export async function POST(request: NextRequest) {
+  try {
+    // 1. Authenticate user
+    const supabase = await createServerSupabase();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // 2. Parse multipart form
+    const formData = await request.formData();
+    const file = formData.get("file") as File | null;
+    const propertyId = formData.get("property_id") as string | null;
+    const name = (formData.get("name") as string) || undefined;
+
+    if (!file) return NextResponse.json({ error: "CSV file is required" }, { status: 400 });
+    if (!propertyId) return NextResponse.json({ error: "property_id is required" }, { status: 400 });
+
+    // 3. Parse CSV
+    const csvText = await file.text();
+    let csvData;
+    try {
+      csvData = parseForestDataCsv(csvText);
+    } catch (parseErr) {
+      return NextResponse.json(
+        { error: `CSV parse error: ${parseErr instanceof Error ? parseErr.message : "Invalid format"}` },
+        { status: 400 }
+      );
+    }
+    if (csvData.totalStands === 0) {
+      return NextResponse.json({ error: "CSV contains no stand data" }, { status: 400 });
+    }
+
+    // 4. Import with all-or-nothing
+    try {
+      const result = await importStandsFromCsv(
+        csvData, propertyId,
+        name || `Forest ${propertyId}`,
+        user.id, env.mmlApiKey, supabase
+      );
+
+      return NextResponse.json({
+        forest_id: result.forestId,
+        property_id: result.propertyId,
+        stands_imported: result.standsImported,
+        stands_with_geometry: result.standsWithGeometry,
+        species_rows: result.speciesRowsImported,
+        total_volume_m3: result.totalVolumeM3,
+        warnings: result.warnings,
+      });
+    } catch (importErr) {
+      // All-or-nothing: delete forest on failure (cascade removes everything)
+      if ((importErr as any).forestId) {
+        await supabase.from("forests").delete().eq("id", (importErr as any).forestId);
+      }
+      throw importErr;
+    }
+  } catch (error) {
+    console.error("CSV import error:", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Import failed unexpectedly" },
+      { status: 500 }
+    );
+  }
+}
+```
+
+**Request:** `multipart/form-data` with fields `file` (CSV), `property_id` (string), `name` (optional string)
+
+**Response:** `{ forest_id, property_id, stands_imported, stands_with_geometry, species_rows, total_volume_m3, warnings }`
 
 ---
 
 #### P5.8: Update frontend import page
 
-Same as v5.0. No field name changes in the UI layer.
+**Files:**
+- Modify: `src/app/(app)/forest/new/page.tsx`
+- Modify: `src/components/import/ImportProgress.tsx`
+
+**Changes to `page.tsx`:**
+1. Add tab state: `"api" | "csv"` with two `<button>` tab toggles
+2. **API tab**: existing form (property ID + name, POST to `/api/import/property`)
+3. **CSV tab**: property ID + `<input type="file" accept=".csv">` + name
+4. Both tabs share the "Import Stand Data" submit button
+5. CSV submit: builds `FormData`, POSTs to `/api/import/csv`
+6. Tab descriptions explain each data source
+
+**Changes to `ImportProgress.tsx`:**
+1. Add CSV stage strings to the `stage` union: `"parsing_csv"`, `"fetching_boundary"`, `"storing_stands"`, `"storing_species"`
+2. Add CSV stage labels to the `stages` array:
+   - `"parsing_csv"` → "Parsing CSV file..."
+   - `"fetching_boundary"` → "Fetching property boundary from National Land Survey…"
+   - `"storing_stands"` → "Storing stand data…"
+   - `"storing_species"` → "Importing species breakdown…"
+3. Route starts at `"parsing_csv"` → `"fetching_boundary"` → `"storing_stands"` → `"storing_species"` → `"done"`
+
+**Client-side preview:** On file select, run Papa Parse in the browser to extract stand count and total volume. Show these below the file input as immediate feedback before the user clicks Import.
 
 ---
 
@@ -467,7 +753,19 @@ Same as v5.0. No field name changes in the UI layer.
 
 #### P5.9: Remove all gridcell code
 
-Same as v5.0. No changes.
+**Objective:** Delete all gridcell-related code. Gridcells were a WFS-specific hack for species data; the CSV path provides species data directly from columns.
+
+**Files:**
+- `src/lib/import/wfs-client.ts` — Delete: `WfsGridcell` interface, `fetchGridcellsByBbox()` function. Keep: `WfsStand`, `fetchStandsByBbox()`, helpers (`bboxFromGeometry`, `toMultiPolygon`, `bbox4326to3067`).
+- `src/lib/import/spatial-service.ts` — Delete: `matchGridcellsToStands()`, `populateCompartmentSpecies()`. Keep: `filterStandsWithinProperty()`. Remove `gridcells` parameter from `filterStandsWithinProperty` signature.
+- `src/app/api/import/property/route.ts` — Remove: `fetchGridcellsByBbox` import and `Promise.all` call; remove `gridcells` argument from `filterStandsWithinProperty()` call.
+- `src/__tests__/unit/wfs-client.test.ts` — Remove gridcell-related tests.
+
+**Verification:**
+```bash
+grep -ri "gridcell\|Gridcell" src/
+# Expected: zero matches
+```
 
 ---
 
@@ -496,41 +794,39 @@ COMMENT ON TABLE compartment_species IS 'Per-species data. English column names 
 
 ---
 
-#### P5.13: Update all source file references (English snake_case)
+#### P5.13: Update source file references (English rename only)
 
-**Objective:** Update every reference to renamed DB columns AND switch all species values to English snake_case for consistency.
+**Objective:** Update every reference to renamed DB columns. Also switch MAINGROUP_MAP values and classify.ts species comparisons to English snake_case for consistency.
 
-**Files to update (11 files):**
+**⚠️ Scope:** This task ONLY handles the English rename. Gridcell removal is P5.9. WFS all-or-nothing is P5.14.
+
+**Files to update:**
 
 | File | Changes |
 |---|---|
 | `src/types/database.ts` | `CompartmentSpecies.puulaji` → `species`, `tukkiprosentti` → `log_pct` |
 | `src/lib/import/code-tables.ts` | `MAINGROUP_MAP`: `"Pine"`→`"pine"`, `"Spruce"`→`"spruce"`, `"Broadleaf"`→`"broadleaf"` |
-| `src/lib/ai/chart-engine.ts:91-92` | FIELD_ALIASES: remove `puulaji` entries (now identity: `species`→`"species"`) |
-| `src/lib/chat/system-prompt.ts:60,82` | `puulaji` → `species` in chart templates; species examples updated to snake_case |
-| `src/lib/import/spatial-service.ts` | `RawSpecies`: `puulaji`→`species`, `tukkiprosentti`→`log_pct`; gridcell species values: `"Mänty"`→`"pine"`, `"Kuusi"`→`"spruce"`, `"Lehtipuu"`→`"broadleaf"` |
-| `src/lib/ai/income-calculator.ts:11,13,80,82` | `puulaji`→`species`, `tukkiprosentti`→`log_pct`; species comparisons to snake_case |
-| `src/lib/ai/classify.ts:53,56,58,73,90,92` | `puulaji`→`species`, `tukkiprosentti`→`log_pct`; `"Koivu"`→`"birch"`, `"Rauduskoivu"`→`"silver_birch"` |
-| `src/lib/ai/schedule.ts:67,370` | `paapuulaji` stays (KuviotData — out of scope) |
-| `src/__tests__/unit/forestry-schedule.test.ts:13` | `paapuulaji` stays (match KuviotData) |
-| `src/lib/import/wfs-client.ts` | Gridcell code removal (P5.9) |
-| `src/app/api/import/property/route.ts` | Gridcell removal + all-or-nothing (P5.9 + P5.14) |
+| `src/lib/ai/chart-engine.ts` | FIELD_ALIASES: remove `puulaji` entries (now identity: `species`→`"species"`) |
+| `src/lib/chat/system-prompt.ts` | `puulaji` → `species` in chart templates (lines 60, 82) |
+| `src/lib/ai/income-calculator.ts` | `puulaji`→`species`, `tukkiprosentti`→`log_pct` in SpeciesPrice interface + all usage |
+| `src/lib/ai/classify.ts` | `puulaji`→`species`, `tukkiprosentti`→`log_pct`; `"Koivu"`→`"birch"`, `"Rauduskoivu"`→`"silver_birch"` |
+
+**Not updated (out of scope or handled by other tasks):**
+- `spatial-service.ts` — P5.9 deletes gridcell functions entirely; no rename needed
+- `schedule.ts` / `forestry-schedule.test.ts` — `paapuulaji` is part of KuviotData (separate cleanup)
+- `wfs-client.ts`, `property/route.ts` — gridcell removal is P5.9
 
 **code-tables.ts MAINGROUP_MAP update:**
 
 ```typescript
 // Before:
 export const MAINGROUP_MAP: Record<number, string> = {
-  1: "Pine",
-  2: "Spruce",
-  3: "Broadleaf",
+  1: "Pine", 2: "Spruce", 3: "Broadleaf",
 };
 
-// After (snake_case for consistency):
+// After:
 export const MAINGROUP_MAP: Record<number, string> = {
-  1: "pine",
-  2: "spruce",
-  3: "broadleaf",
+  1: "pine", 2: "spruce", 3: "broadleaf",
 };
 ```
 
@@ -540,40 +836,49 @@ export const MAINGROUP_MAP: Record<number, string> = {
 // Before:
 const spKey = sp.puulaji === "Koivu" ? "Rauduskoivu" : sp.puulaji;
 
-// After (English snake_case):
+// After:
 const spKey = sp.species === "birch" ? "silver_birch" : sp.species;
-```
-
-**spatial-service.ts gridcell species values (updated in place before deletion in P5.9):**
-
-```typescript
-// Before:
-species.push({ puulaji: "Mänty", m3: ..., tukkiprosentti: 0 });
-species.push({ puulaji: "Kuusi", m3: ..., tukkiprosentti: 0 });
-species.push({ puulaji: "Lehtipuu", m3: ..., tukkiprosentti: 0 });
-
-// After (English snake_case):
-species.push({ species: "pine", m3: ..., log_pct: 0 });
-species.push({ species: "spruce", m3: ..., log_pct: 0 });
-species.push({ species: "broadleaf", m3: ..., log_pct: 0 });
 ```
 
 **Verification:**
 ```bash
-# No Finnish DB column names remain
+# No Finnish DB column names
 grep -rn "puulaji\|tukkiprosentti" src/ --include="*.ts" --include="*.tsx"
 # Expected: zero matches
 
-# Species values are English snake_case
-grep -rn '"Pine"\|"Spruce"\|"Broadleaf"\|"Mänty"\|"Kuusi"\|"Lehtipuu"\|"Koivu"' src/ --include="*.ts" --include="*.tsx"
-# Expected: zero matches (may appear in comments or Finnish data constants)
+# No Title Case species values
+grep -rn '"Pine"\|"Spruce"\|"Broadleaf"' src/ --include="*.ts" --include="*.tsx"
+# Expected: zero matches
 ```
 
 ---
 
 #### P5.14: Add all-or-nothing error handling to WFS import path
 
-Same as v5.0. No changes.
+**Objective:** Apply the same all-or-nothing pattern to the existing WFS import route.
+
+**Files:**
+- Modify: `src/app/api/import/property/route.ts`
+
+**Change:** Wrap the `filterStandsWithinProperty` call in a try/catch. If it fails after forest creation, delete the forest (cascade handles compartments, species, boundary):
+
+```typescript
+// After forest creation and boundary storage:
+let forestId = forest.id;
+
+try {
+  const filteredStands = await filterStandsWithinProperty(
+    boundary.geometry, stands, forestId
+  );
+  // ... update forest totals, return success response ...
+} catch (err) {
+  // Clean up on failure
+  await admin.from("forests").delete().eq("id", forestId);
+  throw err;
+}
+```
+
+**Note:** The WFS path uses `createAdminClient()` for writes (existing pattern). Switching to `createServerSupabase()` is out of scope.
 
 ---
 
@@ -581,43 +886,44 @@ Same as v5.0. No changes.
 
 | File | Action | Purpose |
 |---|---|---|
-| `src/lib/import/csv-parser.ts` | **Create** | Parse CSV (Finnish/English headers → English snake_case fields) |
+| `src/lib/import/csv-parser.ts` | **Create** | Parse CSV (Finnish/English/mixed headers → English snake_case) |
 | `src/lib/import/csv-importer.ts` | **Create** | CSV → MML → Supabase storage (user auth, no admin) |
 | `src/app/api/import/csv/route.ts` | **Create** | POST multipart CSV upload, all-or-nothing |
-| `src/__tests__/unit/csv-parser.test.ts` | **Create** | CSV parser tests (both languages, species mapping, WKT) |
-| `src/app/(app)/forest/new/page.tsx` | **Modify** | Two-tab UI |
-| `src/components/import/ImportProgress.tsx` | **Modify** | CSV progress stages |
+| `src/__tests__/unit/csv-parser.test.ts` | **Create** | CSV parser tests (all header combos, species mapping, WKT) |
+| `src/app/(app)/forest/new/page.tsx` | **Modify** | Two-tab UI: API + CSV import |
+| `src/components/import/ImportProgress.tsx` | **Modify** | Add CSV progress stages |
 | `supabase/migrations/008_english_column_names.sql` | **Create** | Rename `puulaji`→`species`, `tukkiprosentti`→`log_pct` |
-| `src/types/database.ts` | **Modify** | `CompartmentSpecies.puulaji`→`species`, `tukkiprosentti`→`log_pct` |
+| `src/types/database.ts` | **Modify** | `CompartmentSpecies`: English column names |
 | `src/lib/import/code-tables.ts` | **Modify** | MAINGROUP_MAP: Title Case → snake_case |
 | `src/lib/ai/chart-engine.ts` | **Modify** | FIELD_ALIASES: remove `puulaji` references |
-| `src/lib/chat/system-prompt.ts` | **Modify** | `puulaji` → `species`; snake_case species examples |
-| `src/lib/import/spatial-service.ts` | **Modify** | Remove gridcell code; `puulaji`→`species`, Fi→En species values |
+| `src/lib/chat/system-prompt.ts` | **Modify** | `puulaji` → `species` in chart templates |
 | `src/lib/ai/income-calculator.ts` | **Modify** | `puulaji`→`species`, `tukkiprosentti`→`log_pct` |
-| `src/lib/ai/classify.ts` | **Modify** | `puulaji`→`species`, `tukkiprosentti`→`log_pct`; En species comparisons |
-| `src/app/api/import/property/route.ts` | **Modify** | Remove gridcell fetch; all-or-nothing |
-| `src/lib/import/wfs-client.ts` | **Modify** | Remove gridcell code |
-| `src/__tests__/unit/wfs-client.test.ts` | **Modify** | Remove gridcell tests |
+| `src/lib/ai/classify.ts` | **Modify** | English field names + species comparisons |
+| `src/lib/import/spatial-service.ts` | **Modify** | Remove gridcell functions (P5.9) |
+| `src/app/api/import/property/route.ts` | **Modify** | Remove gridcell fetch (P5.9); all-or-nothing (P5.14) |
+| `src/lib/import/wfs-client.ts` | **Modify** | Remove gridcell code (P5.9) |
+| `src/__tests__/unit/wfs-client.test.ts` | **Modify** | Remove gridcell tests (P5.9) |
 | `package.json` | **Modify** | Add `papaparse`, `@types/papaparse`, `tsx` (devDep) |
 
 ## 5. Verification Checklist
 
 - [ ] Migration 008 runs: `puulaji`→`species`, `tukkiprosentti`→`log_pct`
 - [ ] `grep -rn "puulaji\|tukkiprosentti" src/` → zero matches
-- [ ] `grep -rn '"Pine"\|"Spruce"\|"Broadleaf"\|"Mänty"\|"Kuusi"\|"Lehtipuu"' src/` → zero matches in code
-- [ ] `parseForestDataCsv()` with Finnish headers → all fields English snake_case
-- [ ] `parseForestDataCsv()` with English headers → passes through
+- [ ] `grep -rn '"Pine"\|"Spruce"\|"Broadleaf"' src/` → zero matches
+- [ ] `parseForestDataCsv()` Finnish headers → all fields English snake_case
+- [ ] `parseForestDataCsv()` English headers → passes through
+- [ ] `parseForestDataCsv()` mixed headers (e.g. `mänty_age`) → correct
 - [ ] Species: `mänty_m3` → `species = "pine"`; `mänty_tukki_pct` → `log_pct`
 - [ ] Totals: `total_ika` → `total_age`; `total_ppa` → `total_basal_area`
-- [ ] `CsvSpeciesRow` fields: `age`, `basal_area`, `stem_count`, `mean_height`, `mean_diameter`, `log_pct`, `m3_ha`, `m3`, `pct`
-- [ ] `CsvStandRow` fields: `total_age`, `total_basal_area`, `total_stem_count`, `total_mean_height`, `total_mean_diameter`, `total_log_pct`
-- [ ] `MAINGROUP_MAP`: `{ 1: "pine", 2: "spruce", 3: "broadleaf" }`
+- [ ] `CsvSpeciesRow` fields: all English snake_case
+- [ ] `CsvStandRow` fields: all English snake_case
+- [ ] `MAINGROUP_MAP`: snake_case values
 - [ ] `POST /api/import/csv` imports with geometry (no admin client)
 - [ ] Forest owner = authenticated user (RLS verified)
 - [ ] Species stored with English column names + English snake_case values
-- [ ] Failed import cleans up forest (no orphans)
-- [ ] API import path still works
-- [ ] API import path all-or-nothing on failure
+- [ ] Failed CSV import cleans up forest (no orphans)
+- [ ] API import path still works (WFS stands on map)
+- [ ] API import path all-or-nothing on failure (P5.14)
 - [ ] `grep -ri gridcell src/` → zero matches
 - [ ] `npm run build` passes
 - [ ] `npx vitest run` passes
@@ -631,6 +937,7 @@ Same as v5.0. No changes.
 | Column rename breaks existing code | Build fails | P5.12 + P5.13 committed atomically |
 | classify.ts species comparison uses old values | Species matching breaks | Updated to snake_case English comparisons |
 | MAINGROUP_MAP consumers expect Title Case | WFS import species names change | Updated in P5.13; data reimported after migration |
+| Mixed-language CSV headers (Finnish+English) | Parser misses some columns | Species detection logic handles all combos; P5.2 tests mixed headers |
 
 ## 7. Out of Scope
 
@@ -662,4 +969,4 @@ P5.13 Source Updates ◄── (after P5.12)                       │
                                                       P5.14 WFS Fix
 ```
 
-**Critical:** P5.12 + P5.13 = one atomic commit.
+**Critical:** P5.12 + P5.13 = one atomic commit. P5.9 must NOT touch files that P5.13 updates for English rename — scopes are separate.
