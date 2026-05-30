@@ -123,7 +123,7 @@ Returns: operations per stand, key metrics.`,
       type: "function",
       function: {
         name: "batch_update_operations",
-        description: "Update multiple operations at once. Filter selects which operations to modify, update specifies what to change. Use this for bulk modifications like 'move all 2026 thinnings to 2028'. Each `.update()` call is atomic at the DB level. Max 500 operations per call.",
+        description: "Update multiple operations at once. Filter selects which operations to modify, update specifies what to change. Use this for bulk modifications like 'move all 2026 thinnings to 2028'. When the user says 'move harvests', filter by harvest types (Päätehakkuu, Harvennus, Ensiharvennus, Poimintahakkuu). When they say 'move silvicultural work', filter by cost operation types. Each `.update()` call is atomic at the DB level. Max 500 operations per call.",
         parameters: {
           type: "object",
           properties: {
