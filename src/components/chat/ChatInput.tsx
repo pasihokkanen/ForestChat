@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, KeyboardEvent } from "react";
+import { useState, useRef, useCallback, useEffect, KeyboardEvent } from "react";
 import { useForestStore } from "@/lib/store";
 import CommandsMenu from "./CommandsMenu";
 
@@ -14,6 +14,18 @@ export default function ChatInput({ onSend, disabled }: ChatInputProps) {
   const { commandsOpen, toggleCommands } = useForestStore();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const cmdBtnRef = useRef<HTMLDivElement>(null);
+
+  // Re-focus textarea when streaming finishes (disabled → enabled)
+  const prevDisabled = useRef(disabled);
+  useEffect(() => {
+    if (prevDisabled.current && !disabled) {
+      // disabled just turned false — focus the textarea
+      requestAnimationFrame(() => {
+        textareaRef.current?.focus();
+      });
+    }
+    prevDisabled.current = disabled;
+  }, [disabled]);
 
   // Auto-grow textarea up to 4 lines
   const adjustHeight = useCallback(() => {
