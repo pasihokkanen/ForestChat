@@ -196,6 +196,10 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
     // Finnish values (legacy data or unmapped)
     pairs.push("Taimikko");
     pairs.push(DEVELOPMENT_CLASS_COLORS.seedling);
+    pairs.push("Taimikko alle 1,3 m");
+    pairs.push(DEVELOPMENT_CLASS_COLORS.seedling_small);
+    pairs.push("Taimikko yli 1,3 m");
+    pairs.push(DEVELOPMENT_CLASS_COLORS.seedling_large);
     pairs.push("Nuori kasvatusmetsikkö");
     pairs.push(DEVELOPMENT_CLASS_COLORS.young_thinning);
     pairs.push("Varttunut kasvatusmetsikkö");
@@ -206,6 +210,8 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
     pairs.push(DEVELOPMENT_CLASS_COLORS.uneven_aged);
     pairs.push("Suojuspuusto");
     pairs.push(DEVELOPMENT_CLASS_COLORS.shelterwood);
+    pairs.push("Siemenpuumetsikkö");
+    pairs.push(DEVELOPMENT_CLASS_COLORS.seed_tree);
 
     pairs.push("#CCCCCC"); // default fallback
     return pairs as unknown as maplibregl.Expression;

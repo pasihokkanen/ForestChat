@@ -58,26 +58,36 @@ const ENGLISH_SPECIES_SET = new Set([
 const FI_DEVCLASS_TEXT_MAP: Record<string, string> = {
   "Aukea": "open_area",
   "Taimikko": "seedling",
+  "Taimikko alle 1,3 m": "seedling_small",
+  "Taimikko yli 1,3 m": "seedling_large",
   "Nuori kasvatusmetsikkö": "young_thinning",
   "Varttunut kasvatusmetsikkö": "mature_thinning",
   "Uudistuskypsä metsikkö": "regeneration_ready",
   "Eri-ikäisrakenteinen": "uneven_aged",
   "Suojuspuusto": "shelterwood",
+  "Siemenpuumetsikkö": "seed_tree",
 };
 
 const FI_SITETYPE_TEXT_MAP: Record<string, string> = {
   "lehto": "herb-rich",
   "lehtomainen kangas": "herb-rich heath",
+  "Lehtomainen kangas, vastaava suo ja ruohoturvekangas": "herb-rich heath",
   "tuore kangas": "mesic",
+  "Tuore kangas, vastaava suo ja mustikkaturvekangas": "mesic",
   "kuivahko kangas": "sub-xeric",
+  "Kuivahko kangas, vastaava suo ja puolukkaturvekangas": "sub-xeric",
   "kuiva kangas": "xeric",
+  "Kuiva kangas, vastaava suo ja varputurvekangas": "xeric",
   "karukkokangas": "barren",
 };
 
 const FI_DRAINAGE_TEXT_MAP: Record<string, string> = {
   "Ojitettu": "drained",
+  "Ojitettu kangas": "drained_forest",
   "Ojittamaton": "undrained",
+  "Ojittamaton kangas": "undrained_forest",
   "Turvekangas": "peatland_forest",
+  "Muuttuma": "drained_mire",
   "Luonnontilainen": "natural_state",
 };
 

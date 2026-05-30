@@ -18,6 +18,8 @@ export const FERTILITYCLASS_MAP: Record<number, string> = {
 export const DEVELOPMENTCLASS_MAP: Record<string, string> = {
   A0: "open_area", // Aukea
   S0: "seedling", // Taimikko
+  S1: "seedling_small", // Taimikko alle 1,3 m
+  S2: "seedling_large", // Taimikko yli 1,3 m
   T1: "young_thinning", // Nuori kasvatusmetsikkö (early)
   T2: "young_thinning", // Nuori kasvatusmetsikkö (late)
   "02": "mature_thinning", // Varttunut kasvatusmetsikkö
@@ -26,6 +28,7 @@ export const DEVELOPMENTCLASS_MAP: Record<string, string> = {
   "04": "regeneration_ready", // Uudistuskypsä
   ER: "uneven_aged", // Eri-ikäisrakenteinen
   "05": "shelterwood", // Suojuspuusto
+  "06": "seed_tree", // Siemenpuumetsikkö
 };
 
 export function mapWfsCode(
