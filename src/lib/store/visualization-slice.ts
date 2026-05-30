@@ -55,6 +55,7 @@ export const createVisualizationSlice: StateCreator<VisualizationSlice> = (
   addChartTab: (tab) =>
     set((state) => {
       const existing = state.chartTabs.findIndex((t) => t.id === tab.id);
+      const isNew = existing < 0;
       const chartTabs =
         existing >= 0
           ? [
@@ -63,7 +64,8 @@ export const createVisualizationSlice: StateCreator<VisualizationSlice> = (
               ...state.chartTabs.slice(existing + 1),
             ]
           : [...state.chartTabs, tab];
-      return { chartTabs, activeChartTab: tab.id };
+      // Only switch to the new tab if it's genuinely new (not a refresh of an existing chart)
+      return { chartTabs, activeChartTab: isNew ? tab.id : state.activeChartTab };
     }),
 
   removeChartTab: (id) =>
@@ -84,10 +86,15 @@ export const createVisualizationSlice: StateCreator<VisualizationSlice> = (
   setActiveChartTab: (id) => set({ activeChartTab: id }),
 
   setChartTabs: (tabs) =>
-    set({
+    set((state) => ({
       chartTabs: tabs,
-      activeChartTab: tabs.length > 0 ? tabs[tabs.length - 1].id : null,
-    }),
+      // Preserve active tab unless the previously active tab was removed
+      activeChartTab: tabs.some((t) => t.id === state.activeChartTab)
+        ? state.activeChartTab
+        : tabs.length > 0
+          ? tabs[tabs.length - 1].id
+          : null,
+    })),
 
   setChartsFullscreen: (v) => set({ chartsFullscreen: v }),
 
