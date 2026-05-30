@@ -62,6 +62,29 @@ export const THINNING_BA: Record<string, Record<string, number>> = {
 export const MIN_AGE_ENSIHARVENNUS: Record<string, number> = { Mänty: 30, Kuusi: 25, Hieskoivu: 20, Rauduskoivu: 20, Lehtikuusi: 25, Harmaaleppä: 20 };
 export const MIN_AGE_HARVENNUS: Record<string, number> =  { Mänty: 45, Kuusi: 40, Hieskoivu: 35, Rauduskoivu: 35, Lehtikuusi: 40, Harmaaleppä: 35 };
 
+// ─── Operation type display names (Finnish → English) ───
+// Used for chart legends, tooltips, and any user-facing display of operation types.
+export const OPERATION_TYPE_DISPLAY: Record<string, string> = {
+  "Päätehakkuu": "Clearcut",
+  "Harvennus": "Thinning",
+  "Ensiharvennus": "First Thinning",
+  "Poimintahakkuu": "Selection Cutting",
+  "Taimikonhoito": "Tending",
+  "Taimikon varhaishoito": "Early Tending",
+  "Ennakkoraivaus": "Pre-clearance",
+  "Laikkumätästys": "Mounding",
+  "Ojitusmätästys": "Ditch Mounding",
+  "Laikutus": "Scalping",
+  "Kuusen istutus": "Spruce Planting",
+  "Männyn istutus": "Pine Planting",
+  "Istutus": "Planting",
+};
+
+/** Translate a Finnish operation type name to its English display form. */
+export function displayOperationType(fiType: string): string {
+  return OPERATION_TYPE_DISPLAY[fiType] ?? fiType;
+}
+
 // ─── Silvicultural costs (€/ha) ───
 export const COSTS: Record<string, number> = {
   Laikkumätästys: 300,

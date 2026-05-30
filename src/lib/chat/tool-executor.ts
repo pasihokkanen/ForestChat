@@ -34,6 +34,17 @@ const VALID_CHART_TYPES = [
   "radar", "donut", "horizontal_bar", "composed", "waterfall",
 ];
 
+/** Resolve a y_key to the query_config's as name if it matches a raw field name.
+ *  The chart engine uses 'as' as the output column name, but AI models
+ *  sometimes pass the raw field name (e.g. "income_eur" instead of "income").
+ *  This guarantees the chart's dataKey matches the aggregated output column. */
+function resolveAsName(config: ChartQueryConfig, key: string): string {
+  for (const v of config.values) {
+    if (v.field === key || v.as === key) return v.as;
+  }
+  return key;
+}
+
 const toolHandlers: Record<string, ToolHandler> = {
   generate_plan: async (args, ctx) => {
     return generatePlan(ctx.supabase, ctx.forestId, ctx.userId, {
@@ -71,6 +82,12 @@ const toolHandlers: Record<string, ToolHandler> = {
           query_config as ChartQueryConfig
         );
 
+        // Auto-resolve y_key / y_key2 to match the 'as' names in query_config values.
+        // The chart engine outputs columns using 'as' names, but AI models
+        // sometimes pass raw field names (e.g. "income_eur" → "income").
+        const resolvedYKey = resolveAsName(query_config as ChartQueryConfig, y_key as string);
+        const resolvedYKey2 = y_key2 ? resolveAsName(query_config as ChartQueryConfig, y_key2 as string) : null;
+
         const chartTab = {
           id: chart_id as string,
           title: title as string,
@@ -79,8 +96,8 @@ const toolHandlers: Record<string, ToolHandler> = {
           query_config,
           computed_at: engineResult.computedAt,
           xKey: (x_key as string) ?? null,
-          yKey: y_key as string,
-          yKey2: (y_key2 as string) ?? null,
+          yKey: resolvedYKey,
+          yKey2: resolvedYKey2,
           nameKey: (name_key as string) ?? null,
           colorKey: (color_key as string) ?? null,
           standDimension: (stand_dimension as string) ?? null,

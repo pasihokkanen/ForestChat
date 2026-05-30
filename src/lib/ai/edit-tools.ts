@@ -8,6 +8,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Compartment, Operation } from "@/types/database";
 import { calculateOperationIncome } from "./income-calculator";
+import { COSTS } from "./config";
 
 const VALID_TYPES = [
   "Päätehakkuu", "Clear_cut",
@@ -104,7 +105,13 @@ export async function addOperation(
     removalPct
   );
 
-  // Insert with computed income
+  // Compute cost_eur for silvicultural operations (regeneration, tending, etc.)
+  // Harvest operations (Päätehakkuu, Harvennus, etc.) have zero cost — the income
+  // already accounts for net stumpage value.
+  const areaHa = (compartmentData.area_ha as number) ?? 0;
+  const costEur = COSTS[type] ? Math.round(COSTS[type] * areaHa) : 0;
+
+  // Insert with computed income and cost
   const { error } = await supabase.from("operations").insert({
     compartment_id: compartmentData.id as string,
     forest_id: forestId,
@@ -112,11 +119,14 @@ export async function addOperation(
     year,
     removal_pct: removalPct,
     income_eur: incomeEur,
+    cost_eur: costEur,
     created_by: "ai",
   });
 
   if (error) return { success: false, result: "", error: error.message };
-  return { success: true, result: `✅ Added ${type} to stand ${standId} in ${year} (removal: ${removalPct}%, income: ${incomeEur.toLocaleString()} €).` };
+
+  const costInfo = costEur > 0 ? `, cost: ${costEur.toLocaleString()} €` : "";
+  return { success: true, result: `✅ Added ${type} to stand ${standId} in ${year} (removal: ${removalPct}%, income: ${incomeEur.toLocaleString()} €${costInfo}).` };
 }
 
 export async function removeOperation(

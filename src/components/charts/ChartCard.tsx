@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import {
   BarChart,
   Bar,
@@ -28,6 +29,7 @@ import {
 } from "recharts";
 import type { ChartTab } from "@/lib/store/visualization-slice";
 import { useForestStore } from "@/lib/store";
+import { displayOperationType } from "@/lib/ai/config";
 
 const CHART_COLORS = [
   "#4CAF50",
@@ -78,13 +80,35 @@ export default function ChartCard({ tab }: ChartCardProps) {
     }
 
     // If x_key is "year" or similar, clicking filters by that value
-    if (tab.xKey && data[tab.xKey] !== undefined) {
-      const year = Number(data[tab.xKey]);
+    if (effectiveXKey && data[effectiveXKey] !== undefined) {
+      const year = Number(data[effectiveXKey]);
       if (!isNaN(year) && year >= 2000 && year <= 2100) {
         setSelectedYear(selectedYear === year ? null : year);
       }
     }
   };
+
+  // Fallback xKey: if null but data has "year" column, auto-detect it.
+  // Prevents all years collapsing into one bar when AI omits x_key.
+  const effectiveXKey = tab.xKey ?? (tab.data?.[0] && "year" in tab.data[0] ? "year" : null);
+
+  // Translate operation type names in data for display (Finnish → English).
+  // Applies to charts where xKey or nameKey corresponds to operation types.
+  const translatedData = React.useMemo(() => {
+    if (!tab.data?.length) return tab.data;
+    const typeKeys = [effectiveXKey, tab.nameKey, tab.colorKey].filter(Boolean) as string[];
+    if (typeKeys.length === 0) return tab.data;
+    return tab.data.map((row) => {
+      const translated: Record<string, unknown> = { ...row };
+      for (const key of typeKeys) {
+        if (row[key] && typeof row[key] === "string") {
+          const en = displayOperationType(row[key] as string);
+          if (en !== row[key]) translated[key] = en;
+        }
+      }
+      return translated;
+    });
+  }, [tab.data, effectiveXKey, tab.nameKey, tab.colorKey]);
 
   // Determine if a data point is "active" (highlighted)
   const isActive = (_entry: Record<string, unknown>): boolean => {
@@ -106,7 +130,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
       return (
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
-            data={tab.data}
+            data={translatedData}
             onClick={(e) =>
               handleChartClick(
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -115,7 +139,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             }
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey={tab.xKey ?? undefined} tick={{ fontSize: 12 }} />
+            <XAxis dataKey={effectiveXKey ?? undefined} tick={{ fontSize: 12 }} />
             <YAxis tick={{ fontSize: 12 }} />
             <Tooltip />
             <Bar
@@ -129,30 +153,75 @@ export default function ChartCard({ tab }: ChartCardProps) {
       );
 
     case "stacked_bar":
-      // Pivot data: rows like [{year, type, income}] → [{year, "Päätehakkuu": 120k, "Harvennus": 34k}]
+      // Pivot data: rows like [{year, type, income}] → [{year, "Clearcut": 120k, "Thinning": 34k}]
+      // Operation type names are translated from Finnish → English for display.
+      // When yKey2 is present, creates a dual-stack chart: income above zero,
+      // costs below zero (cost values should be pre-negated via multiply: -1 in query_config).
       const pivotStacked = () => {
-        if (!tab.colorKey) return { pivoted: tab.data, stackKeys: [tab.yKey] };
+        if (!tab.colorKey) return { pivoted: tab.data, stackKeys: [tab.yKey], dual: false };
+
         const colorValues = new Set<string>();
         const pivotMap = new Map<string, Record<string, unknown>>();
+        const hasDual = !!(tab.yKey2); // income (yKey) + costs (yKey2)
+
         for (const row of tab.data) {
-          const xVal = String(row[tab.xKey ?? "x"] ?? "");
-          const colorVal = String(row[tab.colorKey ?? ""] ?? "");
-          colorValues.add(colorVal);
+          const xVal = String(row[effectiveXKey ?? "x"] ?? "");
+          const rawColorVal = String(row[tab.colorKey ?? ""] ?? "");
+          const displayColorVal = displayOperationType(rawColorVal);
+          colorValues.add(displayColorVal);
           if (!pivotMap.has(xVal)) {
             const entry: Record<string, unknown> = {};
-            if (tab.xKey) entry[tab.xKey] = row[tab.xKey];
+            if (effectiveXKey) entry[effectiveXKey] = row[effectiveXKey];
             pivotMap.set(xVal, entry);
           }
-          pivotMap.get(xVal)![colorVal] = row[tab.yKey];
+          const entry = pivotMap.get(xVal)!;
+
+          if (hasDual) {
+            // Dual-stack: income above zero, costs below zero
+            entry[`${displayColorVal}_Income`] =
+              ((entry[`${displayColorVal}_Income`] as number) ?? 0) + (row[tab.yKey] as number ?? 0);
+            entry[`${displayColorVal}_Cost`] =
+              ((entry[`${displayColorVal}_Cost`] as number) ?? 0) + (row[tab.yKey2!] as number ?? 0);
+          } else {
+            // Single-stack (legacy)
+            entry[displayColorVal] = row[tab.yKey];
+          }
         }
         // Sort alphabetically for stable color assignment across recomputes
         const sorted = Array.from(colorValues).sort((a, b) => a.localeCompare(b));
+
+        // Filter out zero-only categories (e.g., Clearcut has no cost, Mounding has no income)
+        const pivotedArr = Array.from(pivotMap.values());
+        const skipIncome = new Set<string>();
+        const skipCost = new Set<string>();
+        if (hasDual) {
+          for (const cat of sorted) {
+            if (!pivotedArr.some((row) => ((row[`${cat}_Income`] as number) ?? 0) !== 0)) {
+              skipIncome.add(cat);
+            }
+            if (!pivotedArr.some((row) => ((row[`${cat}_Cost`] as number) ?? 0) !== 0)) {
+              skipCost.add(cat);
+            }
+          }
+        }
+
         return {
-          pivoted: Array.from(pivotMap.values()),
+          pivoted: pivotedArr,
           stackKeys: sorted,
+          dual: hasDual,
+          skipIncome,
+          skipCost,
         };
       };
-      const { pivoted, stackKeys } = pivotStacked();
+      const { pivoted, stackKeys, dual, skipIncome = new Set<string>(), skipCost = new Set<string>() } = pivotStacked();
+
+      // Color palette for costs (warmer) vs income (greens/blues)
+      const COST_COLORS = [
+        "#E57373", "#F06292", "#FF8A65", "#BA68C8",
+        "#EF5350", "#EC407A", "#FF7043", "#AB47BC",
+        "#E53935", "#D81B60", "#F4511E", "#8E24AA",
+      ];
+
       return (
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
@@ -165,18 +234,45 @@ export default function ChartCard({ tab }: ChartCardProps) {
             }
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey={tab.xKey ?? undefined} tick={{ fontSize: 12 }} />
+            <XAxis dataKey={effectiveXKey ?? undefined} tick={{ fontSize: 12 }} />
             <YAxis tick={{ fontSize: 12 }} />
             <Tooltip />
             <Legend />
-            {stackKeys.map((key, i) => (
-              <Bar
-                key={key}
-                dataKey={key}
-                stackId="a"
-                fill={CHART_COLORS[i % CHART_COLORS.length]}
-              />
-            ))}
+            {dual
+              ? stackKeys.flatMap((cat, i) => {
+                  const bars: React.ReactElement[] = [];
+                  if (!skipIncome.has(cat)) {
+                    bars.push(
+                      <Bar
+                        key={`${cat}_Income`}
+                        dataKey={`${cat}_Income`}
+                        stackId="income"
+                        fill={CHART_COLORS[i % CHART_COLORS.length]}
+                        name={`${cat}`}
+                      />
+                    );
+                  }
+                  if (!skipCost.has(cat)) {
+                    bars.push(
+                      <Bar
+                        key={`${cat}_Cost`}
+                        dataKey={`${cat}_Cost`}
+                        stackId="cost"
+                        fill={COST_COLORS[i % COST_COLORS.length]}
+                        name={`${cat}`}
+                      />
+                    );
+                  }
+                  return bars;
+                })
+              : stackKeys.map((key, i) => (
+                  <Bar
+                    key={key}
+                    dataKey={key}
+                    stackId="a"
+                    fill={CHART_COLORS[i % CHART_COLORS.length]}
+                  />
+                ))}
           </BarChart>
         </ResponsiveContainer>
       );
@@ -185,7 +281,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
       return (
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
-            data={tab.data}
+            data={translatedData}
             layout="vertical"
             onClick={(e) =>
               handleChartClick(
@@ -197,7 +293,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
             <XAxis type="number" tick={{ fontSize: 12 }} />
             <YAxis
-              dataKey={tab.xKey ?? undefined}
+              dataKey={effectiveXKey ?? undefined}
               type="category"
               width={100}
               tick={{ fontSize: 12 }}
@@ -218,7 +314,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie
-              data={tab.data}
+              data={translatedData}
               dataKey={tab.yKey}
               nameKey={tab.nameKey ?? undefined}
               cx="50%"
@@ -227,7 +323,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
               label={({ name, value }) => `${name}: ${value}`}
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
             >
-              {tab.data.map((_, i) => (
+              {translatedData.map((_, i) => (
                 <Cell key={i} fill={getCellFill(i)} />
               ))}
             </Pie>
@@ -242,7 +338,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie
-              data={tab.data}
+              data={translatedData}
               dataKey={tab.yKey}
               nameKey={tab.nameKey ?? undefined}
               cx="50%"
@@ -252,7 +348,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
               label={({ name, value }) => `${name}: ${value}`}
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
             >
-              {tab.data.map((_, i) => (
+              {translatedData.map((_, i) => (
                 <Cell key={i} fill={getCellFill(i)} />
               ))}
             </Pie>
@@ -266,7 +362,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
       return (
         <ResponsiveContainer width="100%" height="100%">
           <LineChart
-            data={tab.data}
+            data={translatedData}
             onClick={(e) =>
               handleChartClick(
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -275,7 +371,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             }
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey={tab.xKey ?? undefined} tick={{ fontSize: 12 }} />
+            <XAxis dataKey={effectiveXKey ?? undefined} tick={{ fontSize: 12 }} />
             <YAxis tick={{ fontSize: 12 }} />
             <Tooltip />
             <Line
@@ -293,7 +389,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
       return (
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart
-            data={tab.data}
+            data={translatedData}
             onClick={(e) =>
               handleChartClick(
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -302,7 +398,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             }
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey={tab.xKey ?? undefined} tick={{ fontSize: 12 }} />
+            <XAxis dataKey={effectiveXKey ?? undefined} tick={{ fontSize: 12 }} />
             <YAxis tick={{ fontSize: 12 }} />
             <Tooltip />
             <Area
@@ -329,9 +425,9 @@ export default function ChartCard({ tab }: ChartCardProps) {
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
             <XAxis
-              dataKey={tab.xKey ?? undefined}
+              dataKey={effectiveXKey ?? undefined}
               type="number"
-              name={tab.xKey ?? "x"}
+              name={effectiveXKey ?? "x"}
               tick={{ fontSize: 12 }}
             />
             <YAxis
@@ -342,7 +438,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             />
             <Tooltip cursor={{ strokeDasharray: "3 3" }} />
             <Scatter
-              data={tab.data}
+              data={translatedData}
               fill="#E91E63"
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
             />
@@ -353,9 +449,9 @@ export default function ChartCard({ tab }: ChartCardProps) {
     case "radar":
       return (
         <ResponsiveContainer width="100%" height="100%">
-          <RadarChart data={tab.data}>
+          <RadarChart data={translatedData}>
             <PolarGrid />
-            <PolarAngleAxis dataKey={tab.xKey ?? undefined} tick={{ fontSize: 11 }} />
+            <PolarAngleAxis dataKey={effectiveXKey ?? undefined} tick={{ fontSize: 11 }} />
             <PolarRadiusAxis tick={{ fontSize: 11 }} />
             <Tooltip />
             <Radar
@@ -373,7 +469,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
       return (
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart
-            data={tab.data}
+            data={translatedData}
             onClick={(e) =>
               handleChartClick(
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -382,7 +478,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             }
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey={tab.xKey ?? undefined} tick={{ fontSize: 12 }} />
+            <XAxis dataKey={effectiveXKey ?? undefined} tick={{ fontSize: 12 }} />
             <YAxis tick={{ fontSize: 12 }} />
             <Tooltip />
             <Legend />
@@ -401,7 +497,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
       return (
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
-            data={tab.data}
+            data={translatedData}
             onClick={(e) =>
               handleChartClick(
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -410,7 +506,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             }
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey={tab.xKey ?? undefined} tick={{ fontSize: 12 }} />
+            <XAxis dataKey={effectiveXKey ?? undefined} tick={{ fontSize: 12 }} />
             <YAxis tick={{ fontSize: 12 }} />
             <Tooltip />
             <Bar
