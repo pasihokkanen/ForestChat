@@ -3,10 +3,13 @@
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 > **P5.10 (chart engine alias fix) is committed separately — not part of this plan.**
 
-**Version:** 8.0
+**Version:** 9.0
 **Date:** 2026-05-29
 
-**Changelog v8.0 (from v7.0):**
+**Changelog v9.0 (from v8.0):**
+- Added `spatial-service.ts` to P5.13 scope — updates column references before P5.9 deletes functions (avoids intermediate breakage)
+- Added value translation test cases to P5.2 (dev_class, site_type, drainage)
+- Added "unknown Finnish values pass through" to P5.3 edge cases
 - Added Finnish text value → English translation maps: `FI_DEVCLASS_TEXT_MAP`, `FI_SITETYPE_TEXT_MAP`, `FI_DRAINAGE_TEXT_MAP` — CSV data values are now English, matching WFS output
 - Made CSV importer self-cleaning: deletes forest on internal failure (no `forestId` error attachment needed)
 - Noted WFS species data loss after gridcell removal — fallback to `main_species` exists
@@ -547,6 +550,10 @@ console.log('  species[0].age:', s.species[0]?.age, 'log_pct:', s.species[0]?.lo
 16. Total volume aggregation matches sum of `total_m3`
 17. Both Finnish (`mänty`) and English (`pine`) species prefixes detected
 18. Unknown headers silently ignored
+19. `development_class` translated: "Nuori kasvatusmetsikkö" → "young_thinning"
+20. `site_type` translated: "tuore kangas" → "mesic"
+21. `drainage_status` translated: "Ojitettu" → "drained"
+22. Unknown Finnish value passes through unchanged (e.g., unrecognized soil type)
 
 ---
 
@@ -563,6 +570,7 @@ console.log('  species[0].age:', s.species[0]?.age, 'log_pct:', s.species[0]?.lo
 - Main species values → mapped through `SPECIES_NAME_MAP` (snake_case English)
 - `total_m3_ha` (standing volume/ha) → stored in `attributes` JSONB, NOT in `growth_m3_per_ha`
 - Unrecognized headers → silently ignored (allows CSVs with extra metadata columns)
+- Unknown Finnish text values → pass through unchanged (e.g., unrecognized soil type stays as-is)
 
 ---
 
@@ -883,9 +891,9 @@ COMMENT ON TABLE compartment_species IS 'Per-species data. English column names 
 | `src/lib/chat/system-prompt.ts` | `puulaji` → `species` in chart templates (lines 60, 82) |
 | `src/lib/ai/income-calculator.ts` | `puulaji`→`species`, `tukkiprosentti`→`log_pct` in SpeciesPrice interface + all usage |
 | `src/lib/ai/classify.ts` | `puulaji`→`species`, `tukkiprosentti`→`log_pct`; `"Koivu"`→`"birch"`, `"Rauduskoivu"`→`"silver_birch"` |
+| `src/lib/import/spatial-service.ts` | `puulaji`→`species`, `tukkiprosentti`→`log_pct` in `RawSpecies` interface + `matchGridcellsToStands`/`populateCompartmentSpecies` usage (updated here, deleted in P5.9 — avoids intermediate breakage) |
 
-**Not updated (out of scope or handled by other tasks):**
-- `spatial-service.ts` — P5.9 deletes gridcell functions entirely; no rename needed
+**Not updated (out of scope):**
 - `schedule.ts` / `forestry-schedule.test.ts` — `paapuulaji` is part of KuviotData (separate cleanup)
 - `wfs-client.ts`, `property/route.ts` — gridcell removal is P5.9
 
