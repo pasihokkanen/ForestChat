@@ -572,6 +572,19 @@ export async function recomputeChartData(
     throw new Error(`Invalid chart source: ${config.source}`);
   }
 
+  // 1b. Validate required fields
+  if (!config.aggregate || !Array.isArray(config.aggregate)) {
+    throw new Error("config.aggregate is required and must be an array");
+  }
+  if (!config.values || !Array.isArray(config.values)) {
+    throw new Error("config.values is required and must be an array — e.g. values: [{ field: \"volume_m3\", as: \"volume\", fn: \"sum\" }]");
+  }
+  for (const v of config.values) {
+    if (!v.field || !v.as) {
+      throw new Error(`Each value entry needs field and as — got: ${JSON.stringify(v)}`);
+    }
+  }
+
   // 2. Build and execute query
   const query = buildQuery(supabase, forestId, config);
   const { data: rawRows, error } = await query;

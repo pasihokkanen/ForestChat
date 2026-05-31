@@ -601,6 +601,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <Scatter
               data={translatedData}
               fill="#E91E63"
+              isAnimationActive={false}
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
             />
           </ScatterChart>

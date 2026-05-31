@@ -131,7 +131,103 @@ function detectChartIntent(userMsg: string): Record<string, unknown> | null {
     };
   }
 
-  // Generic: "chart of area" or "chart of volume" → compartment_species
+  // Pattern: "scatter plot age vs volume" or "scatter age and volume"
+  if (chartType === "scatter") {
+    const hasAge = msg.includes("age");
+    const hasGrowth = msg.includes("growth");
+    const hasDiameter = msg.includes("diameter");
+    const hasHeight = msg.includes("height");
+    const hasBasal = msg.includes("basal");
+
+    if (hasDiameter && hasHeight) {
+      return {
+        chart_id: "chart-scatter-diameter-height",
+        title: "Diameter vs Height (All Stands)",
+        type: "scatter",
+        query_config: {
+          source: "compartments",
+          aggregate: [{ group_by: "stand_id" }],
+          values: [
+            { field: "avg_diameter", as: "diameter", fn: "avg" },
+            { field: "avg_height", as: "height", fn: "avg" },
+          ],
+        },
+        x_key: "diameter",
+        y_key: "height",
+      };
+    }
+
+    if (hasAge && hasGrowth) {
+      return {
+        chart_id: "chart-scatter-age-growth",
+        title: "Age vs Growth (All Stands)",
+        type: "scatter",
+        query_config: {
+          source: "compartments",
+          aggregate: [{ group_by: "stand_id" }],
+          values: [
+            { field: "age_years", as: "age", fn: "avg" },
+            { field: "growth_m3_per_ha", as: "growth", fn: "avg" },
+          ],
+        },
+        x_key: "age",
+        y_key: "growth",
+      };
+    }
+
+    if (hasAge && hasVolume) {
+      return {
+        chart_id: "chart-scatter-age-volume",
+        title: "Age vs Volume (All Stands)",
+        type: "scatter",
+        query_config: {
+          source: "compartments",
+          aggregate: [{ group_by: "stand_id" }],
+          values: [
+            { field: "age_years", as: "age", fn: "avg" },
+            { field: "volume_m3", as: "volume", fn: "avg" },
+          ],
+        },
+        x_key: "age",
+        y_key: "volume",
+      };
+    }
+
+    if (hasAge && hasBasal) {
+      return {
+        chart_id: "chart-scatter-age-basal",
+        title: "Age vs Basal Area (All Stands)",
+        type: "scatter",
+        query_config: {
+          source: "compartments",
+          aggregate: [{ group_by: "stand_id" }],
+          values: [
+            { field: "age_years", as: "age", fn: "avg" },
+            { field: "basal_area", as: "basal_area", fn: "avg" },
+          ],
+        },
+        x_key: "age",
+        y_key: "basal_area",
+      };
+    }
+
+    // Generic scatter: age vs volume as default
+    return {
+      chart_id: "chart-scatter-age-volume",
+      title: "Age vs Volume (All Stands)",
+      type: "scatter",
+      query_config: {
+        source: "compartments",
+        aggregate: [{ group_by: "stand_id" }],
+        values: [
+          { field: "age_years", as: "age", fn: "avg" },
+          { field: "volume_m3", as: "volume", fn: "avg" },
+        ],
+      },
+      x_key: "age",
+      y_key: "volume",
+    };
+  }
   if (hasArea || hasVolume) {
     return {
       chart_id: hasArea ? "chart-species-area" : "chart-species-volume",
