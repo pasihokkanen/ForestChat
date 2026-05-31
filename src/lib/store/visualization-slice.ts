@@ -108,6 +108,7 @@ export const createVisualizationSlice: StateCreator<VisualizationSlice> = (
   setChartTabs: (tabs) =>
     set({
       chartTabs: tabs,
+      activeChartTab: tabs.length > 0 ? tabs[tabs.length - 1].id : null,
     }),
 
   setChartsFullscreen: (v) => set({ chartsFullscreen: v }),

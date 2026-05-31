@@ -1010,7 +1010,7 @@ try {
 - [x] API import path all-or-nothing on failure (P5.14) ✅ 2026-05-30
 - [x] `grep -ri gridcell src/` → zero matches ✅ 2026-05-30
 - [x] `npm run build` passes ✅ 2026-05-30
-- [x] `npx vitest run` passes ✅ 2026-05-30
+- [x] `npx vitest run` passes (190/190) ✅ 2026-05-31 (was 189/190; `setChartTabs` regression fixed — now auto-selects last tab)
 
 ## 6. Risks
 
