@@ -10,7 +10,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // ─── Types ───────────────────────────────────────────────────────────
 
 export interface ChartQueryConfig {
-  source: "operations" | "compartments" | "plan_metadata";
+  source: "operations" | "compartments" | "compartment_species" | "plan_metadata";
   join?: {
     table: "compartments";
     on: "compartment_id";
