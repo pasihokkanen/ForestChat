@@ -172,9 +172,14 @@ const CHART_COLORS = [
 ];
 
 function WaterfallBar(props: Record<string, unknown>) {
-  const { fill: _fill, value, ...rest } = props;
+  const { fill: _fill, value, payload, dataKey, ...rest } = props;
+  // In stacked bars Recharts passes absolute segment height as "value".
+  // Use the original payload to get the real (possibly negative) number.
+  const actualValue = payload && dataKey
+    ? (payload as Record<string, unknown>)[dataKey as string]
+    : value;
   const barColor =
-    typeof value === "number" && value < 0 ? "#E53935" : "#4CAF50";
+    typeof actualValue === "number" && Number(actualValue) < 0 ? "#E53935" : "#4CAF50";
   return <Rectangle {...rest} fill={barColor} />;
 }
 
