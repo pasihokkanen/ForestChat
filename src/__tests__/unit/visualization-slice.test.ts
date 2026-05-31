@@ -114,15 +114,17 @@ describe("VisualizationSlice", () => {
   });
 
   describe("setChartTabs", () => {
-    it("sets tabs from array and selects last tab", () => {
+    it("replaces tabs without changing activeChartTab", () => {
       const tabs = [
         makeTab({ id: "a", title: "A" }),
         makeTab({ id: "b", title: "B" }),
       ];
+      // setChartTabs replaces data but callers (use-charts, ChatPanel SSE)
+      // manage activeChartTab themselves — do NOT auto-select
       store.getState().setChartTabs(tabs);
       const state = store.getState();
       expect(state.chartTabs).toHaveLength(2);
-      expect(state.activeChartTab).toBe("b");
+      expect(state.activeChartTab).toBeNull(); // untouched
     });
 
     it("sets activeChartTab to null for empty array", () => {
