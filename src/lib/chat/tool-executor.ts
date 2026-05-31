@@ -83,10 +83,22 @@ const toolHandlers: Record<string, ToolHandler> = {
         );
 
         // Auto-resolve y_key / y_key2 to match the 'as' names in query_config values.
-        // The chart engine outputs columns using 'as' names, but AI models
-        // sometimes pass raw field names (e.g. "income_eur" → "income").
         const resolvedYKey = resolveAsName(query_config as ChartQueryConfig, y_key as string);
         const resolvedYKey2 = y_key2 ? resolveAsName(query_config as ChartQueryConfig, y_key2 as string) : null;
+
+        // Auto-detect name_key for pie/donut charts: use first group_by field if name_key not provided
+        const qc = query_config as ChartQueryConfig;
+        const effectiveNameKey = (name_key as string)
+          ?? ((type === "pie" || type === "donut") && qc.aggregate?.length > 0
+            ? qc.aggregate[0].group_by
+            : null);
+
+        // Auto-detect x_key for bar/line/area charts: use first group_by field if x_key not provided
+        const effectiveXKey = (x_key as string)
+          ?? ((type === "bar" || type === "line" || type === "area" || type === "horizontal_bar")
+            && qc.aggregate?.length > 0
+            ? qc.aggregate[0].group_by
+            : null);
 
         const chartTab = {
           id: chart_id as string,
@@ -95,10 +107,10 @@ const toolHandlers: Record<string, ToolHandler> = {
           data: engineResult.data,
           query_config,
           computed_at: engineResult.computedAt,
-          xKey: (x_key as string) ?? null,
+          xKey: effectiveXKey,
           yKey: resolvedYKey,
           yKey2: resolvedYKey2,
-          nameKey: (name_key as string) ?? null,
+          nameKey: effectiveNameKey,
           colorKey: (color_key as string) ?? null,
           standDimension: (stand_dimension as string) ?? null,
         };

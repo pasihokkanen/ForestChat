@@ -19,7 +19,7 @@ export function resolveModel(sessionModel?: string | null): string {
 }
 
 export interface OpenRouterRequest {
-  messages: Array<{ role: string; content: string }>;
+  messages: Array<{ role: string; content: string; tool_call_id?: string }>;
   tools?: ToolDefinition[];
   model?: string | null;
   stream: boolean;
@@ -27,13 +27,14 @@ export interface OpenRouterRequest {
 
 interface AccumulatedToolCall {
   index: number;
+  id: string;
   name: string;
   arguments: string;
 }
 
 export type StreamChunk =
   | { type: "text"; content: string }
-  | { type: "tool_call"; name: string; arguments: Record<string, unknown> };
+  | { type: "tool_call"; id: string; name: string; arguments: Record<string, unknown> };
 
 export async function* streamChat(
   request: OpenRouterRequest,
@@ -90,11 +91,12 @@ export async function* streamChat(
           try {
             yield {
               type: "tool_call" as const,
+              id: tc.id,
               name: tc.name,
               arguments: tc.arguments ? JSON.parse(tc.arguments) : {},
             };
           } catch {
-            yield { type: "tool_call" as const, name: tc.name, arguments: {} };
+            yield { type: "tool_call" as const, id: tc.id, name: tc.name, arguments: {} };
           }
         }
         pendingToolCalls.clear();
@@ -117,10 +119,11 @@ export async function* streamChat(
           for (const tc of delta.tool_calls) {
             const idx = tc.index ?? 0;
 
-            // Name arrives in the first delta for this tool_call index
+            // Name and ID arrive in the first delta for this tool_call index
             if (tc.function?.name) {
               pendingToolCalls.set(idx, {
                 index: idx,
+                id: tc.id ?? "",
                 name: tc.function.name,
                 arguments: tc.function?.arguments ?? "",
               });
@@ -129,10 +132,13 @@ export async function* streamChat(
               const existing = pendingToolCalls.get(idx);
               if (existing) {
                 existing.arguments += tc.function?.arguments ?? "";
+                // Capture id if it arrives in a later delta (some providers)
+                if (tc.id && !existing.id) existing.id = tc.id;
               } else {
                 // First delta without name — rare but handle it
                 pendingToolCalls.set(idx, {
                   index: idx,
+                  id: tc.id ?? "",
                   name: "",
                   arguments: tc.function?.arguments ?? "",
                 });
@@ -148,12 +154,14 @@ export async function* streamChat(
               const args = tc.arguments ? JSON.parse(tc.arguments) : {};
               yield {
                 type: "tool_call" as const,
+                id: tc.id,
                 name: tc.name,
                 arguments: args,
               };
             } catch {
               yield {
                 type: "tool_call" as const,
+                id: tc.id,
                 name: tc.name,
                 arguments: {},
               };

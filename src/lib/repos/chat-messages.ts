@@ -19,7 +19,8 @@ export async function addMessage(
   sessionId: string,
   role: "user" | "assistant" | "tool",
   content: string,
-  toolCalls?: unknown
+  toolCalls?: unknown,
+  toolCallId?: string
 ): Promise<ChatMessage> {
   const supabase = await createServerSupabase();
   const { data, error } = await supabase
@@ -28,7 +29,7 @@ export async function addMessage(
       session_id: sessionId,
       role,
       content,
-      tool_calls: toolCalls ?? null,
+      tool_calls: toolCallId ? { tool_call_id: toolCallId } : (toolCalls ?? null),
     })
     .select()
     .single();

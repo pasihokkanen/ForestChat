@@ -90,7 +90,7 @@ export interface ChatMessage {
   session_id: string;
   role: "user" | "assistant" | "tool";
   content: string;
-  tool_calls: unknown | null;
+  tool_calls: unknown | null;  // JSONB: for tool role, stores { tool_call_id: string }
   created_at: string;
 }
 
