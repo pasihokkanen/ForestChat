@@ -62,39 +62,77 @@ export const THINNING_BA: Record<string, Record<string, number>> = {
 export const MIN_AGE_ENSIHARVENNUS: Record<string, number> = { Mänty: 30, Kuusi: 25, Hieskoivu: 20, Rauduskoivu: 20, Lehtikuusi: 25, Harmaaleppä: 20 };
 export const MIN_AGE_HARVENNUS: Record<string, number> =  { Mänty: 45, Kuusi: 40, Hieskoivu: 35, Rauduskoivu: 35, Lehtikuusi: 40, Harmaaleppä: 35 };
 
-// ─── Operation type display names (Finnish → English) ───
+// ─── Operation type display names (system value → English display) ───
 // Used for chart legends, tooltips, and any user-facing display of operation types.
+// The keys are snake_case system values stored in the DB.
 export const OPERATION_TYPE_DISPLAY: Record<string, string> = {
-  "Päätehakkuu": "Clearcut",
-  "Harvennus": "Thinning",
-  "Ensiharvennus": "First Thinning",
-  "Poimintahakkuu": "Selection Cutting",
-  "Taimikonhoito": "Tending",
-  "Taimikon varhaishoito": "Early Tending",
-  "Ennakkoraivaus": "Pre-clearance",
-  "Laikkumätästys": "Mounding",
-  "Ojitusmätästys": "Ditch Mounding",
-  "Laikutus": "Scalping",
-  "Kuusen istutus": "Spruce Planting",
-  "Männyn istutus": "Pine Planting",
-  "Istutus": "Planting",
+  clear_cut: "Clearcut",
+  thinning: "Thinning",
+  first_thinning: "First Thinning",
+  selection_cutting: "Selection Cutting",
+  tending: "Tending",
+  early_tending: "Early Tending",
+  pre_clearance: "Pre-clearance",
+  site_prep: "Mounding",
+  ditch_mounding: "Ditch Mounding",
+  scalping: "Scalping",
+  spruce_planting: "Spruce Planting",
+  pine_planting: "Pine Planting",
+  planting: "Planting",
 };
 
-/** Translate a Finnish operation type name to its English display form. */
-export function displayOperationType(fiType: string): string {
-  return OPERATION_TYPE_DISPLAY[fiType] ?? fiType;
+/** Translate a system operation type value to its English display form. */
+export function displayOperationType(sysValue: string): string {
+  return OPERATION_TYPE_DISPLAY[sysValue] ?? sysValue;
+}
+
+// ─── Finnish → system value mapping (for AI tool input normalization) ───
+// Accepts both Finnish names and English capitalized variants, maps to snake_case.
+export const FINNISH_TO_SYSTEM: Record<string, string> = {
+  päätehakkuu: "clear_cut",
+  clear_cut: "clear_cut",
+  avohakkuu: "clear_cut",
+  harvennus: "thinning",
+  thinning: "thinning",
+  ensiharvennus: "first_thinning",
+  first_thinning: "first_thinning",
+  poimintahakkuu: "selection_cutting",
+  selection_cutting: "selection_cutting",
+  taimikonhoito: "tending",
+  tending: "tending",
+  "taimikon varhaishoito": "early_tending",
+  early_tending: "early_tending",
+  ennakkoraivaus: "pre_clearance",
+  pre_clearance: "pre_clearance",
+  laikkumätästys: "site_prep",
+  site_prep: "site_prep",
+  ojitusmätästys: "ditch_mounding",
+  ditch_mounding: "ditch_mounding",
+  laikutus: "scalping",
+  scalping: "scalping",
+  istutus: "planting",
+  planting: "planting",
+  "kuusen istutus": "spruce_planting",
+  spruce_planting: "spruce_planting",
+  "männyn istutus": "pine_planting",
+  pine_planting: "pine_planting",
+};
+
+/** Normalize a user-supplied operation type to its system snake_case value */
+export function normalizeOperationType(input: string): string {
+  return FINNISH_TO_SYSTEM[input.toLowerCase()] ?? input;
 }
 
 // ─── Silvicultural costs (€/ha) ───
 export const COSTS: Record<string, number> = {
-  Laikkumätästys: 300,
-  Ojitusmätästys: 400,
-  Laikutus: 250,
-  "Kuusen istutus": 600,
-  "Männyn istutus": 550,
-  "Taimikon varhaishoito": 350,
-  Taimikonhoito: 500,
-  Ennakkoraivaus: 400,
+  site_prep: 300,
+  ditch_mounding: 400,
+  scalping: 250,
+  spruce_planting: 600,
+  pine_planting: 550,
+  early_tending: 350,
+  tending: 500,
+  pre_clearance: 400,
 };
 
 // ─── Growth rates (m³/ha/y) — Luke VMI13, Väli-Suomi ───

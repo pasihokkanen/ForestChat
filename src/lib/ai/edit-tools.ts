@@ -8,28 +8,24 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Compartment, Operation } from "@/types/database";
 import { calculateOperationIncome } from "./income-calculator";
-import { COSTS } from "./config";
+import { COSTS, normalizeOperationType } from "./config";
 
 const VALID_TYPES = [
-  "Päätehakkuu", "Clear_cut",
-  "Harvennus", "Thinning",
-  "Ensiharvennus", "First_thinning",
-  "Poimintahakkuu", "Selection_cutting",
-  "Taimikonhoito", "Tending",
-  "Taimikon varhaishoito", "Early_tending",
-  "Laikkumätästys", "Site_prep",
-  "Kuusen istutus", "Männyn istutus", "Planting",
-  "Ennakkoraivaus",
+  "clear_cut",
+  "thinning",
+  "first_thinning",
+  "selection_cutting",
+  "tending",
+  "early_tending",
+  "site_prep",
+  "spruce_planting",
+  "pine_planting",
+  "planting",
+  "pre_clearance",
 ];
 
 function normalizeType(type: string): string {
-  const map: Record<string, string> = {
-    clear_cut: "Päätehakkuu", thinning: "Harvennus",
-    first_thinning: "Ensiharvennus", selection_cutting: "Poimintahakkuu",
-    tending: "Taimikonhoito", early_tending: "Taimikon varhaishoito",
-    site_prep: "Laikkumätästys", planting: "Istutus",
-  };
-  return map[type.toLowerCase()] || type;
+  return normalizeOperationType(type);
 }
 
 // ── Species & site maps (reused from query-tools for batch_update filtering) ──

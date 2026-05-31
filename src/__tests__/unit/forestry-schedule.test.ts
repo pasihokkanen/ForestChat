@@ -47,9 +47,9 @@ describe("schedulePlan", () => {
     expect(result.summary.totalVolume).toBe(0);
   });
 
-  it("schedules a single päätehakkuu in period 1", () => {
+  it("schedules a single clear_cut in period 1", () => {
     const kuvio = makeKuvio({ numero: "1", m3: 300, arvo: 15000 });
-    const ops = [makeOp(kuvio, "Päätehakkuu")];
+    const ops = [makeOp(kuvio, "clear_cut")];
     const result = schedulePlan([kuvio], ops, 2026);
     const totalPaateP1 = result.p1.reduce((s, y) => s + y.paate.length, 0);
     const totalPaateP2 = result.p2.reduce((s, y) => s + y.paate.length, 0);
@@ -58,7 +58,7 @@ describe("schedulePlan", () => {
 
   it("generates regeneration after clearcut", () => {
     const kuvio = makeKuvio({ numero: "2", m3: 300, arvo: 15000 });
-    const ops = [makeOp(kuvio, "Päätehakkuu")];
+    const ops = [makeOp(kuvio, "clear_cut")];
     const result = schedulePlan([kuvio], ops, 2026);
     const totalUudist = result.p1.reduce((s, y) => s + y.uudist.length, 0) +
       result.p2.reduce((s, y) => s + y.uudist.length, 0);
@@ -69,7 +69,7 @@ describe("schedulePlan", () => {
     const kuvios = Array.from({ length: 10 }, (_, i) =>
       makeKuvio({ numero: String(i + 10), m3: 200 + i * 50, arvo: 10000 + i * 1000 })
     );
-    const ops = kuvios.map((k) => makeOp(k, "Päätehakkuu"));
+    const ops = kuvios.map((k) => makeOp(k, "clear_cut"));
     const result = schedulePlan(kuvios, ops, 2026);
     // No single year should have an extreme concentration
     for (const year of result.p1) {
@@ -78,9 +78,9 @@ describe("schedulePlan", () => {
     }
   });
 
-  it("includes K180 poimintahakkuu in 2028", () => {
+  it("includes K180 selection_cutting in 2028", () => {
     const k180 = makeKuvio({ numero: "180", m3: 400, arvo: 20000 });
-    const ops = [makeOp(k180, "Poimintahakkuu", { removal_m3: 200, notes: "50%" })];
+    const ops = [makeOp(k180, "selection_cutting", { removal_m3: 200, notes: "50%" })];
     const result = schedulePlan([k180], ops, 2026);
     // Check that operations reference kuvio 180
     const allOps = [...result.p1, ...result.p2].flatMap((y) => [
@@ -92,7 +92,7 @@ describe("schedulePlan", () => {
 
   it("produces valid PlanSummary with non-negative values", () => {
     const kuvio = makeKuvio({ numero: "3", m3: 500, arvo: 25000 });
-    const ops = [makeOp(kuvio, "Päätehakkuu")];
+    const ops = [makeOp(kuvio, "clear_cut")];
     const result = schedulePlan([kuvio], ops, 2026);
     expect(result.summary.totalVolume).toBeGreaterThanOrEqual(0);
     expect(result.summary.annualGrowth).toBeGreaterThanOrEqual(0);

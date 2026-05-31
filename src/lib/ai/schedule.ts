@@ -30,24 +30,24 @@ export function schedulePlan(
 
   for (const op of operations) {
     switch (op.type) {
-      case "Päätehakkuu":
+      case "clear_cut":
         paatehakkuut.push(op);
         break;
-      case "Harvennus":
-      case "Ensiharvennus":
+      case "thinning":
+      case "first_thinning":
         harvennukset.push(op);
         break;
-      case "Poimintahakkuu":
+      case "selection_cutting":
         poiminta.push(op);
         break;
-      case "Taimikon varhaishoito":
-      case "Taimikonhoito":
+      case "early_tending":
+      case "tending":
         taimikot.push(op);
         break;
-      case "Laikkumätästys":
-      case "Kuusen istutus":
-      case "Männyn istutus":
-      case "Laikutus":
+      case "site_prep":
+      case "spruce_planting":
+      case "pine_planting":
+      case "scalping":
         uudist.push(op);
         break;
     }
@@ -90,7 +90,7 @@ export function schedulePlan(
 
       getP1(yr).paate.push({
         kuvio: subK,
-        type: "Päätehakkuu",
+        type: "clear_cut",
         year: yr,
         income_eur: sv,
         cost_eur: 0,
@@ -99,10 +99,10 @@ export function schedulePlan(
       });
       getP1(yr).uudist.push({
         kuvio: subK,
-        type: "Laikkumätästys",
+        type: "site_prep",
         year: yr,
         income_eur: 0,
-        cost_eur: Math.round(COSTS["Laikkumätästys"] * sa),
+        cost_eur: Math.round(COSTS.site_prep * sa),
         removal_m3: 0,
         notes: "",
       });
@@ -110,10 +110,10 @@ export function schedulePlan(
       if (plantYr <= 2035) {
         getP1(plantYr).uudist.push({
           kuvio: subK,
-          type: "Kuusen istutus",
+          type: "spruce_planting",
           year: plantYr,
           income_eur: 0,
-          cost_eur: Math.round(COSTS["Kuusen istutus"] * sa),
+          cost_eur: Math.round(COSTS.spruce_planting * sa),
           removal_m3: 0,
           notes: `Istutus osa ${partI + 1}`,
         });
@@ -140,7 +140,7 @@ export function schedulePlan(
 
       getP1(yr).paate.push({
         kuvio: subK,
-        type: "Päätehakkuu",
+        type: "clear_cut",
         year: yr,
         income_eur: sv,
         cost_eur: 0,
@@ -149,10 +149,10 @@ export function schedulePlan(
       });
       getP1(yr).uudist.push({
         kuvio: subK,
-        type: "Laikkumätästys",
+        type: "site_prep",
         year: yr,
         income_eur: 0,
-        cost_eur: Math.round(COSTS["Laikkumätästys"] * sa),
+        cost_eur: Math.round(COSTS.site_prep * sa),
         removal_m3: 0,
         notes: "",
       });
@@ -160,10 +160,10 @@ export function schedulePlan(
       if (plantYr <= 2035) {
         getP1(plantYr).uudist.push({
           kuvio: subK,
-          type: "Männyn istutus",
+          type: "pine_planting",
           year: plantYr,
           income_eur: 0,
-          cost_eur: Math.round(COSTS["Männyn istutus"] * sa),
+          cost_eur: Math.round(COSTS.pine_planting * sa),
           removal_m3: 0,
           notes: `Istutus osa ${partI + 1}`,
         });
@@ -211,17 +211,17 @@ export function schedulePlan(
     const k = op.kuvio;
     getP1(yr).paate.push({
       kuvio: k,
-      type: "Päätehakkuu",
+      type: "clear_cut",
       year: yr,
       income_eur: op.income_eur,
       cost_eur: 0,
       removal_m3: op.removal_m3,
       notes: op.notes,
     });
-    const costMounding = Math.round(COSTS["Laikkumätästys"] * k.ala);
+    const costMounding = Math.round(COSTS.site_prep * k.ala);
     getP1(yr).uudist.push({
       kuvio: k,
-      type: "Laikkumätästys",
+      type: "site_prep",
       year: yr,
       income_eur: 0,
       cost_eur: costMounding,
@@ -231,7 +231,7 @@ export function schedulePlan(
     const plantYr = yr + 1;
     if (plantYr <= 2035) {
       const isMoist = k.site_class.includes("tuore") || k.site_class.includes("lehto");
-      const plantType = isMoist ? "Kuusen istutus" : "Männyn istutus";
+      const plantType = isMoist ? "spruce_planting" : "pine_planting";
       const plantCost = Math.round(COSTS[plantType] * k.ala);
       getP1(plantYr).uudist.push({
         kuvio: k,
@@ -259,17 +259,17 @@ export function schedulePlan(
 
     getP2(yr).paate.push({
       kuvio: k,
-      type: "Päätehakkuu",
+      type: "clear_cut",
       year: yr,
       income_eur: arvoGrown,
       cost_eur: 0,
       removal_m3: Math.round(m3Grown),
       notes: `Jatkokausi, projisoitu ikä ${ageAtYr.toFixed(0)}v`,
     });
-    const costMounding = Math.round(COSTS["Laikkumätästys"] * k.ala);
+    const costMounding = Math.round(COSTS.site_prep * k.ala);
     getP2(yr).uudist.push({
       kuvio: k,
-      type: "Laikkumätästys",
+      type: "site_prep",
       year: yr,
       income_eur: 0,
       cost_eur: costMounding,
@@ -279,7 +279,7 @@ export function schedulePlan(
     const plantYr = yr + 1;
     if (plantYr <= yearsP2[yearsP2.length - 1]) {
       const isMoist = k.site_class.includes("tuore") || k.site_class.includes("lehto");
-      const plantType = isMoist ? "Kuusen istutus" : "Männyn istutus";
+      const plantType = isMoist ? "spruce_planting" : "pine_planting";
       const plantCost = Math.round(COSTS[plantType] * k.ala);
       getP2(plantYr).uudist.push({
         kuvio: k,
@@ -318,7 +318,7 @@ export function schedulePlan(
     const age = k.ikä;
     let target: number | null = null;
 
-    if (op.type === "Taimikon varhaishoito") {
+    if (op.type === "early_tending") {
       if (age < 3) target = startYear + Math.floor(3 - age);
       else if (age <= 12) target = startYear;
       else continue;
@@ -346,10 +346,10 @@ export function schedulePlan(
       if (target >= yearsP2[0] && target <= yearsP2[yearsP2.length - 1]) {
         getP2(target).taimik.push({
           kuvio: k,
-          type: "Taimikonhoito",
+          type: "tending",
           year: target,
           income_eur: 0,
-          cost_eur: Math.round(COSTS["Taimikonhoito"] * k.ala),
+          cost_eur: Math.round(COSTS.tending * k.ala),
           removal_m3: 0,
           notes: "Projisoitu",
         });
@@ -374,7 +374,7 @@ export function schedulePlan(
 
     // Skip already scheduled or special
     const alreadyScheduled = p1.some((yp) =>
-      [...yp.paate, ...yp.harvennus, ...yp.taimik, ...yp.uudist].some((op) => op.kuvio === k && op.type === "Päätehakkuu")
+      [...yp.paate, ...yp.harvennus, ...yp.taimik, ...yp.uudist].some((op) => op.kuvio === k && op.type === "clear_cut")
     );
     if (alreadyScheduled) continue;
     if (Math.abs(knum - 180.0) < 0.01 || Math.abs(knum - 128.0) < 0.01) continue;
@@ -416,17 +416,17 @@ export function schedulePlan(
 
     getP2(spreadYr).paate.push({
       kuvio: k,
-      type: "Päätehakkuu",
+      type: "clear_cut",
       year: spreadYr,
       income_eur: arvoGrown,
       cost_eur: 0,
       removal_m3: Math.round(m3Grown),
       notes: `Kypsyy kaudella 2, ikä ${ageAtTarget.toFixed(0)}v`,
     });
-    const costMounding = Math.round(COSTS["Laikkumätästys"] * ala);
+    const costMounding = Math.round(COSTS.site_prep * ala);
     getP2(spreadYr).uudist.push({
       kuvio: k,
-      type: "Laikkumätästys",
+      type: "site_prep",
       year: spreadYr,
       income_eur: 0,
       cost_eur: costMounding,
@@ -436,7 +436,7 @@ export function schedulePlan(
     const plantYr = spreadYr + 1;
     if (plantYr <= yearsP2[yearsP2.length - 1]) {
       const isMoist = site.includes("tuore") || site.includes("lehto");
-      const plantType = isMoist ? "Kuusen istutus" : "Männyn istutus";
+      const plantType = isMoist ? "spruce_planting" : "pine_planting";
       const plantCost = Math.round(COSTS[plantType] * ala);
       getP2(plantYr).uudist.push({
         kuvio: k,

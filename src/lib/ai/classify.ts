@@ -191,7 +191,7 @@ export function classifyAndValueStands(
     if (Math.abs(knum - 180.0) < 0.01) {
       operations.push({
         kuvio: k,
-        type: "Poimintahakkuu",
+        type: "selection_cutting",
         year: cy,
         income_eur: Math.round(arvo * 0.5),
         cost_eur: 0,
@@ -211,7 +211,7 @@ export function classifyAndValueStands(
       const income = Math.round(arvo * 0.30 * ratio);
       operations.push({
         kuvio: k,
-        type: "Harvennus",
+        type: "thinning",
         year: cy,
         income_eur: income,
         cost_eur: 0,
@@ -240,7 +240,7 @@ export function classifyAndValueStands(
       const income = Math.round(futureArvo * 0.28 * ratio);
       operations.push({
         kuvio: k,
-        type: "Harvennus",
+        type: "thinning",
         year: cy,
         income_eur: income,
         cost_eur: 0,
@@ -260,7 +260,7 @@ export function classifyAndValueStands(
       const [optMin, optMax] = getOptimalAge(pp, site);
       operations.push({
         kuvio: k,
-        type: "Päätehakkuu",
+        type: "clear_cut",
         year: cy,
         income_eur: arvo,
         cost_eur: 0,
@@ -274,19 +274,19 @@ export function classifyAndValueStands(
     if (kl.includes("shelterwood")) {
       operations.push({
         kuvio: k,
-        type: "Laikkumätästys",
+        type: "site_prep",
         year: cy,
         income_eur: 0,
-        cost_eur: Math.round(COSTS["Laikkumätästys"] * ala),
+        cost_eur: Math.round(COSTS.site_prep * ala),
         removal_m3: 0,
         notes: "Uudistaminen",
       });
       operations.push({
         kuvio: k,
-        type: "Männyn istutus",
+        type: "pine_planting",
         year: cy,
         income_eur: 0,
-        cost_eur: Math.round(COSTS["Männyn istutus"] * ala),
+        cost_eur: Math.round(COSTS.pine_planting * ala),
         removal_m3: 0,
         notes: "",
       });
@@ -297,18 +297,19 @@ export function classifyAndValueStands(
     if (kl.includes("open_area") && m3 < 5) {
       operations.push({
         kuvio: k,
-        type: "Laikkumätästys",
+        type: "site_prep",
         year: cy,
         income_eur: 0,
-        cost_eur: Math.round(COSTS["Laikkumätästys"] * ala),
+        cost_eur: Math.round(COSTS.site_prep * ala),
         removal_m3: 0,
         notes: "Uudistaminen",
       });
-      const opsSpecies = site.includes("tuore") || site.includes("lehto") ? "Kuusen" : "Männyn";
-      const plantCost = Math.round(COSTS[`${opsSpecies} istutus`] * ala);
+      const opsSpecies = site.includes("tuore") || site.includes("lehto") ? "spruce" : "pine";
+      const plantType = `${opsSpecies}_planting`;
+      const plantCost = Math.round(COSTS[plantType] * ala);
       operations.push({
         kuvio: k,
-        type: `${opsSpecies} istutus`,
+        type: plantType,
         year: cy,
         income_eur: 0,
         cost_eur: plantCost,
@@ -322,10 +323,10 @@ export function classifyAndValueStands(
     if (kl.includes("seedling") && age >= 3 && age <= 12) {
         operations.push({
           kuvio: k,
-          type: "Taimikon varhaishoito",
+          type: "early_tending",
           year: cy,
           income_eur: 0,
-          cost_eur: Math.round(COSTS["Taimikon varhaishoito"] * ala),
+          cost_eur: Math.round(COSTS.early_tending * ala),
           removal_m3: 0,
           notes: `Ikä ${age.toFixed(0)}v`,
         });
@@ -336,10 +337,10 @@ export function classifyAndValueStands(
     if (kl.includes("seedling") && age >= 10 && age <= 25) {
         operations.push({
           kuvio: k,
-          type: "Taimikonhoito",
+          type: "tending",
           year: cy,
           income_eur: 0,
-          cost_eur: Math.round(COSTS["Taimikonhoito"] * ala),
+        cost_eur: Math.round(COSTS.tending * ala),
           removal_m3: 0,
           notes: `Ikä ${age.toFixed(0)}v`,
         });
@@ -359,7 +360,7 @@ export function classifyAndValueStands(
         const income = Math.round(arvo * 0.25 * ratio);
         operations.push({
           kuvio: k,
-          type: "Ensiharvennus",
+          type: "first_thinning",
           year: cy,
           income_eur: income,
           cost_eur: 0,
@@ -383,7 +384,7 @@ export function classifyAndValueStands(
         const income = Math.round(arvo * 0.28 * ratio);
         operations.push({
           kuvio: k,
-          type: "Harvennus",
+          type: "thinning",
           year: cy,
           income_eur: income,
           cost_eur: 0,

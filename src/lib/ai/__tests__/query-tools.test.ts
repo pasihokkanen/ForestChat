@@ -48,21 +48,21 @@ const mockCompartments: Compartment[] = [
 const mockOperations = [
   {
     id: "op001", compartment_id: "c001", forest_id: "forest-1",
-    type: "Harvennus", year: 2026, removal_pct: 28,
+    type: "thinning", year: 2026, removal_pct: 28,
     income_eur: 12000, cost_eur: 500, notes: null,
     created_by: "ai", created_at: "2025-01-01", updated_at: "2025-01-01",
     compartments: mockCompartments[0],
   },
   {
     id: "op002", compartment_id: "c002", forest_id: "forest-1",
-    type: "Päätehakkuu", year: 2030, removal_pct: 100,
+    type: "clear_cut", year: 2030, removal_pct: 100,
     income_eur: 38700, cost_eur: 2000, notes: null,
     created_by: "ai", created_at: "2025-01-01", updated_at: "2025-01-01",
     compartments: mockCompartments[1],
   },
   {
     id: "op003", compartment_id: "c003", forest_id: "forest-1",
-    type: "Harvennus", year: 2026, removal_pct: 25,
+    type: "thinning", year: 2026, removal_pct: 25,
     income_eur: 3000, cost_eur: 400, notes: null,
     created_by: "ai", created_at: "2025-01-01", updated_at: "2025-01-01",
     compartments: mockCompartments[2],
@@ -253,7 +253,7 @@ describe("queryOperations", () => {
     expect(result.result).toContain("Stand 1");
     expect(result.result).toContain("Mänty");
     expect(result.result).toContain("2026");
-    expect(result.result).toContain("Harvennus");
+    expect(result.result).toContain("thinning");
   });
 
   it("filters by income range", async () => {
@@ -297,7 +297,7 @@ describe("batchUpdateOperations", () => {
     const result = await batchUpdateOperations(
       supabase,
       "forest-1",
-      { years: [2026], types: ["Harvennus"] },
+      { years: [2026], types: ["thinning"] },
       { year: 2028 }
     );
     expect(result.success).toBe(true);
@@ -314,7 +314,7 @@ describe("batchUpdateOperations", () => {
       supabase,
       "forest-1",
       {},
-      { type: "Päätehakkuu" as any }
+      { type: "clear_cut" as any }
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("Cannot update field \"type\"");
@@ -359,7 +359,7 @@ describe("batchUpdateOperations", () => {
     const result = await batchUpdateOperations(
       supabase,
       "forest-1",
-      { years: [2026], types: ["Harvennus"] },
+      { years: [2026], types: ["thinning"] },
       { notes: "Updated batch" }
     );
     expect(result.success).toBe(true);

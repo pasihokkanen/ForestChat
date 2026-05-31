@@ -64,9 +64,9 @@ describe("Forestry Config", () => {
   });
 
   it("COSTS has all silvicultural operations", () => {
-    expect(COSTS["Laikkumätästys"]).toBe(300);
-    expect(COSTS["Kuusen istutus"]).toBe(600);
-    expect(COSTS["Taimikonhoito"]).toBe(500);
+    expect(COSTS.site_prep).toBe(300);
+    expect(COSTS.spruce_planting).toBe(600);
+    expect(COSTS.tending).toBe(500);
   });
 
   it("GROWTH_MINERAL has correct rates", () => {

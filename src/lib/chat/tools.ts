@@ -100,7 +100,7 @@ Returns: operations per stand, key metrics.`,
           type: "object",
           properties: {
             years: { type: "array", items: { type: "number" }, description: "List of specific years, e.g. [2026, 2028]. Returns operations in ANY of these years." },
-            types: { type: "array", items: { type: "string" }, description: "Operation types, e.g. ['Päätehakkuu', 'Harvennus', 'Ensiharvennus', 'Taimikonhoito', 'Laikkumätästys']" },
+            types: { type: "array", items: { type: "string" }, description: "Operation types, e.g. ['clear_cut', 'thinning', 'first_thinning', 'tending', 'site_prep']" },
             stand_ids: { type: "array", items: { type: "string" }, description: "Filter by stand IDs, e.g. ['5', '12']" },
             species: { type: "array", items: { type: "string" }, description: "Filter by main tree species" },
             development_classes: { type: "array", items: { type: "string" }, description: "Filter by development class" },
@@ -123,7 +123,7 @@ Returns: operations per stand, key metrics.`,
       type: "function",
       function: {
         name: "batch_update_operations",
-        description: "Update multiple operations at once. Filter selects which operations to modify, update specifies what to change. Use this for bulk modifications like 'move all 2026 thinnings to 2028'. When the user says 'move harvests', filter by harvest types (Päätehakkuu, Harvennus, Ensiharvennus, Poimintahakkuu). When they say 'move silvicultural work', filter by cost operation types. Each `.update()` call is atomic at the DB level. Max 500 operations per call.",
+        description: "Update multiple operations at once. Filter selects which operations to modify, update specifies what to change. Use this for bulk modifications like 'move all 2026 thinnings to 2028'. When the user says 'move harvests', filter by harvest types (clear_cut, thinning, first_thinning, selection_cutting). When they say 'move silvicultural work', filter by cost operation types. Each `.update()` call is atomic at the DB level. Max 500 operations per call.",
         parameters: {
           type: "object",
           properties: {
@@ -177,7 +177,7 @@ Validation is performed server-side before the operation is added.`,
           properties: {
             stand_id: { type: "string", description: "Stand ID (e.g., '7', '89.1')" },
             year: { type: "number", description: "Year of operation" },
-            type: { type: "string", description: "Operation type: Päätehakkuu, Harvennus, Ensiharvennus, Poimintahakkuu, Taimikonhoito, Taimikon varhaishoito, Ennakkoraivaus, Laikkumätästys, Ojitusmätästys, Laikutus, Istutus, Kuusen istutus, Männyn istutus" },
+            type: { type: "string", description: "Operation type: clear_cut, thinning, first_thinning, selection_cutting, tending, early_tending, pre_clearance, site_prep, ditch_mounding, scalping, planting, spruce_planting, pine_planting" },
             removal_pct: { type: "number", description: "Removal percentage (default: 100 for clearcut, 28 for thinning, 25 for first thinning, 50 for selection cutting)" },
           },
           required: ["stand_id", "year", "type"],

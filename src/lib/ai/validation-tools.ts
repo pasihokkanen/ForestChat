@@ -54,7 +54,7 @@ export async function checkSustainability(
     let totalHarvestM3 = 0;
     let totalIncome = 0;
     const harvestOps = operations.filter((o) =>
-      ["Päätehakkuu", "Harvennus", "Ensiharvennus", "Poimintahakkuu"].includes(o.type)
+      ["clear_cut", "thinning", "first_thinning", "selection_cutting"].includes(o.type)
     );
 
     for (const op of harvestOps) {
@@ -132,7 +132,7 @@ export async function validatePlan(
     const currentYear = new Date().getFullYear();
 
     // Check 1: No clearcuts on non-regeneration-ready stands (Period 1 only — P2 is forward-looking)
-    const clearcuts = operations.filter((o) => o.type === "Päätehakkuu");
+    const clearcuts = operations.filter((o) => o.type === "clear_cut");
     for (const op of clearcuts) {
       const comp = compMap.get(op.compartment_id);
       // Only flag P1 clearcuts — P2 clearcuts are projected based on future maturity
@@ -147,7 +147,7 @@ export async function validatePlan(
 
     // Check 2: No thinnings within 10 years
     const thinnings = operations
-      .filter((o) => o.type === "Harvennus" || o.type === "Ensiharvennus")
+      .filter((o) => o.type === "thinning" || o.type === "first_thinning")
       .sort((a, b) => a.year - b.year);
     for (let i = 1; i < thinnings.length; i++) {
       if (thinnings[i - 1].compartment_id === thinnings[i].compartment_id &&
@@ -161,7 +161,7 @@ export async function validatePlan(
     }
 
     // Check 3: Regeneration chain follows clearcuts
-    const regenTypes = ["Laikkumätästys", "Ojitusmätästys", "Laikutus", "Kuusen istutus", "Männyn istutus"];
+    const regenTypes = ["site_prep", "ditch_mounding", "scalping", "spruce_planting", "pine_planting"];
     for (const op of clearcuts) {
       const hasFollowUp = operations.some(
         (o) => o.compartment_id === op.compartment_id &&
@@ -181,7 +181,7 @@ export async function validatePlan(
     const annualGrowth = compartments.reduce((s, c) => s + ((c.growth_m3_per_ha ?? 0) * (c.area_ha ?? 0)), 0);
     const harvestByYear = new Map<number, number>();
     for (const op of operations) {
-      if (["Päätehakkuu", "Harvennus", "Ensiharvennus"].includes(op.type)) {
+      if (["clear_cut", "thinning", "first_thinning"].includes(op.type)) {
         const vol = (compMap.get(op.compartment_id)?.volume_m3 ?? 0) * ((op.removal_pct ?? 0) / 100);
         harvestByYear.set(op.year, (harvestByYear.get(op.year) ?? 0) + vol);
       }

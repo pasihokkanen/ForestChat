@@ -44,7 +44,7 @@ describe("classifyAndValueStands", () => {
     ];
     const result = classifyAndValueStands(compartments);
     expect(result.operations.length).toBeGreaterThan(0);
-    expect(result.operations.some((o) => o.type === "Päätehakkuu")).toBe(true);
+    expect(result.operations.some((o) => o.type === "clear_cut")).toBe(true);
   });
 
   it("handles K128 special case: uudistuskypsä at 57y → harvennus", () => {
@@ -52,10 +52,10 @@ describe("classifyAndValueStands", () => {
       makeCompartment({ stand_id: "128", development_class: "Uudistuskypsä metsikkö", age_years: 57 }),
     ];
     const result = classifyAndValueStands(compartments);
-    // Should NOT be päätehakkuu despite development_class
-    expect(result.operations.some((o) => o.type === "Päätehakkuu")).toBe(false);
-    // Should be harvennus instead
-    expect(result.operations.some((o) => o.type === "Harvennus")).toBe(true);
+    // Should NOT be clear_cut despite development_class
+    expect(result.operations.some((o) => o.type === "clear_cut")).toBe(false);
+    // Should be thinning instead
+    expect(result.operations.some((o) => o.type === "thinning")).toBe(true);
   });
 
   it("calculates volume and value correctly", () => {
@@ -83,7 +83,7 @@ describe("classifyAndValueStands", () => {
     ];
     const result = classifyAndValueStands(compartments);
     const hasTending = result.operations.some(
-      (o) => o.type === "Taimikon varhaishoito"
+      (o) => o.type === "early_tending"
     );
     expect(hasTending).toBe(true);
   });

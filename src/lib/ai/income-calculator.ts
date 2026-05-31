@@ -19,7 +19,7 @@ function tierForType(type: string): "uudistushakkuu" | "harvennus" | "ensiharven
   if (t === "clear_cut" || t === "päätehakkuu" || t === "avohakkuu") return "uudistushakkuu";
   if (t === "first_thinning" || t === "ensiharvennus") return "ensiharvennus";
   if (t === "selection_cutting" || t === "poimintahakkuu") return "harvennus";
-  return "harvennus"; // Thinning, Harvennus, etc.
+  return "harvennus"; // thinning, harvennus, etc.
 }
 
 /**

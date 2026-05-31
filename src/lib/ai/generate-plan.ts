@@ -75,7 +75,7 @@ export async function generatePlan(
               forest_id: forestId,
               type: op.type,
               year: op.year,
-              removal_pct: op.type === "Päätehakkuu" || op.type === "Poimintahakkuu" ? 100 : 28,
+              removal_pct: op.type === "clear_cut" || op.type === "selection_cutting" ? 100 : 28,
               income_eur: op.income_eur,
               cost_eur: op.cost_eur,
               notes: op.notes,
