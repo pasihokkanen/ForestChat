@@ -12,7 +12,7 @@ import type { ToolDefinition } from "./tools";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 // Model selection priority: session.model > OPENROUTER_MODEL env > default
-const DEFAULT_MODEL = "deepseek/deepseek-v4-flash";
+const DEFAULT_MODEL = "deepseek/deepseek-chat";
 
 export function resolveModel(sessionModel?: string | null): string {
   return sessionModel ?? process.env.OPENROUTER_MODEL ?? DEFAULT_MODEL;
@@ -47,11 +47,22 @@ export async function* streamChat(
       "HTTP-Referer": "https://forestchat.app",
       "X-Title": "ForestChat",
     },
-    body: JSON.stringify({ ...request, model: request.model ?? DEFAULT_MODEL }),
+    body: JSON.stringify({
+      ...request,
+      model: request.model ?? DEFAULT_MODEL,
+      // Prefer providers known to reliably support tool calling with DeepSeek models.
+      // DeepSeek (official API) and DeepInfra are the most reliable; fall back to others if both fail.
+      provider: {
+        order: ["DeepSeek", "DeepInfra"],
+        allow_fallbacks: true,
+      },
+    }),
   });
 
   if (!response.ok) {
-    throw new Error(`OpenRouter error: ${response.status} ${await response.text()}`);
+    const errBody = await response.text();
+    console.error("[STREAM] OpenRouter error:", response.status, errBody.slice(0, 500));
+    throw new Error(`OpenRouter error: ${response.status} ${errBody}`);
   }
 
   const reader = response.body?.getReader();
@@ -130,7 +141,7 @@ export async function* streamChat(
           }
         }
 
-        // When the response signals done, flush accumulated tool calls
+        // When the response signals tool_calls done, flush accumulated tool calls
         if (choice?.finish_reason === "tool_calls") {
           for (const [_, tc] of pendingToolCalls) {
             try {

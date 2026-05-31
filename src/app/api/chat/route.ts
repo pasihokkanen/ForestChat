@@ -151,19 +151,20 @@ export async function POST(request: NextRequest) {
       ]);
 
       let needsRecompute = false;
+      let hasToolCalls = false;
 
       for (let iteration = 0; iteration < maxIterations; iteration++) {
         const toolResults: Array<{ role: string; content: string }> = [];
 
         for await (const chunk of streamChat(
-          {
-            messages: openRouterMessages,
-            tools: tools.length > 0 ? tools : undefined,
-            model: activeModel,
-            stream: true,
-          },
-          env.openRouterApiKey
-        )) {
+            {
+              messages: openRouterMessages,
+              tools: tools.length > 0 ? tools : undefined,
+              model: activeModel,
+              stream: true,
+            },
+            env.openRouterApiKey
+          )) {
           if (chunk.type === "text") {
             finalContent += chunk.content;
             send({ event: "chunk", data: { content: chunk.content } });
@@ -185,6 +186,7 @@ export async function POST(request: NextRequest) {
             send({ event: "tool_end", data: { name: chunk.name, result: result.result, error: result.error } });
 
             const toolContent = result.success ? result.result : `Error: ${result.error}`;
+            hasToolCalls = true;
             toolResults.push({
               role: "tool",
               content: toolContent,
@@ -199,13 +201,49 @@ export async function POST(request: NextRequest) {
           break;
         }
 
-        openRouterMessages.push({ role: "assistant", content: finalContent });
+        // Don't push empty assistant content — confuses models (DeepSeek quirk)
+        if (finalContent.trim()) {
+          openRouterMessages.push({ role: "assistant", content: finalContent });
+        }
         for (const tr of toolResults) {
           openRouterMessages.push(tr);
         }
       }
 
-      // Phase 4b: After ALL iterations — recompute charts once if any mutation happened
+      // When model returns no text after tool execution (DeepSeek quirk),
+      // generate a fallback summary so the user isn't left with empty output
+      if (!finalContent.trim()) {
+        if (hasToolCalls) {
+          // Model called tools but returned no text — generic summary
+          finalContent = "✅ Done. You can ask me to make changes, create charts, or check sustainability.";
+          send({ event: "chunk", data: { content: finalContent } });
+        } else {
+          // Model produced nothing and didn't call any tools — provider issue.
+          // Try auto-detect: if user looks like they want a plan, generate one.
+          const userMsg = openRouterMessages.filter(m => m.role === "user").pop()?.content?.toLowerCase() ?? "";
+          if (userMsg.includes("plan") || userMsg.includes("summary") || userMsg.includes("management")) {
+            send({ event: "chunk", data: { content: "🔧 Generating your plan…\n" } });
+            const result = await executeTool("generate_plan", {}, ctx);
+            if (result.success) {
+              finalContent = result.result;
+              send({ event: "chunk", data: { content: finalContent } });
+              needsRecompute = true;
+            } else {
+              finalContent = `❌ Error: ${result.error}`;
+              send({ event: "chunk", data: { content: finalContent } });
+            }
+          } else if (userMsg.includes("chart") || userMsg.includes("graph") || userMsg.includes("plot")) {
+            // Chart-related but model didn't respond — give guidance
+            finalContent = "I can create charts for you. Try asking something like: \"Show yearly income as a bar chart\" or \"Create a pie chart of species distribution.\"";
+            send({ event: "chunk", data: { content: finalContent } });
+          } else {
+            finalContent = "⚠️ The AI model returned an empty response. This can happen with some model/provider combinations. Try a simpler query or ask me to generate your forest plan with 'Generate a plan'.";
+            send({ event: "chunk", data: { content: finalContent } });
+          }
+        }
+      }
+
+      // Phase 4b: After ALL iterations + fallback — recompute charts once if any mutation happened
       if (needsRecompute) {
         await recomputeAllCharts(ctx.supabase, ctx.forestId, sendSse);
       }

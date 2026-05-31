@@ -89,10 +89,10 @@ export async function generatePlan(
     addPlanOps(p1);
     addPlanOps(p2);
 
-    // 5. Upsert plan_metadata
+    // 5. Save plan_metadata (upsert via manual check — avoids DB constraint dependency)
     const periodYears = args.periodYears ?? 20;
     const startYear = args.startYear ?? new Date().getFullYear();
-    const { error: metaError } = await supabase.from("plan_metadata").upsert({
+    const metaPayload = {
       forest_id: forestId,
       name: `Forest Plan ${startYear}-${startYear + periodYears - 1}`,
       period_start: startYear,
@@ -101,10 +101,17 @@ export async function generatePlan(
       stumpage_value_eur: totalValue,
       annual_growth_m3: totalGrowth,
       owner_stated_value_eur: null,
-    }, { onConflict: "forest_id" });
-    if (metaError) {
-      // Non-critical — metadata is optional
-      console.warn("Failed to upsert plan_metadata:", metaError.message);
+    };
+    const { data: existingMeta } = await supabase
+      .from("plan_metadata")
+      .select("id")
+      .eq("forest_id", forestId)
+      .limit(1)
+      .single();
+    if (existingMeta) {
+      await supabase.from("plan_metadata").update(metaPayload).eq("id", existingMeta.id);
+    } else {
+      await supabase.from("plan_metadata").insert(metaPayload);
     }
 
     // 6. Delete old AI-generated operations FIRST, then insert new ones
