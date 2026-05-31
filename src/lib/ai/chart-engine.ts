@@ -127,9 +127,11 @@ function buildSelect(config: ChartQueryConfig): string {
     }
   }
 
-  // Value source columns (skip count which has no field)
+  // Value source columns (skip count which has no field, and skip
+  // when fn is undefined/falsy — defaults to "count" in aggregateFn)
   for (const v of config.values) {
-    if (v.fn === "count") continue;
+    const fn = v.fn || "count";
+    if (fn === "count") continue;
 
     // Check if this is a computed field
     const computed = COMPUTED_FIELDS[v.field];
@@ -280,6 +282,13 @@ function aggregateRows(
   const groups = new Map<string, { key: Record<string, unknown>; rows: Record<string, unknown>[] }>();
 
   for (const row of rows) {
+    // Skip rows where any group_by key is null/undefined — those rows
+    // can't be categorized and break Recharts rendering (e.g. null in
+    // the legend, invisible chart area).
+    if (groupKeys.some((k) => row[k] == null)) {
+      console.log("[chart-engine] skipping row with null group_by key:", JSON.stringify(groupKeys), "row:", JSON.stringify(row));
+      continue;
+    }
     const compositeKey = groupKeys.map((k) => String(row[k] ?? "")).join("|");
     if (!groups.has(compositeKey)) {
       const keyObj: Record<string, unknown> = {};
@@ -306,21 +315,27 @@ function aggregateRows(
 
 /** Apply an aggregation function to a field across rows */
 function aggregateFn(
-  fn: "sum" | "count" | "avg" | "min" | "max",
+  fn: "sum" | "count" | "avg" | "min" | "max" | undefined,
   rows: Record<string, unknown>[],
   field: string
 ): number {
+  // Default to "count" when fn is missing — models sometimes omit it,
+  // and "count" works with any field type (string UUIDs, etc.) while
+  // "sum" would produce 0 for non-numeric fields, causing invisible charts.
+  const effectiveFn = fn || "count";
+
+  // For "count", rows.length is always correct — no field access needed.
+  if (effectiveFn === "count") return rows.length;
+
   const values = rows
     .map((r) => r[field])
     .filter((v): v is number => typeof v === "number" && !isNaN(v));
 
   if (values.length === 0) return 0;
 
-  switch (fn) {
+  switch (effectiveFn) {
     case "sum":
       return values.reduce((a, b) => a + b, 0);
-    case "count":
-      return rows.length;
     case "avg":
       return values.reduce((a, b) => a + b, 0) / values.length;
     case "min":

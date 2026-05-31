@@ -34,6 +34,35 @@ const VALID_CHART_TYPES = [
   "radar", "donut", "horizontal_bar", "composed", "waterfall",
 ];
 
+/** Parse a Python-style dict string (single quotes) into a JavaScript object.
+ *  Some models (Nemotron) serialize nested configs as Python dicts: "{'source': 'operations'}".
+ *  This converts them to valid JSON-like objects. */
+function parsePythonDict(s: string): Record<string, unknown> | null {
+  try {
+    // Try standard JSON first
+    return JSON.parse(s);
+  } catch {
+    // Try Python-style: replace single quotes with double quotes
+    try {
+      const jsonLike = s.replace(/'/g, '"');
+      return JSON.parse(jsonLike);
+    } catch {
+      // Try to handle more complex nested Python dicts
+      try {
+        // Replace Python keywords
+        const cleaned = s
+          .replace(/True/g, "true")
+          .replace(/False/g, "false")
+          .replace(/None/g, "null")
+          .replace(/'/g, '"');
+        return JSON.parse(cleaned);
+      } catch {
+        return null;
+      }
+    }
+  }
+}
+
 /** Resolve a y_key to the query_config's as name if it matches a raw field name.
  *  The chart engine uses 'as' as the output column name, but AI models
  *  sometimes pass the raw field name (e.g. "income_eur" instead of "income").
@@ -76,18 +105,36 @@ const toolHandlers: Record<string, ToolHandler> = {
     // BRANCH: query_config mode (auto-updating — recommended)
     if (query_config) {
       try {
+        // Handle Python-style dict strings from some models (e.g. "{'source': 'operations'}")
+        let qc: ChartQueryConfig;
+        if (typeof query_config === "string") {
+          const parsed = parsePythonDict(query_config as string);
+          if (!parsed || !parsed.source) {
+            return { success: false, result: "", error: "query_config must be a valid object — received a string that could not be parsed" };
+          }
+          qc = parsed as unknown as ChartQueryConfig;
+        } else {
+          qc = query_config as ChartQueryConfig;
+        }
+
         const engineResult = await recomputeChartData(
           ctx.supabase,
           ctx.forestId,
-          query_config as ChartQueryConfig
+          qc
         );
 
         // Auto-resolve y_key / y_key2 to match the 'as' names in query_config values.
-        const resolvedYKey = resolveAsName(query_config as ChartQueryConfig, y_key as string);
-        const resolvedYKey2 = y_key2 ? resolveAsName(query_config as ChartQueryConfig, y_key2 as string) : null;
+        // Also auto-detect y_key from first value's 'as' name if not provided.
+        const resolvedYKey = (y_key as string)
+          ? resolveAsName(qc, y_key as string)
+          : (qc.values?.length > 0 ? qc.values[0].as : null);
+        const resolvedYKey2 = y_key2 ? resolveAsName(qc, y_key2 as string) : null;
+
+        if (!resolvedYKey) {
+          return { success: false, result: "", error: "y_key is required — could not determine value column from query_config" };
+        }
 
         // Auto-detect name_key for pie/donut charts: use first group_by field if name_key not provided
-        const qc = query_config as ChartQueryConfig;
         const effectiveNameKey = (name_key as string)
           ?? ((type === "pie" || type === "donut") && qc.aggregate?.length > 0
             ? qc.aggregate[0].group_by
@@ -95,7 +142,7 @@ const toolHandlers: Record<string, ToolHandler> = {
 
         // Auto-detect x_key for bar/line/area charts: use first group_by field if x_key not provided
         const effectiveXKey = (x_key as string)
-          ?? ((type === "bar" || type === "line" || type === "area" || type === "horizontal_bar")
+          ?? ((type === "bar" || type === "line" || type === "area" || type === "horizontal_bar" || type === "scatter" || type === "radar" || type === "composed" || type === "waterfall")
             && qc.aggregate?.length > 0
             ? qc.aggregate[0].group_by
             : null);

@@ -170,6 +170,21 @@ export default function ChartCard({ tab }: ChartCardProps) {
     });
   }, [tab.data, effectiveXKey, tab.nameKey, tab.colorKey]);
 
+  // Filter out rows with null/undefined/"null" nameKey values for pie/donut charts.
+  // Recharts Pie fails to render slices when nameKey resolves to null.
+  // DB stores some nulls as the literal string "null".
+  const cleanData = React.useMemo(() => {
+    if (!translatedData?.length) return translatedData;
+    const isPieLike = tab.type === "pie" || tab.type === "donut";
+    if (!isPieLike || !tab.nameKey) return translatedData;
+    const filtered = translatedData.filter((row) => {
+      const v = row[tab.nameKey!];
+      return v != null && v !== "null";
+    });
+    console.log("[ChartCard] donut/pie cleanData:", { type: tab.type, nameKey: tab.nameKey, yKey: tab.yKey, total: translatedData.length, filtered: filtered.length, sample: filtered.slice(0, 2) });
+    return filtered;
+  }, [translatedData, tab.type, tab.nameKey]);
+
   // Determine if a data point is "active" (highlighted)
   const isActive = (_entry: Record<string, unknown>): boolean => {
     return false; // Simplified — full active highlighting handled by Cell opacity
@@ -401,7 +416,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie
-              data={translatedData}
+              data={cleanData}
               dataKey={tab.yKey}
               nameKey={tab.nameKey ?? undefined}
               cx="50%"
@@ -411,7 +426,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
 
             >
-              {translatedData.map((_, i) => (
+              {cleanData.map((_, i) => (
                 <Cell key={i} fill={getCellFill(i)} />
               ))}
             </Pie>
@@ -426,7 +441,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie
-              data={translatedData}
+              data={cleanData}
               dataKey={tab.yKey}
               nameKey={tab.nameKey ?? undefined}
               cx="50%"
@@ -437,7 +452,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
 
             >
-              {translatedData.map((_, i) => (
+              {cleanData.map((_, i) => (
                 <Cell key={i} fill={getCellFill(i)} />
               ))}
             </Pie>
