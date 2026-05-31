@@ -105,7 +105,9 @@ function EuroTooltip({ active, payload, label }: Record<string, unknown>) {
       color: "var(--foreground, #171717)",
     }}>
       <div style={{ fontWeight: 600, marginBottom: 4, color: "var(--foreground, #171717)" }}>{String(label)}</div>
-      {(payload as Array<Record<string, unknown>>).map((entry, i) => {
+      {(payload as Array<Record<string, unknown>>)
+        .filter((entry) => (entry.dataKey as string) !== "_wfBase")
+        .map((entry, i) => {
         const val = entry.value as number;
         const name = entry.name as string;
         const color = entry.color as string;
@@ -174,6 +176,26 @@ function WaterfallBar(props: Record<string, unknown>) {
   const barColor =
     typeof value === "number" && value < 0 ? "#E53935" : "#4CAF50";
   return <Rectangle {...rest} fill={barColor} />;
+}
+
+/** Transform flat data into waterfall format: each row gets a "base" (where
+ *  the bar starts) computed from the cumulative sum of all previous values.
+ *  The visible bar ("yKey") stacks on top of the invisible "base" bar. */
+function buildWaterfallData(
+  data: Record<string, unknown>[],
+  yKey: string
+): Record<string, unknown>[] {
+  let cumulative = 0;
+  return data.map((row) => {
+    const val = (row[yKey] as number) ?? 0;
+    const wfRow = {
+      ...row,
+      _wfBase: cumulative,
+      [yKey]: val,
+    };
+    cumulative += val;
+    return wfRow;
+  });
 }
 
 interface ChartCardProps {
@@ -659,11 +681,12 @@ export default function ChartCard({ tab }: ChartCardProps) {
         </ResponsiveContainer>
       );
 
-    case "waterfall":
+    case "waterfall": {
+      const wfData = buildWaterfallData(translatedData, tab.yKey);
       return (
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
-            data={translatedData}
+            data={wfData}
             onClick={(e) =>
               handleChartClick(
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -679,14 +702,18 @@ export default function ChartCard({ tab }: ChartCardProps) {
             />
             <YAxis {...yAxisProps(tab.yKey)} />
             <Tooltip content={<EuroTooltip />} />
+            {/* Invisible base bar — pushes each visible bar to start above previous cumulative */}
+            <Bar dataKey="_wfBase" stackId="wf" fill="transparent" />
             <Bar
               dataKey={tab.yKey}
+              stackId="wf"
               shape={<WaterfallBar />}
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
             />
           </BarChart>
         </ResponsiveContainer>
       );
+    }
 
     default:
       return (

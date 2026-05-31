@@ -31,6 +31,7 @@ function detectChartIntent(userMsg: string): Record<string, unknown> | null {
   else if (msg.includes("scatter")) chartType = "scatter";
   else if (msg.includes("horizontal")) chartType = "horizontal_bar";
   else if (msg.includes("stacked")) chartType = "stacked_bar";
+  else if (msg.includes("waterfall")) chartType = "waterfall";
 
   // Detect data pattern
   const hasSpecies = msg.includes("species");
@@ -40,6 +41,7 @@ function detectChartIntent(userMsg: string): Record<string, unknown> | null {
   const hasCost = msg.includes("cost") || msg.includes("expense");
   const hasYear = msg.includes("year") || msg.includes("annual") || msg.includes("yearly");
   const hasType = msg.includes("type") || msg.includes("operation");
+  const hasNet = msg.includes("net") || msg.includes("cashflow");
 
   // Pattern: "area by tree species" → pie chart of compartment_species
   if (hasArea && hasSpecies) {
@@ -75,7 +77,8 @@ function detectChartIntent(userMsg: string): Record<string, unknown> | null {
   }
 
   // Pattern: "yearly income" → bar/line of operations by year
-  if (hasYear && hasIncome) {
+  // Skip if user asked for waterfall (handled separately below)
+  if (hasYear && hasIncome && chartType !== "waterfall" && !hasNet) {
     const isCumulative = msg.includes("cumulative");
     return {
       chart_id: "chart-yearly-income",
@@ -128,6 +131,23 @@ function detectChartIntent(userMsg: string): Record<string, unknown> | null {
       y_key: "income",
       y_key2: "cost",
       color_key: "type",
+    };
+  }
+
+  // Pattern: "waterfall net cashflow" or "waterfall income minus costs"
+  if (chartType === "waterfall" || (hasNet && (hasIncome || hasCost))) {
+    return {
+      chart_id: "chart-waterfall-net",
+      title: "Yearly Net Cashflow (Income − Costs)",
+      type: "waterfall",
+      query_config: {
+        source: "operations",
+        aggregate: [{ group_by: "year" }],
+        values: [{ field: "net_cashflow", as: "net", fn: "sum" }],
+        sort: { by: "year" },
+      },
+      x_key: "year",
+      y_key: "net",
     };
   }
 

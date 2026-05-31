@@ -59,6 +59,15 @@ const COMPUTED_FIELDS: Record<string, ComputedFieldDef> = {
     compute: (row) =>
       ((row.volume_m3 as number) ?? 0) * ((row.removal_pct as number) ?? 0) / 100,
   },
+  net_cashflow: {
+    sources: ["income_eur", "cost_eur"],
+    sourceTables: {
+      income_eur: "source",
+      cost_eur: "source",
+    },
+    compute: (row) =>
+      ((row.income_eur as number) ?? 0) - ((row.cost_eur as number) ?? 0),
+  },
 };
 
 const WHITELISTED_SOURCES = new Set([
