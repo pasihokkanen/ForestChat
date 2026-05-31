@@ -135,7 +135,8 @@ function detectChartIntent(userMsg: string): Record<string, unknown> | null {
   }
 
   // Pattern: "waterfall net cashflow" or "waterfall income minus costs"
-  if (chartType === "waterfall" || (hasNet && (hasIncome || hasCost))) {
+  // Only fires for explicit cashflow/net prompts, not all waterfall requests
+  if (chartType === "waterfall" && hasNet && (hasIncome || hasCost)) {
     return {
       chart_id: "chart-waterfall-net",
       title: "Yearly Net Cashflow (Income − Costs)",
