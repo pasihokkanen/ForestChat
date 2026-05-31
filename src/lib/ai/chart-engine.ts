@@ -105,6 +105,10 @@ const FIELD_ALIASES: Record<string, string> = {
   "tree_species": "species",
   "total_ha": "area_ha",
   "total_m3": "volume_m3",
+  // common plural / shorthand mistakes
+  "development_classes": "development_class",
+  "dev_class": "development_class",
+  "stand_type": "development_class",
 };
 
 /** Translate a field name through the alias map (source-aware).
