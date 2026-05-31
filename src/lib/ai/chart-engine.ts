@@ -23,6 +23,10 @@ export interface ChartQueryConfig {
     fn: "sum" | "count" | "avg" | "min" | "max";
     /** Multiply result by this factor after aggregation (e.g. -1 for costs). */
     multiply?: number;
+    /** When true, convert this value from period sums to cumulative running
+     *  totals after aggregation. Only works on sorted data — the cumulative
+     *  direction follows the sort order (typically year ascending). */
+    cumulative?: boolean;
   }>;
   filters?: Record<string, unknown>;
   sort?: { by: string; dir?: "asc" | "desc" };
@@ -462,6 +466,94 @@ function fillYearGaps(
   return result;
 }
 
+/** Check whether cumulative should be applied to at least one value.
+ *  Only applies when sorted (sort is present or can be inferred from first group_by). */
+function shouldApplyCumulative(config: ChartQueryConfig): boolean {
+  return config.values.some((v) => v.cumulative === true)
+    && (config.sort !== undefined || (config.aggregate.length > 0 && config.aggregate[0].group_by === "year"));
+}
+
+/** Convert period sums to cumulative running totals for values flagged cumulative.
+ *  Preserves multi-group ordering: within each secondary group dimension, values
+ *  accumulate independently along the primary sort axis (typically year).
+ *
+ *  Example input:  [{year:2026, income:100}, {year:2027, income:150}, {year:2028, income:120}]
+ *  Example output: [{year:2026, income:100}, {year:2027, income:250}, {year:2028, income:370}]
+ */
+function applyCumulative(
+  rows: Record<string, unknown>[],
+  config: ChartQueryConfig
+): Record<string, unknown>[] {
+  if (!shouldApplyCumulative(config)) return rows;
+
+  // Identify which value fields need cumulative treatment
+  const cumulativeFields = new Set<string>();
+  for (const v of config.values) {
+    if (v.cumulative) cumulativeFields.add(v.as);
+  }
+
+  if (cumulativeFields.size === 0) return rows;
+
+  // Determine primary sort key (the "time" axis along which to accumulate)
+  const sortKey = config.sort?.by ?? (config.aggregate.length > 0 ? config.aggregate[0].group_by : null);
+  if (!sortKey) return rows;
+
+  // If there's a secondary group_by (e.g. [{group_by:"year"}, {group_by:"type"}]),
+  // accumulate separately within each secondary group dimension.
+  const secondaryKey = config.aggregate.length > 1 ? config.aggregate[1].group_by : null;
+
+  if (secondaryKey) {
+    // Partition rows by secondary key, accumulate within each partition
+    const partitions = new Map<string, Record<string, unknown>[]>();
+    for (const row of rows) {
+      const key = String(row[secondaryKey] ?? "__null__");
+      if (!partitions.has(key)) partitions.set(key, []);
+      partitions.get(key)!.push(row);
+    }
+
+    // Sort each partition by the primary sort key, then accumulate
+    const result: Record<string, unknown>[] = [];
+    partitions.forEach((partition) => {
+      partition.sort((a, b) => String(a[sortKey] ?? "").localeCompare(String(b[sortKey] ?? "")));
+      const running: Record<string, number> = {};
+      cumulativeFields.forEach((f) => { running[f] = 0; });
+      for (const row of partition) {
+        cumulativeFields.forEach((f) => {
+          const val = Number(row[f]) || 0;
+          running[f] += val;
+          row[f] = running[f];
+        });
+        result.push(row);
+      }
+    });
+    return result;
+  }
+
+  // Single group — accumulate across all rows in sort order
+  // Rows are already sorted by the time we reach this step (aggregateRows preserves
+  // DB order + post-sort happens in recomputeChartData step 6), but ensure they're
+  // sorted by the primary key for correct cumulative direction.
+  const sorted = [...rows].sort((a, b) => {
+    const va = a[sortKey];
+    const vb = b[sortKey];
+    if (typeof va === "number" && typeof vb === "number") return va - vb;
+    return String(va ?? "").localeCompare(String(vb ?? ""));
+  });
+
+  const running: Record<string, number> = {};
+  cumulativeFields.forEach((f) => { running[f] = 0; });
+
+  for (const row of sorted) {
+    cumulativeFields.forEach((f) => {
+      const val = Number(row[f]) || 0;
+      running[f] += val;
+      row[f] = running[f];
+    });
+  }
+
+  return sorted;
+}
+
 // ─── Public API ──────────────────────────────────────────────────────
 
 /**
@@ -516,6 +608,11 @@ export async function recomputeChartData(
       return String(va ?? "").localeCompare(String(vb ?? "")) * dir;
     });
   }
+
+  // 6b. Apply cumulative transformation — converts period sums to running totals
+  //     for any value entry flagged cumulative: true. Re-sorts ascending along
+  //     the primary axis so cumulative always runs forward in time.
+  aggregated = applyCumulative(aggregated, config);
 
   // 7. Apply limit
   if (config.limit && config.limit > 0) {

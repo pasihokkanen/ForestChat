@@ -76,14 +76,15 @@ function detectChartIntent(userMsg: string): Record<string, unknown> | null {
 
   // Pattern: "yearly income" → bar/line of operations by year
   if (hasYear && hasIncome) {
+    const isCumulative = msg.includes("cumulative");
     return {
       chart_id: "chart-yearly-income",
-      title: "Yearly Income",
+      title: isCumulative ? "Cumulative Income Over Plan Years" : "Yearly Income",
       type: chartType,
       query_config: {
         source: "operations",
         aggregate: [{ group_by: "year" }],
-        values: [{ field: "income_eur", as: "income", fn: "sum" }],
+        values: [{ field: "income_eur", as: "income", fn: "sum", ...(isCumulative ? { cumulative: true } : {}) }],
         sort: { by: "year" },
       },
       x_key: "year",
@@ -377,10 +378,10 @@ export async function POST(request: NextRequest) {
           break;
         }
 
-        // If the model called a terminal (client-side) tool and produced no new text
-        // this iteration, don't feed tool results back for another round — the UI is
-        // already updated and continuing risks duplicate chart/selection calls.
-        if (!iterationText.trim() && hadTerminalTool) {
+        // If the model called a terminal (client-side) tool, stop the loop
+        // immediately — the UI is already updated and feeding tool results back
+        // for another iteration risks duplicate chart/selection calls.
+        if (hadTerminalTool) {
           break;
         }
 
@@ -394,7 +395,9 @@ export async function POST(request: NextRequest) {
       }
 
       // When model returns no text after tool execution (DeepSeek quirk),
-      // generate a fallback summary so the user isn't left with empty output
+      // generate a fallback summary so the user isn't left with empty output.
+      // Also: when a terminal tool (create_chart) was called, append the tool's
+      // result text so the user gets a clear confirmation message.
       if (!finalContent.trim()) {
         if (hasToolCalls) {
           // Model called tools but returned no text — use the tool's own result
@@ -439,6 +442,14 @@ export async function POST(request: NextRequest) {
             send({ event: "chunk", data: { content: finalContent } });
           }
         }
+      }
+
+      // When a chart was created and the model produced its own text (not
+      // the fallback above), append the chart's result text so the user
+      // sees a clear confirmation alongside the model's natural response.
+      if (createdChart && lastToolResult && finalContent.trim() !== lastToolResult) {
+        finalContent += "\n\n" + lastToolResult;
+        send({ event: "chunk", data: { content: "\n\n" + lastToolResult } });
       }
 
       // Phase 4b: After ALL iterations + fallback — recompute charts once if any mutation happened
