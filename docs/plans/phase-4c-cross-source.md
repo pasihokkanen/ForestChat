@@ -69,7 +69,8 @@ interface SubQueryConfig {
               ┌───────────────┼───────────────┐
               ▼               ▼               ▼
         recomputeSubQ1  recomputeSubQ2  recomputeSubQ3
-        (full pipeline) (full pipeline) (full pipeline)
+        (pipeline w/o    (pipeline w/o    (pipeline w/o
+         cumulative)      cumulative)      cumulative)
               │               │               │
               ▼               ▼               ▼
          rows_q1[]       rows_q2[]       rows_q3[]
@@ -86,14 +87,16 @@ interface SubQueryConfig {
                      on merge_on key)
                               │
                               ▼
-                       fillGaps()
-                    (zero-fill missing
-                     merge keys)
+                       fillMergeGaps()
+                    (year gaps if merge_on
+                     is "year"; no-op
+                     for other keys)
                               │
                               ▼
                      applyCumulative()
-                    (post-merge, respects
-                     per-subquery flags)
+                    (post-merge, using
+                     original sub-query
+                     cumulative flags)
                               │
                               ▼
                          sort()
@@ -103,6 +106,8 @@ interface SubQueryConfig {
                               ▼
                      ChartEngineResult
 ```
+
+**Important:** Sub-queries run through the existing `recomputeChartData` pipeline but with cumulative **stripped** from their value entries. Cumulative is deferred to post-merge because the rows haven't been aligned yet — cumulating independently would produce incorrect totals. The original cumulative flags are saved and applied after the merge step.
 
 ### Merge semantics
 
@@ -198,6 +203,8 @@ growth_m3_total: {
 
 **Result:** Each row has `{ year, removal, growth }`. Growth is the same constant per year (broadcast). The waterfall can show growth as positive bars and removal as negative.
 
+> **Note:** The waterfall chart component currently supports a single `y_key` value. To render both growth (+) and removal (−) in a single waterfall, the chart component needs multi-value waterfall support. This is a rendering concern — the cross-source pipeline correctly produces the data. A follow-up task (Phase 4c.5) should extend the waterfall component. Until then, growth + removal combined charts can use `stacked_bar` or `line` types which already support dual values via `y_key` + `y_key2`.
+
 ---
 
 ## Example: Cumulative growth + removal (line chart)
@@ -244,10 +251,14 @@ growth_m3_total: {
 
 ### Phase 4c.1: Join-prefixed filter resolution (~30 min)
 
+**⚠️ Feasibility:** Supabase JS client's `.eq()` operates on the base table's columns. Filtering on an embedded/joined table's column (`compartments.development_class`) may require PostgREST's embedded resource filter syntax (`.filter("compartments.development_class", "eq", ...)`) instead of standard `.eq()`. This needs a spike during implementation to determine which API works.
+
+**Fallback if `.eq()` doesn't work:** Use cross-source mode for this case — query 1 gets compartment IDs from `compartments` filtered by `development_class`, query 2 filters `compartment_species` by those IDs.
+
 **File:** `src/lib/ai/chart-engine.ts`
 
 - Modify `buildQuery()` filters loop to resolve join-prefixed filter keys
-- `"comp.development_class"` → `compartments(development_class)` in Supabase `.eq()`/`.in()` calls
+- `"comp.development_class"` → `compartments(development_class)` in Supabase `.eq()`/`.in()` calls (or use `.filter()` if `.eq()` doesn't support embedded resources)
 - Reuse existing `resolveJoinField()` helper
 - This enables `compartment_species` → `compartments` filtering without cross-source mode
 
@@ -269,12 +280,14 @@ growth_m3_total: {
 **File:** `src/lib/ai/chart-engine.ts`
 
 1. **Types** — Add `CrossQueryConfig`, `SubQueryConfig` interfaces
-2. **`recomputeSubQuery()`** — Run a single sub-query through the existing pipeline. Extracted from `recomputeChartData()` as a reusable function.
+2. **`recomputeSubQuery()`** — Run a single sub-query through the existing pipeline. Extracted from `recomputeChartData()` as a reusable function. Accepts a `skipCumulative: boolean` parameter — when true, strips cumulative flags from value entries before running, so cumulative is deferred to the cross-pipeline post-merge step.
 3. **`extractMergeKeys()`** — Collect unique `merge_on` values from all sub-query results
-4. **`mergeResults()`** — For each merge key, combine matching rows from all sub-queries. Handle broadcast rows.
-5. **`fillMergeGaps()`** — For outer merge, zero-fill missing values
-6. **`recomputeCrossData()`** — Orchestrator: run sub-queries → extract keys → merge → fill gaps → apply cumulative → sort
-7. **Modify `recomputeChartData()`** — `if (config.source === "cross")` → delegate to `recomputeCrossData()`
+4. **`mergeResults()`** — For each merge key, combine matching rows from all sub-queries. Handle broadcast rows. **Error handling:** if any sub-query fails, fail the entire cross query — bubble up the first error (partial results would produce silently broken charts).
+5. **`fillMergeGaps()`** — For outer merge, zero-fill missing values. When `merge_on === "year"`, uses the existing `fillYearGaps` logic to fill all integer years between min and max. For non-year merge keys, only fills merge keys present in the union of sub-queries (no synthetic keys).
+6. **`applyCrossCumulative()`** — After merge, re-reads the original sub-query cumulative flags and applies `applyCumulative` to the merged rows. Cumulative must happen post-merge because rows from different sub-queries need to be aligned by merge key first.
+7. **`recomputeCrossData()`** — Orchestrator: run sub-queries (with cumulative stripped) → extract keys → merge → fill gaps → apply cumulative from saved flags → sort
+8. **Modify `recomputeChartData()`** — `if (config.source === "cross")` → delegate to `recomputeCrossData()`
+9. **Update `recomputeAllCharts()`** — The `query_config` JSONB column may contain either `ChartQueryConfig` or `CrossQueryConfig`. Widen the type to `ChartQueryConfig | CrossQueryConfig` and use `config.source` as discriminator.
 
 **File:** `src/lib/ai/__tests__/chart-engine.test.ts` (new)
 
