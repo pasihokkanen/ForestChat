@@ -18,8 +18,8 @@ import { batchUpdateOperations } from "../edit-tools";
 const mockCompartments: Compartment[] = [
   {
     id: "c001", forest_id: "forest-1", stand_id: "1",
-    area_ha: 1.2, main_species: "Mänty", development_class: "Varttunut kasvatusmetsikkö",
-    site_type: "tuore", soil_type: "Kangas", drainage_status: null,
+    area_ha: 1.2, main_species: "Mänty", development_class: "mature_thinning",
+    site_type: "mesic", soil_type: "Kangas", drainage_status: null,
     age_years: 55, volume_m3: 120, basal_area: 18.5,
     avg_diameter: 22.0, avg_height: 16.5, growth_m3_per_ha: 4.2,
     geometry: null, attributes: null,
@@ -27,8 +27,8 @@ const mockCompartments: Compartment[] = [
   },
   {
     id: "c002", forest_id: "forest-1", stand_id: "2",
-    area_ha: 2.1, main_species: "Kuusi", development_class: "Uudistuskypsä metsikkö",
-    site_type: "lehtomainen", soil_type: "Kangas", drainage_status: null,
+    area_ha: 2.1, main_species: "Kuusi", development_class: "regeneration_ready",
+    site_type: "herb-rich heath", soil_type: "Kangas", drainage_status: null,
     age_years: 80, volume_m3: 340, basal_area: 26.0,
     avg_diameter: 30.0, avg_height: 22.0, growth_m3_per_ha: 5.8,
     geometry: null, attributes: null,
@@ -36,8 +36,8 @@ const mockCompartments: Compartment[] = [
   },
   {
     id: "c003", forest_id: "forest-1", stand_id: "5",
-    area_ha: 0.9, main_species: "Rauduskoivu", development_class: "Nuori kasvatusmetsikkö",
-    site_type: "tuore", soil_type: "Kangas", drainage_status: null,
+    area_ha: 0.9, main_species: "Rauduskoivu", development_class: "young_thinning",
+    site_type: "mesic", soil_type: "Kangas", drainage_status: null,
     age_years: 28, volume_m3: 45, basal_area: 12.0,
     avg_diameter: 15.0, avg_height: 12.0, growth_m3_per_ha: 6.1,
     geometry: null, attributes: null,

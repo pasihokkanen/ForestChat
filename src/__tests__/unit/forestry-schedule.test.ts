@@ -6,8 +6,8 @@ function makeKuvio(overrides: Partial<KuviotData> & { numero: string }): KuviotD
   return {
     numero: overrides.numero,
     ala: overrides.ala ?? 2.0,
-    kehitysluokka: overrides.kehitysluokka ?? "Varttunut kasvatusmetsikkö",
-    kasvupaikka: overrides.kasvupaikka ?? "tuore",
+    kehitysluokka: overrides.kehitysluokka ?? "mature_thinning",
+    kasvupaikka: overrides.kasvupaikka ?? "mesic",
     maalaji: overrides.maalaji ?? "kivennäismaa",
     ojitustilanne: overrides.ojitustilanne ?? "ei ojia",
     paapuulaji: overrides.paapuulaji ?? "Mänty",

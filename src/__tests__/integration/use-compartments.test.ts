@@ -33,7 +33,7 @@ describe("useCompartments", () => {
 
     expect(result.current.data).toHaveLength(2);
     expect(result.current.data[0].stand_id).toBe("1");
-    expect(result.current.data[1].development_class).toBe("Uudistuskypsä");
+    expect(result.current.data[1].development_class).toBe("regeneration_ready");
     expect(result.current.error).toBeNull();
   });
 

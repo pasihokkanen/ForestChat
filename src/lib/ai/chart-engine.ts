@@ -237,7 +237,7 @@ function flattenRows(rows: Record<string, unknown>[]): Record<string, unknown>[]
     for (const [key, val] of Object.entries(row)) {
       if (val && typeof val === "object" && !Array.isArray(val)) {
         // This is a joined table result — flatten with prefix
-        // e.g. "compartments": { "main_species": "Mänty" } → "main_species": "Mänty"
+        // e.g. a joined table result {"main_species": "Pine"} → "main_species": "Pine"
         // Also keep compartment_id for the on-join lookup
         const nested = val as Record<string, unknown>;
         for (const [nk, nv] of Object.entries(nested)) {

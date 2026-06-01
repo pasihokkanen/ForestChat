@@ -54,10 +54,10 @@ describe("compartmentsToGeoJSON", () => {
 
   it("preserves development_class for MapLibre expression", () => {
     const result = compartmentsToGeoJSON([
-      makeCompartment({ development_class: "Uudistuskypsä" }),
+      makeCompartment({ development_class: "regeneration_ready" }),
     ]);
     expect(result.features[0].properties.development_class).toBe(
-      "Uudistuskypsä",
+      "regeneration_ready",
     );
   });
 

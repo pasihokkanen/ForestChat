@@ -10,8 +10,8 @@ function makeCompartment(overrides: Partial<Compartment> & { stand_id: string })
     stand_id: overrides.stand_id,
     area_ha: overrides.area_ha ?? 2.0,
     main_species: overrides.main_species ?? "Mänty",
-    development_class: overrides.development_class ?? "Varttunut kasvatusmetsikkö",
-    site_type: overrides.site_type ?? "tuore",
+    development_class: overrides.development_class ?? "mature_thinning",
+    site_type: overrides.site_type ?? "mesic",
     soil_type: overrides.soil_type ?? "kivennäismaa",
     drainage_status: overrides.drainage_status ?? "ei ojia",
     age_years: overrides.age_years ?? 50,
@@ -31,7 +31,7 @@ describe("classifyAndValueStands", () => {
   it("filters out non-forest land types", () => {
     const compartments = [
       makeCompartment({ stand_id: "1", development_class: "Muu maa" }),
-      makeCompartment({ stand_id: "2", development_class: "Varttunut kasvatusmetsikkö" }),
+      makeCompartment({ stand_id: "2", development_class: "mature_thinning" }),
     ];
     const result = classifyAndValueStands(compartments);
     expect(result.forestKuviot.length).toBe(1);
@@ -47,9 +47,9 @@ describe("classifyAndValueStands", () => {
     expect(result.operations.some((o) => o.type === "clear_cut")).toBe(true);
   });
 
-  it("handles K128 special case: uudistuskypsä at 57y → harvennus", () => {
+  it("handles K128 special case: regeneration_ready at 57y → thinning only", () => {
     const compartments = [
-      makeCompartment({ stand_id: "128", development_class: "Uudistuskypsä metsikkö", age_years: 57 }),
+      makeCompartment({ stand_id: "128", development_class: "regeneration_ready", age_years: 57 }),
     ];
     const result = classifyAndValueStands(compartments);
     // Should NOT be clear_cut despite development_class
@@ -71,7 +71,7 @@ describe("classifyAndValueStands", () => {
 
   it("assigns site_class correctly", () => {
     const compartments = [
-      makeCompartment({ stand_id: "5", site_type: "lehtomainen" }),
+      makeCompartment({ stand_id: "5", site_type: "herb-rich heath" }),
     ];
     const result = classifyAndValueStands(compartments);
     expect(result.forestKuviot[0].site_class).toBe("lehtomainen");

@@ -57,14 +57,14 @@ Returns: operations per stand, key metrics.`,
       type: "function",
       function: {
         name: "search_stands",
-        description: "Search compartments (kuviot) by any combination of criteria. All parameters optional — omit to get all stands (useful for overview). Filter values can be in Finnish OR English (e.g. 'Mänty' or 'Pine', 'tuore' or 'mesic') — handler auto-translates. The fields parameter only returns the requested columns from the database, reducing response size.",
+        description: "Search compartments by any combination of criteria. All parameters optional — omit to get all stands (useful for overview). The fields parameter only returns the requested columns from the database, reducing response size.",
         parameters: {
           type: "object",
           properties: {
             stand_ids: { type: "array", items: { type: "string" }, description: "List of specific stand IDs, e.g. ['5', '12', '89.1']" },
-            species: { type: "array", items: { type: "string" }, description: "Main tree species in Finnish or English, e.g. ['Mänty', 'Kuusi']" },
-            development_classes: { type: "array", items: { type: "string" }, description: "e.g. ['Uudistuskypsä metsikkö', 'Varttunut kasvatusmetsikkö', 'Nuori kasvatusmetsikkö', 'Taimikko']" },
-            site_types: { type: "array", items: { type: "string" }, description: "e.g. ['tuore', 'lehtomainen', 'kuivahko', 'kuiva']" },
+            species: { type: "array", items: { type: "string" }, description: "Main tree species, e.g. ['pine', 'spruce', 'birch']" },
+            development_classes: { type: "array", items: { type: "string" }, description: "e.g. ['regeneration_ready', 'mature_thinning', 'young_thinning', 'open_area', 'seed_tree', 'seedling_large', 'seedling_small']" },
+            site_types: { type: "array", items: { type: "string" }, description: "e.g. ['herb-rich heath', 'mesic', 'sub-xeric', 'xeric']" },
             age_min: { type: "number" }, age_max: { type: "number" },
             area_min: { type: "number" }, area_max: { type: "number" },
             volume_min: { type: "number" }, volume_max: { type: "number" },
