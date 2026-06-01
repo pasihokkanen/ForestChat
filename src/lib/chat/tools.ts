@@ -275,6 +275,7 @@ For joined fields in aggregate, prefix with "comp." (e.g. "comp.main_species"). 
             name_key: { type: "string", description: "Slice label key (pie/donut)" },
             color_key: { type: "string", description: "Color grouping key" },
             stand_dimension: { type: "string", description: "Key mapping to stand_id for cross-panel interaction" },
+            waterfall_base: { type: "number", description: "Starting base value for waterfall charts (e.g., current total volume in m³). The first bar shows this value, subsequent bars build on top of it." },
           },
           required: ["chart_id", "title", "type", "y_key"],
         },

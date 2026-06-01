@@ -24,6 +24,8 @@ export interface ChartTab {
   standDimension: string | null;
   query_config?: Record<string, unknown> | null;
   computed_at?: string | null;
+  /** Starting value for waterfall charts (e.g., current total volume). */
+  waterfall_base?: number | null;
 }
 
 export interface VisualizationSlice {

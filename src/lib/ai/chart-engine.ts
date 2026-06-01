@@ -114,6 +114,22 @@ const COMPUTED_FIELDS: Record<string, ComputedFieldDef> = {
     compute: (row) =>
       ((row.growth_m3_per_ha as number) ?? 0) * ((row.area_ha as number) ?? 0),
   },
+  // Net volume change per operation: growth − removal. Positive = net growth,
+  // negative = net removal. Designed for waterfall charts (growth up, removal down).
+  net_volume_change: {
+    sources: ["growth_m3_per_ha", "area_ha", "volume_m3", "removal_pct"],
+    sourceTables: {
+      growth_m3_per_ha: "compartments",
+      area_ha: "compartments",
+      volume_m3: "compartments",
+      removal_pct: "source",
+    },
+    compute: (row) => {
+      const growth = ((row.growth_m3_per_ha as number) ?? 0) * ((row.area_ha as number) ?? 0);
+      const removal = ((row.volume_m3 as number) ?? 0) * ((row.removal_pct as number) ?? 0) / 100;
+      return growth - removal;
+    },
+  },
 };
 
 const WHITELISTED_SOURCES = new Set([
@@ -171,17 +187,25 @@ function resolveJoinField(field: string): { table: string | null; field: string 
 }
 
 function buildSelect(config: ChartQueryConfig): string {
-  const fields = new Set<string>();
+  const rawFields = new Set<string>();       // bare columns (no join prefix)
+  const joinFields = new Map<string, Set<string>>();  // table → columns
 
-  for (const g of config.aggregate) {
-    const res = resolveJoinField(g.group_by);
-    if (res.table === "compartments") {
-      fields.add(`compartments(${res.field})`);
+  const addField = (col: string) => {
+    const res = resolveJoinField(col);
+    if (res.table) {
+      if (!joinFields.has(res.table)) joinFields.set(res.table, new Set());
+      joinFields.get(res.table)!.add(res.field);
     } else {
-      fields.add(res.field);
+      rawFields.add(res.field);
     }
+  };
+
+  // Group-by fields
+  for (const g of config.aggregate) {
+    addField(g.group_by);
   }
 
+  // Value source columns
   for (const v of config.values) {
     const fn = v.fn || "count";
     if (fn === "count") continue;
@@ -189,43 +213,59 @@ function buildSelect(config: ChartQueryConfig): string {
     const computed = COMPUTED_FIELDS[v.field];
     if (computed) {
       for (const src of computed.sources) {
+        // computed.sourceTables tells us which table each source column
+        // belongs to. "compartments" means the joined table; anything else
+        // means the primary source table.
         const srcTable = computed.sourceTables[src] ?? "source";
-        if (srcTable === "compartments") {
-          fields.add(`compartments(${src})`);
+
+        // When a join is configured, check if this source column is in the
+        // join fields — even if sourceTables says "source" (written for the
+        // case where the source IS compartments). Columns provided via join
+        // must be fetched through the embedded resource, not as bare columns.
+        const isJoinColumn = srcTable === "compartments"
+          || (!!config.join && config.join.fields.includes(src));
+
+        if (isJoinColumn) {
+          if (!joinFields.has("compartments")) joinFields.set("compartments", new Set());
+          joinFields.get("compartments")!.add(resolveFieldAlias(src));
         } else {
-          fields.add(src);
+          rawFields.add(resolveFieldAlias(src));
         }
       }
       continue;
     }
 
-    const res = resolveJoinField(v.field);
-    if (res.table === "compartments") {
-      fields.add(`compartments(${res.field})`);
-    } else {
-      fields.add(res.field);
-    }
+    addField(v.field);
   }
 
+  // Extra join fields
   if (config.join) {
+    if (!joinFields.has("compartments")) joinFields.set("compartments", new Set());
     for (const f of config.join.fields) {
-      fields.add(`compartments(${f})`);
+      joinFields.get("compartments")!.add(f);
     }
   }
 
+  // Sort field
   if (config.sort) {
     const res = resolveJoinField(config.sort.by);
-    if (res.table === "compartments") {
-      fields.add(`compartments(${res.field})`);
+    if (res.table) {
+      if (!joinFields.has(res.table)) joinFields.set(res.table, new Set());
+      joinFields.get(res.table)!.add(res.field);
     } else {
-      fields.add(res.field);
+      rawFields.add(res.field);
     }
   }
 
-  return Array.from(fields).join(", ");
+  // Build select string — merge all columns per join table into a single
+  // embedded resource (e.g. "compartments(col1, col2, col3)") to avoid
+  // duplicate alias errors in PostgREST.
+  const parts: string[] = Array.from(rawFields);
+  for (const [table, cols] of joinFields) {
+    parts.push(`${table}(${Array.from(cols).join(", ")})`);
+  }
+  return parts.join(", ");
 }
-
-/** Build the raw Supabase query from config */
 function buildQuery(
   supabase: SupabaseClient,
   forestId: string,

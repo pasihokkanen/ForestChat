@@ -185,13 +185,26 @@ function WaterfallBar(props: Record<string, unknown>) {
 
 /** Transform flat data into waterfall format: each row gets a "base" (where
  *  the bar starts) computed from the cumulative sum of all previous values.
- *  The visible bar ("yKey") stacks on top of the invisible "base" bar. */
+ *  The visible bar ("yKey") stacks on top of the invisible "base" bar.
+ *  When waterfallBase is set, prepends a synthetic "Start" row with that value. */
 function buildWaterfallData(
   data: Record<string, unknown>[],
-  yKey: string
+  yKey: string,
+  waterfallBase?: number | null
 ): Record<string, unknown>[] {
-  let cumulative = 0;
-  return data.map((row) => {
+  let cumulative = waterfallBase ?? 0;
+  const result: Record<string, unknown>[] = [];
+
+  // Prepend synthetic starting row when base is non-zero
+  if (waterfallBase && waterfallBase !== 0) {
+    result.push({
+      _wfLabel: "Start",
+      [yKey]: waterfallBase,
+      _wfBase: 0,
+    });
+  }
+
+  for (const row of data) {
     const val = (row[yKey] as number) ?? 0;
     const wfRow = {
       ...row,
@@ -199,8 +212,9 @@ function buildWaterfallData(
       [yKey]: val,
     };
     cumulative += val;
-    return wfRow;
-  });
+    result.push(wfRow);
+  }
+  return result;
 }
 
 interface ChartCardProps {
@@ -687,7 +701,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
       );
 
     case "waterfall": {
-      const wfData = buildWaterfallData(translatedData, tab.yKey);
+      const wfData = buildWaterfallData(translatedData, tab.yKey, tab.waterfall_base);
       return (
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
