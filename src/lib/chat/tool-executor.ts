@@ -9,7 +9,7 @@ import { getStand, searchStands, planSummary, queryOperations } from "../ai/quer
 import { addOperation, removeOperation, batchUpdateOperations } from "../ai/edit-tools";
 import { checkSustainability, validatePlan } from "../ai/validation-tools";
 import { recomputeChartData } from "../ai/chart-engine";
-import type { ChartQueryConfig } from "../ai/chart-engine";
+import type { ChartQueryConfig, AnyQueryConfig } from "../ai/chart-engine";
 
 export interface ToolResult {
   success: boolean;
@@ -106,15 +106,15 @@ const toolHandlers: Record<string, ToolHandler> = {
     if (query_config) {
       try {
         // Handle Python-style dict strings from some models (e.g. "{'source': 'operations'}")
-        let qc: ChartQueryConfig;
+        let qc: AnyQueryConfig;
         if (typeof query_config === "string") {
           const parsed = parsePythonDict(query_config as string);
           if (!parsed || !parsed.source) {
             return { success: false, result: "", error: "query_config must be a valid object — received a string that could not be parsed" };
           }
-          qc = parsed as unknown as ChartQueryConfig;
+          qc = parsed as unknown as AnyQueryConfig;
         } else {
-          qc = query_config as ChartQueryConfig;
+          qc = query_config as AnyQueryConfig;
         }
 
         const engineResult = await recomputeChartData(
@@ -124,27 +124,35 @@ const toolHandlers: Record<string, ToolHandler> = {
         );
 
         // Auto-resolve y_key / y_key2 to match the 'as' names in query_config values.
-        // Also auto-detect y_key from first value's 'as' name if not provided.
+        // Only for single-source configs — cross configs have no top-level values array
+        // and rely on explicit x_key/y_key/name_key from the model.
+        const isSingleSource = qc.source !== "cross" && Array.isArray((qc as ChartQueryConfig).values);
+        const scValues = isSingleSource ? (qc as ChartQueryConfig).values : undefined;
+
         const resolvedYKey = (y_key as string)
-          ? resolveAsName(qc, y_key as string)
-          : (qc.values?.length > 0 ? qc.values[0].as : null);
-        const resolvedYKey2 = y_key2 ? resolveAsName(qc, y_key2 as string) : null;
+          ? (scValues ? resolveAsName(qc as ChartQueryConfig, y_key as string) : (y_key as string))
+          : (scValues && scValues.length > 0 ? scValues[0].as : null);
+        const resolvedYKey2 = y_key2
+          ? (scValues ? resolveAsName(qc as ChartQueryConfig, y_key2 as string) : (y_key2 as string))
+          : null;
 
         if (!resolvedYKey) {
           return { success: false, result: "", error: "y_key is required — could not determine value column from query_config" };
         }
 
         // Auto-detect name_key for pie/donut charts: use first group_by field if name_key not provided
+        // (single-source configs only — cross configs must provide name_key explicitly)
         const effectiveNameKey = (name_key as string)
-          ?? ((type === "pie" || type === "donut") && qc.aggregate?.length > 0
-            ? qc.aggregate[0].group_by
+          ?? ((type === "pie" || type === "donut") && isSingleSource && (qc as ChartQueryConfig).aggregate?.length > 0
+            ? (qc as ChartQueryConfig).aggregate[0].group_by
             : null);
 
         // Auto-detect x_key for bar/line/area charts: use first group_by field if x_key not provided
+        // (single-source configs only — cross configs must provide x_key explicitly)
         const effectiveXKey = (x_key as string)
           ?? ((type === "bar" || type === "line" || type === "area" || type === "horizontal_bar" || type === "scatter" || type === "radar" || type === "composed" || type === "waterfall")
-            && qc.aggregate?.length > 0
-            ? qc.aggregate[0].group_by
+            && isSingleSource && (qc as ChartQueryConfig).aggregate?.length > 0
+            ? (qc as ChartQueryConfig).aggregate[0].group_by
             : null);
 
         const chartTab = {

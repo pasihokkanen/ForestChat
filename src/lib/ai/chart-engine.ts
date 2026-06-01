@@ -1,5 +1,6 @@
 // src/lib/ai/chart-engine.ts
 // Phase 4b: Deterministic chart data recomputation from declarative query configs.
+// Phase 4c: Cross-source queries — merge results from multiple tables on a common key.
 //
 // Charts should be specified, not computed at AI-time. The AI describes what
 // data to source and how to transform it — this engine executes that spec
@@ -32,6 +33,41 @@ export interface ChartQueryConfig {
   sort?: { by: string; dir?: "asc" | "desc" };
   limit?: number;
 }
+
+/** Cross-source query: runs N sub-queries independently, merges on a common key. */
+export interface CrossQueryConfig {
+  source: "cross";
+  merge_on: string;
+  merge_strategy?: "outer" | "inner";  // default: "outer"
+  queries: SubQueryConfig[];
+  sort?: { by: string; dir?: "asc" | "desc" };
+}
+
+/** A sub-query within a cross query. Same fields as ChartQueryConfig but
+ *  without top-level sort (sorting happens after merge). */
+export interface SubQueryConfig {
+  source: "operations" | "compartments" | "compartment_species";
+  join?: {
+    table: "compartments";
+    on: "compartment_id";
+    fields: string[];
+  };
+  aggregate: Array<{ group_by: string }>;
+  values: Array<{
+    field: string;
+    as: string;
+    fn: "sum" | "count" | "avg" | "min" | "max";
+    multiply?: number;
+    cumulative?: boolean;
+  }>;
+  filters?: Record<string, unknown>;
+  limit?: number;
+  /** If true, the sub-query produces a single row that broadcasts to ALL
+   *  merge keys. Use for constants like total annual growth. */
+  broadcast?: boolean;
+}
+
+export type AnyQueryConfig = ChartQueryConfig | CrossQueryConfig;
 
 export interface ChartEngineResult {
   data: Record<string, unknown>[];
@@ -68,6 +104,16 @@ const COMPUTED_FIELDS: Record<string, ComputedFieldDef> = {
     compute: (row) =>
       ((row.income_eur as number) ?? 0) - ((row.cost_eur as number) ?? 0),
   },
+  // Phase 4c.2: total annual growth in m³ for compartments source
+  growth_m3_total: {
+    sources: ["growth_m3_per_ha", "area_ha"],
+    sourceTables: {
+      growth_m3_per_ha: "source",
+      area_ha: "source",
+    },
+    compute: (row) =>
+      ((row.growth_m3_per_ha as number) ?? 0) * ((row.area_ha as number) ?? 0),
+  },
 };
 
 const WHITELISTED_SOURCES = new Set([
@@ -75,6 +121,7 @@ const WHITELISTED_SOURCES = new Set([
   "compartments",
   "compartment_species",
   "plan_metadata",
+  "cross",
 ]);
 
 const JOIN_PREFIX_MAP: Record<string, string> = {
@@ -84,9 +131,6 @@ const JOIN_PREFIX_MAP: Record<string, string> = {
 const MAX_ROWS = 500; // safety limit — charts get cluttered beyond this
 
 // ─── Field Aliases ───────────────────────────────────────────────────
-// AI models sometimes use semantic names instead of DB column names.
-// These aliases translate common mistakes before query building.
-// Source-aware: some aliases only apply to specific sources.
 
 const FIELD_ALIASES: Record<string, string> = {
   // operations table
@@ -111,16 +155,12 @@ const FIELD_ALIASES: Record<string, string> = {
   "stand_type": "development_class",
 };
 
-/** Translate a field name through the alias map (source-aware).
- *  Returns the resolved field name — either the original or its alias. */
 function resolveFieldAlias(field: string): string {
   return FIELD_ALIASES[field] ?? field;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
-/** Resolve a join-prefixed field name (e.g. "comp.main_species") to { table, field }.
- *  Also applies FIELD_ALIASES to the field portion (after prefix stripping). */
 function resolveJoinField(field: string): { table: string | null; field: string } {
   const dotIdx = field.indexOf(".");
   if (dotIdx === -1) return { table: null, field: resolveFieldAlias(field) };
@@ -130,11 +170,9 @@ function resolveJoinField(field: string): { table: string | null; field: string 
   return { table: resolved, field: resolveFieldAlias(fieldPart) };
 }
 
-/** Build the Supabase .select() string from config fields */
 function buildSelect(config: ChartQueryConfig): string {
   const fields = new Set<string>();
 
-  // Group-by fields
   for (const g of config.aggregate) {
     const res = resolveJoinField(g.group_by);
     if (res.table === "compartments") {
@@ -144,16 +182,12 @@ function buildSelect(config: ChartQueryConfig): string {
     }
   }
 
-  // Value source columns (skip count which has no field, and skip
-  // when fn is undefined/falsy — defaults to "count" in aggregateFn)
   for (const v of config.values) {
     const fn = v.fn || "count";
     if (fn === "count") continue;
 
-    // Check if this is a computed field
     const computed = COMPUTED_FIELDS[v.field];
     if (computed) {
-      // Add source columns instead
       for (const src of computed.sources) {
         const srcTable = computed.sourceTables[src] ?? "source";
         if (srcTable === "compartments") {
@@ -173,15 +207,12 @@ function buildSelect(config: ChartQueryConfig): string {
     }
   }
 
-  // Extra join fields (for filters, etc.)
   if (config.join) {
     for (const f of config.join.fields) {
       fields.add(`compartments(${f})`);
     }
   }
 
-  // Always include forest_id for scoping (but we use .eq filter, not select)
-  // Sort field
   if (config.sort) {
     const res = resolveJoinField(config.sort.by);
     if (res.table === "compartments") {
@@ -207,14 +238,27 @@ function buildQuery(
     .eq("forest_id", forestId)
     .limit(MAX_ROWS);
 
-  // Apply filters
+  // Apply filters — Phase 4c.1: resolve join-prefixed filter keys
+  // (e.g. "comp.development_class") for embedded resource filtering
   if (config.filters) {
     for (const [key, val] of Object.entries(config.filters)) {
-      const resolvedKey = resolveFieldAlias(key);
-      if (Array.isArray(val)) {
-        query = query.in(resolvedKey, val);
-      } else if (val !== undefined && val !== null) {
-        query = query.eq(resolvedKey, val);
+      // Check for join-prefixed filter key
+      const joinResolved = resolveJoinField(key);
+      if (joinResolved.table) {
+        // Embedded resource filter via PostgREST path syntax
+        const embeddedKey = `${joinResolved.table}.${joinResolved.field}`;
+        if (Array.isArray(val)) {
+          query = query.filter(embeddedKey, "in", `(${val.join(",")})`);
+        } else if (val !== undefined && val !== null) {
+          query = query.filter(embeddedKey, "eq", val);
+        }
+      } else {
+        const resolvedKey = resolveFieldAlias(key);
+        if (Array.isArray(val)) {
+          query = query.in(resolvedKey, val);
+        } else if (val !== undefined && val !== null) {
+          query = query.eq(resolvedKey, val);
+        }
       }
     }
   }
@@ -230,15 +274,11 @@ function buildQuery(
   return query;
 }
 
-/** Flatten nested join data from Supabase response into flat rows */
 function flattenRows(rows: Record<string, unknown>[]): Record<string, unknown>[] {
   return rows.map((row) => {
     const flat: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(row)) {
       if (val && typeof val === "object" && !Array.isArray(val)) {
-        // This is a joined table result — flatten with prefix
-        // e.g. a joined table result {"main_species": "Pine"} → "main_species": "Pine"
-        // Also keep compartment_id for the on-join lookup
         const nested = val as Record<string, unknown>;
         for (const [nk, nv] of Object.entries(nested)) {
           flat[nk] = nv;
@@ -251,15 +291,18 @@ function flattenRows(rows: Record<string, unknown>[]): Record<string, unknown>[]
   });
 }
 
-/** Compute synthetic columns for each row */
 function applyComputedFields(
   rows: Record<string, unknown>[],
   config: ChartQueryConfig
 ): Record<string, unknown>[] {
-  // Check which value fields are computed
+  if (rows.length === 0) return rows;
+
+  // Only apply computed fields whose source columns are actually present
+  // in the data (e.g., removal_m3 requires volume_m3 from a compartments join).
   const computedFields = new Set<string>();
   for (const v of config.values) {
-    if (COMPUTED_FIELDS[v.field]) {
+    const def = COMPUTED_FIELDS[v.field];
+    if (def && def.sources.every((s) => s in rows[0])) {
       computedFields.add(v.field);
     }
   }
@@ -276,18 +319,15 @@ function applyComputedFields(
   });
 }
 
-/** Aggregate rows by group_by keys and apply aggregation functions */
 function aggregateRows(
   rows: Record<string, unknown>[],
   config: ChartQueryConfig
 ): Record<string, unknown>[] {
   if (rows.length === 0) return [];
 
-  // Build group key from aggregate.group_by fields
   const groupKeys = config.aggregate.map((g) => g.group_by);
 
   if (groupKeys.length === 0) {
-    // No grouping — single row aggregation
     const result: Record<string, unknown> = {};
     for (const v of config.values) {
       result[v.as] = (aggregateFn(v.fn, rows, v.field)) * (v.multiply ?? 1);
@@ -295,13 +335,9 @@ function aggregateRows(
     return [result];
   }
 
-  // Group rows by composite key
   const groups = new Map<string, { key: Record<string, unknown>; rows: Record<string, unknown>[] }>();
 
   for (const row of rows) {
-    // Skip rows where any group_by key is null/undefined — those rows
-    // can't be categorized and break Recharts rendering (e.g. null in
-    // the legend, invisible chart area).
     if (groupKeys.some((k) => row[k] == null)) {
       console.log("[chart-engine] skipping row with null group_by key:", JSON.stringify(groupKeys), "row:", JSON.stringify(row));
       continue;
@@ -317,7 +353,6 @@ function aggregateRows(
     groups.get(compositeKey)!.rows.push(row);
   }
 
-  // Aggregate each group
   const result: Record<string, unknown>[] = [];
   groups.forEach((group) => {
     const aggregated: Record<string, unknown> = { ...group.key };
@@ -330,18 +365,13 @@ function aggregateRows(
   return result;
 }
 
-/** Apply an aggregation function to a field across rows */
 function aggregateFn(
   fn: "sum" | "count" | "avg" | "min" | "max" | undefined,
   rows: Record<string, unknown>[],
   field: string
 ): number {
-  // Default to "count" when fn is missing — models sometimes omit it,
-  // and "count" works with any field type (string UUIDs, etc.) while
-  // "sum" would produce 0 for non-numeric fields, causing invisible charts.
   const effectiveFn = fn || "count";
 
-  // For "count", rows.length is always correct — no field access needed.
   if (effectiveFn === "count") return rows.length;
 
   const values = rows
@@ -364,23 +394,12 @@ function aggregateFn(
   }
 }
 
-/** Fill missing years in aggregated data with zero-value rows.
- *  Works for both single-group (e.g. [{group_by: "year"}]) and multi-group
- *  configs (e.g. [{group_by: "year"}, {group_by: "type"}] for stacked bars).
- *  For multi-group configs, fills all (year × group_dim_value) combinations
- *  so stacked bars render correctly across the full year range.
- *
- *  Only fills gaps when the first group_by is "year". Other configs are
- *  returned as-is. */
 function fillYearGaps(
   rows: Record<string, unknown>[],
   config: ChartQueryConfig
 ): Record<string, unknown>[] {
   if (config.aggregate.length === 0) return rows;
-
-  // Only fill when first group_by is "year"
   if (config.aggregate[0].group_by !== "year") return rows;
-
   if (rows.length < 1) return rows;
 
   const existingYears = new Set<number>();
@@ -388,14 +407,12 @@ function fillYearGaps(
     const y = Number(row["year"]);
     if (!isNaN(y)) existingYears.add(y);
   }
-
   if (existingYears.size < 1) return rows;
 
   const yearsArr = Array.from(existingYears);
   const minYear = Math.min(...yearsArr);
   const maxYear = Math.max(...yearsArr);
 
-  // Single-group: [{group_by: "year"}] — simple gap fill
   if (config.aggregate.length === 1) {
     const result = [...rows];
     for (let y = minYear; y <= maxYear; y++) {
@@ -409,13 +426,10 @@ function fillYearGaps(
     return result;
   }
 
-  // Multi-group: [{group_by: "year"}, {group_by: "X"}, ...] — fill all combinations
-  // Collect distinct values for each additional group dimension
   const groupValues: Map<string, Set<string>> = new Map();
   for (let i = 1; i < config.aggregate.length; i++) {
     groupValues.set(config.aggregate[i].group_by, new Set());
   }
-
   for (const row of rows) {
     for (let i = 1; i < config.aggregate.length; i++) {
       const key = config.aggregate[i].group_by;
@@ -424,7 +438,6 @@ function fillYearGaps(
     }
   }
 
-  // Build existing year+group keys for dedup
   const existingKeys = new Set<string>();
   for (const row of rows) {
     const parts = [String(row["year"] ?? "")];
@@ -434,10 +447,8 @@ function fillYearGaps(
     existingKeys.add(parts.join("|"));
   }
 
-  // Generate zero rows for all missing (year × group values) combinations
   const result = [...rows];
 
-  // Build cartesian product of group dimension values
   const dimValues: string[][] = [];
   for (let i = 1; i < config.aggregate.length; i++) {
     dimValues.push(Array.from(groupValues.get(config.aggregate[i].group_by)!));
@@ -457,9 +468,7 @@ function fillYearGaps(
   }
 
   for (let y = minYear; y <= maxYear; y++) {
-    if (existingYears.has(y)) {
-      continue;
-    }
+    if (existingYears.has(y)) continue;
 
     for (const combo of cartesianProduct(dimValues)) {
       const key = [String(y), ...combo].join("|");
@@ -479,44 +488,29 @@ function fillYearGaps(
   return result;
 }
 
-/** Check whether cumulative should be applied to at least one value.
- *  Only applies when sorted (sort is present or can be inferred from first group_by). */
 function shouldApplyCumulative(config: ChartQueryConfig): boolean {
   return config.values.some((v) => v.cumulative === true)
     && (config.sort !== undefined || (config.aggregate.length > 0 && config.aggregate[0].group_by === "year"));
 }
 
-/** Convert period sums to cumulative running totals for values flagged cumulative.
- *  Preserves multi-group ordering: within each secondary group dimension, values
- *  accumulate independently along the primary sort axis (typically year).
- *
- *  Example input:  [{year:2026, income:100}, {year:2027, income:150}, {year:2028, income:120}]
- *  Example output: [{year:2026, income:100}, {year:2027, income:250}, {year:2028, income:370}]
- */
 function applyCumulative(
   rows: Record<string, unknown>[],
   config: ChartQueryConfig
 ): Record<string, unknown>[] {
   if (!shouldApplyCumulative(config)) return rows;
 
-  // Identify which value fields need cumulative treatment
   const cumulativeFields = new Set<string>();
   for (const v of config.values) {
     if (v.cumulative) cumulativeFields.add(v.as);
   }
-
   if (cumulativeFields.size === 0) return rows;
 
-  // Determine primary sort key (the "time" axis along which to accumulate)
   const sortKey = config.sort?.by ?? (config.aggregate.length > 0 ? config.aggregate[0].group_by : null);
   if (!sortKey) return rows;
 
-  // If there's a secondary group_by (e.g. [{group_by:"year"}, {group_by:"type"}]),
-  // accumulate separately within each secondary group dimension.
   const secondaryKey = config.aggregate.length > 1 ? config.aggregate[1].group_by : null;
 
   if (secondaryKey) {
-    // Partition rows by secondary key, accumulate within each partition
     const partitions = new Map<string, Record<string, unknown>[]>();
     for (const row of rows) {
       const key = String(row[secondaryKey] ?? "__null__");
@@ -524,7 +518,6 @@ function applyCumulative(
       partitions.get(key)!.push(row);
     }
 
-    // Sort each partition by the primary sort key, then accumulate
     const result: Record<string, unknown>[] = [];
     partitions.forEach((partition) => {
       partition.sort((a, b) => String(a[sortKey] ?? "").localeCompare(String(b[sortKey] ?? "")));
@@ -542,10 +535,6 @@ function applyCumulative(
     return result;
   }
 
-  // Single group — accumulate across all rows in sort order
-  // Rows are already sorted by the time we reach this step (aggregateRows preserves
-  // DB order + post-sort happens in recomputeChartData step 6), but ensure they're
-  // sorted by the primary key for correct cumulative direction.
   const sorted = [...rows].sort((a, b) => {
     const va = a[sortKey];
     const vb = b[sortKey];
@@ -567,30 +556,191 @@ function applyCumulative(
   return sorted;
 }
 
-// ─── Public API ──────────────────────────────────────────────────────
+// ─── Phase 4c.3: Cross-Source Pipeline ───────────────────────────────
 
-/**
- * Recompute chart data from a declarative query config.
- * Translates the config into safe PostgREST queries via the authenticated
- * Supabase client, handles computed fields (e.g. removal_m3), and returns
- * structured chart-ready data.
- */
-export async function recomputeChartData(
+/** Extract unique merge key values from all sub-query results. */
+function extractMergeKeys(
+  mergeOn: string,
+  subResults: Record<string, unknown>[][]
+): Set<string> {
+  const keys = new Set<string>();
+  for (const rows of subResults) {
+    for (const row of rows) {
+      const val = row[mergeOn];
+      if (val !== undefined && val !== null) {
+        keys.add(String(val));
+      }
+    }
+  }
+  return keys;
+}
+
+/** Merge sub-query results on a common key.
+ *  Handles broadcast rows (a single-row result fanned out to all merge keys). */
+function mergeResults(
+  mergeOn: string,
+  strategy: "outer" | "inner",
+  subResults: Record<string, unknown>[][],
+  subConfigs: SubQueryConfig[]
+): Record<string, unknown>[] {
+  const allKeys = extractMergeKeys(mergeOn, subResults);
+
+  // Collect all value column names for zero-fill
+  const allValueColumns = new Set<string>();
+  for (const sq of subConfigs) {
+    for (const v of sq.values) {
+      allValueColumns.add(v.as);
+    }
+  }
+
+  const mergedMap = new Map<string, Record<string, unknown>>();
+
+  for (const key of Array.from(allKeys)) {
+    let merged: Record<string, unknown> = { [mergeOn]: isNaN(Number(key)) ? key : Number(key) };
+    let allPresent = true;
+
+    for (let i = 0; i < subResults.length; i++) {
+      const subCfg = subConfigs[i];
+      const rows = subResults[i];
+
+      if (subCfg.broadcast && rows.length === 1) {
+        // Broadcast: copy all fields from the single row to every merge key
+        Object.assign(merged, rows[0]);
+        // Remove merge_on from broadcast row so it doesn't overwrite
+        delete merged[mergeOn];
+        merged[mergeOn] = isNaN(Number(key)) ? key : Number(key);
+      } else {
+        const match = rows.find((r) => String(r[mergeOn]) === key);
+        if (match) {
+          // Copy value columns only (not the merge key, already set)
+          for (const v of subCfg.values) {
+            merged[v.as] = match[v.as] ?? 0;
+          }
+        } else {
+          allPresent = false;
+          // Zero-fill missing values
+          for (const v of subCfg.values) {
+            merged[v.as] = 0;
+          }
+        }
+      }
+    }
+
+    if (strategy === "inner" && !allPresent) continue;
+
+    mergedMap.set(key, merged);
+  }
+
+  return Array.from(mergedMap.values());
+}
+
+/** Fill gaps in merged results. When merge_on is "year", fills all integer
+ *  years between min and max. Otherwise no-op. */
+function fillMergeGaps(
+  rows: Record<string, unknown>[],
+  mergeOn: string,
+  valueColumns: string[]
+): Record<string, unknown>[] {
+  if (mergeOn !== "year" || rows.length === 0) return rows;
+
+  const existingYears = new Set<number>();
+  for (const row of rows) {
+    const y = Number(row[mergeOn]);
+    if (!isNaN(y)) existingYears.add(y);
+  }
+  if (existingYears.size < 2) return rows;
+
+  const yearsArr = Array.from(existingYears);
+  const minYear = Math.min(...yearsArr);
+  const maxYear = Math.max(...yearsArr);
+
+  const result = [...rows];
+  for (let y = minYear; y <= maxYear; y++) {
+    if (existingYears.has(y)) continue;
+    const zeroRow: Record<string, unknown> = { [mergeOn]: y };
+    for (const col of valueColumns) {
+      zeroRow[col] = 0;
+    }
+    result.push(zeroRow);
+  }
+
+  return result;
+}
+
+/** Apply cumulative transformation post-merge, using the original sub-query
+ *  cumulative flags. Cumulative is deferred to post-merge because rows from
+ *  different sub-queries must be aligned by merge key first. */
+function applyCrossCumulative(
+  rows: Record<string, unknown>[],
+  mergeOn: string,
+  subConfigs: SubQueryConfig[]
+): Record<string, unknown>[] {
+  // Collect which output columns should be cumulative
+  const cumulativeColumns = new Set<string>();
+  for (const sq of subConfigs) {
+    for (const v of sq.values) {
+      if (v.cumulative) cumulativeColumns.add(v.as);
+    }
+  }
+
+  if (cumulativeColumns.size === 0) return rows;
+
+  // Sort by merge key ascending for correct cumulative direction
+  const sorted = [...rows].sort((a, b) => {
+    const va = a[mergeOn];
+    const vb = b[mergeOn];
+    if (typeof va === "number" && typeof vb === "number") return va - vb;
+    return String(va ?? "").localeCompare(String(vb ?? ""));
+  });
+
+  const running: Record<string, number> = {};
+  cumulativeColumns.forEach((col) => { running[col] = 0; });
+
+  for (const row of sorted) {
+    cumulativeColumns.forEach((col) => {
+      const val = Number(row[col]) || 0;
+      running[col] += val;
+      row[col] = running[col];
+    });
+  }
+
+  return sorted;
+}
+
+/** Run a single sub-query through the existing pipeline.
+ *  When skipCumulative is true, strips cumulative flags before running
+ *  (cumulative is deferred to post-merge in the cross pipeline). */
+async function recomputeSubQuery(
   supabase: SupabaseClient,
   forestId: string,
-  config: ChartQueryConfig
-): Promise<ChartEngineResult> {
-  // 1. Validate source
+  subConfig: SubQueryConfig,
+  skipCumulative: boolean
+): Promise<Record<string, unknown>[]> {
+  // Build a ChartQueryConfig from the sub-query config
+  const values = skipCumulative
+    ? subConfig.values.map((v) => ({ ...v, cumulative: undefined }))
+    : subConfig.values;
+
+  const config: ChartQueryConfig = {
+    source: subConfig.source,
+    join: subConfig.join,
+    aggregate: subConfig.aggregate,
+    values: values as ChartQueryConfig["values"],
+    filters: subConfig.filters,
+    limit: subConfig.limit,
+    // Sub-queries don't have their own sort — sorting happens post-merge.
+    // But fillYearGaps needs the implied sort from group_by for year detection.
+  };
+
+  // 1. Validate
   if (!WHITELISTED_SOURCES.has(config.source)) {
     throw new Error(`Invalid chart source: ${config.source}`);
   }
-
-  // 1b. Validate required fields
   if (!config.aggregate || !Array.isArray(config.aggregate)) {
     throw new Error("config.aggregate is required and must be an array");
   }
   if (!config.values || !Array.isArray(config.values)) {
-    throw new Error("config.values is required and must be an array — e.g. values: [{ field: \"volume_m3\", as: \"volume\", fn: \"sum\" }]");
+    throw new Error("config.values is required and must be an array");
   }
   for (const v of config.values) {
     if (!v.field || !v.as) {
@@ -603,6 +753,149 @@ export async function recomputeChartData(
   const { data: rawRows, error } = await query;
 
   if (error) {
+    throw new Error(`Sub-query (${config.source}) failed: ${error.message}`);
+  }
+
+  const rows = (rawRows as unknown as Record<string, unknown>[]) ?? [];
+
+  // 3-6. Pipeline
+  const flatRows = flattenRows(rows);
+  const computedRows = applyComputedFields(flatRows, config);
+  let aggregated = aggregateRows(computedRows, config);
+  aggregated = fillYearGaps(aggregated, config);
+
+  // Sort by first group_by
+  const effectiveSort = config.aggregate.length > 0
+    ? { by: config.aggregate[0].group_by, dir: "asc" as string }
+    : null;
+  if (effectiveSort) {
+    const sortBy = effectiveSort.by;
+    const dir = effectiveSort.dir === "desc" ? -1 : 1;
+    aggregated.sort((a, b) => {
+      const va = a[sortBy];
+      const vb = b[sortBy];
+      if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
+      return String(va ?? "").localeCompare(String(vb ?? "")) * dir;
+    });
+  }
+
+  // Cumulative is skipped when skipCumulative=true (stripped from values above),
+  // but we still call applyCumulative in case skipCumulative=false for standalone use.
+  if (!skipCumulative) {
+    aggregated = applyCumulative(aggregated, config);
+  }
+
+  if (config.limit && config.limit > 0) {
+    aggregated = aggregated.slice(0, config.limit);
+  }
+
+  return aggregated;
+}
+
+/** Run a cross-source query: execute all sub-queries, merge on common key,
+ *  fill gaps, and apply deferred cumulative. */
+async function recomputeCrossData(
+  supabase: SupabaseClient,
+  forestId: string,
+  config: CrossQueryConfig
+): Promise<ChartEngineResult> {
+  const strategy = config.merge_strategy ?? "outer";
+
+  // 1. Run all sub-queries (cumulative stripped, applied post-merge)
+  const subResults: Record<string, unknown>[][] = [];
+  for (const subCfg of config.queries) {
+    const rows = await recomputeSubQuery(supabase, forestId, subCfg, true);
+    subResults.push(rows);
+  }
+
+  // 2. Merge on common key
+  let merged = mergeResults(config.merge_on, strategy, subResults, config.queries);
+
+  // 3. Fill gaps
+  const allValueColumns = new Set<string>();
+  for (const sq of config.queries) {
+    for (const v of sq.values) {
+      allValueColumns.add(v.as);
+    }
+  }
+  merged = fillMergeGaps(merged, config.merge_on, Array.from(allValueColumns));
+
+  // 4. Apply deferred cumulative
+  merged = applyCrossCumulative(merged, config.merge_on, config.queries);
+
+  // 5. Sort
+  if (config.sort) {
+    const sortBy = config.sort.by;
+    const dir = config.sort.dir === "desc" ? -1 : 1;
+    merged.sort((a, b) => {
+      const va = a[sortBy];
+      const vb = b[sortBy];
+      if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
+      return String(va ?? "").localeCompare(String(vb ?? "")) * dir;
+    });
+  } else {
+    // Default sort by merge key ascending
+    const sortBy = config.merge_on;
+    merged.sort((a, b) => {
+      const va = a[sortBy];
+      const vb = b[sortBy];
+      if (typeof va === "number" && typeof vb === "number") return (va as number) - (vb as number);
+      return String(va ?? "").localeCompare(String(vb ?? ""));
+    });
+  }
+
+  return {
+    data: merged,
+    computedAt: new Date().toISOString(),
+  };
+}
+
+// ─── Public API ──────────────────────────────────────────────────────
+
+/**
+ * Recompute chart data from a declarative query config.
+ * Translates the config into safe PostgREST queries via the authenticated
+ * Supabase client, handles computed fields (e.g. removal_m3), and returns
+ * structured chart-ready data.
+ *
+ * Phase 4c: dispatches to cross-source pipeline when source === "cross".
+ */
+export async function recomputeChartData(
+  supabase: SupabaseClient,
+  forestId: string,
+  config: AnyQueryConfig
+): Promise<ChartEngineResult> {
+  // Phase 4c.3: cross-source dispatch
+  if (config.source === "cross") {
+    return recomputeCrossData(supabase, forestId, config as CrossQueryConfig);
+  }
+
+  // Existing single-source pipeline
+  const sc = config as ChartQueryConfig;
+
+  // 1. Validate source
+  if (!WHITELISTED_SOURCES.has(sc.source)) {
+    throw new Error(`Invalid chart source: ${sc.source}`);
+  }
+
+  // 1b. Validate required fields
+  if (!sc.aggregate || !Array.isArray(sc.aggregate)) {
+    throw new Error("config.aggregate is required and must be an array");
+  }
+  if (!sc.values || !Array.isArray(sc.values)) {
+    throw new Error("config.values is required and must be an array — e.g. values: [{ field: \"volume_m3\", as: \"volume\", fn: \"sum\" }]");
+  }
+  for (const v of sc.values) {
+    if (!v.field || !v.as) {
+      throw new Error(`Each value entry needs field and as — got: ${JSON.stringify(v)}`);
+    }
+  }
+
+  // 2. Build and execute query
+  const query = buildQuery(supabase, forestId, sc);
+  const { data: rawRows, error } = await query;
+
+  if (error) {
     throw new Error(`Chart data query failed: ${error.message}`);
   }
 
@@ -612,17 +905,17 @@ export async function recomputeChartData(
   const flatRows = flattenRows(rows);
 
   // 4. Compute synthetic columns (e.g. removal_m3)
-  const computedRows = applyComputedFields(flatRows, config);
+  const computedRows = applyComputedFields(flatRows, sc);
 
   // 5. Aggregate
-  let aggregated = aggregateRows(computedRows, config);
+  let aggregated = aggregateRows(computedRows, sc);
 
-  // 5b. Fill year gaps — ensure all years between min/max have rows (even if zero)
-  aggregated = fillYearGaps(aggregated, config);
+  // 5b. Fill year gaps
+  aggregated = fillYearGaps(aggregated, sc);
 
-  // 6. Sort result — always sort, defaulting to first group_by field asc
-  const effectiveSort = config.sort ?? (config.aggregate.length > 0
-    ? { by: config.aggregate[0].group_by, dir: "asc" as const }
+  // 6. Sort result
+  const effectiveSort = sc.sort ?? (sc.aggregate.length > 0
+    ? { by: sc.aggregate[0].group_by, dir: "asc" as string }
     : null);
   if (effectiveSort) {
     const sortBy = effectiveSort.by;
@@ -635,14 +928,12 @@ export async function recomputeChartData(
     });
   }
 
-  // 6b. Apply cumulative transformation — converts period sums to running totals
-  //     for any value entry flagged cumulative: true. Re-sorts ascending along
-  //     the primary axis so cumulative always runs forward in time.
-  aggregated = applyCumulative(aggregated, config);
+  // 6b. Apply cumulative
+  aggregated = applyCumulative(aggregated, sc);
 
   // 7. Apply limit
-  if (config.limit && config.limit > 0) {
-    aggregated = aggregated.slice(0, config.limit);
+  if (sc.limit && sc.limit > 0) {
+    aggregated = aggregated.slice(0, sc.limit);
   }
 
   return {
@@ -653,20 +944,14 @@ export async function recomputeChartData(
 
 /**
  * Recompute all query_config-backed chart tabs for a forest.
- * Called once per user message after the AI agent loop completes
- * (if any mutation occurred).
- *
- * Skips legacy charts (those with data but no query_config).
- * Emits "charts_refreshed" SSE event on success.
- * Errors for individual charts are caught and logged — one broken
- * chart doesn't block the rest.
+ * Called once per user message after the AI agent loop completes.
+ * Phase 4c: supports both single-source and cross-source configs.
  */
 export async function recomputeAllCharts(
   supabase: SupabaseClient,
   forestId: string,
   sendSse?: (event: string, data: unknown) => void
 ): Promise<void> {
-  // 1. Fetch all config-backed chart tabs for this forest
   const { data: tabs, error } = await supabase
     .from("chart_tabs")
     .select("chart_id, query_config, title")
@@ -684,7 +969,8 @@ export async function recomputeAllCharts(
 
   for (const tab of tabs) {
     try {
-      const config = tab.query_config as ChartQueryConfig;
+      // Phase 4c: widened type — query_config may be ChartQueryConfig or CrossQueryConfig
+      const config = tab.query_config as AnyQueryConfig;
       const result = await recomputeChartData(supabase, forestId, config);
 
       await supabase
@@ -702,7 +988,6 @@ export async function recomputeAllCharts(
         `recomputeAllCharts: failed for chart "${tab.chart_id}" (${tab.title}):`,
         err
       );
-      // Continue with remaining charts
     }
   }
 
