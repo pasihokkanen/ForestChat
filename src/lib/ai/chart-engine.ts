@@ -476,11 +476,13 @@ function buildSelect(config: ChartQueryConfig): string {
   }
 
   // Build select string — merge all columns per join table into a single
-  // embedded resource (e.g. "compartments(col1, col2, col3)") to avoid
-  // duplicate alias errors in PostgREST.
+  // embedded resource (e.g. "compartments!inner(col1, col2, col3)") to avoid
+  // duplicate alias errors in PostgREST. Always use !inner so that
+  // embedded-resource filters (e.g. ?compartments.development_class=eq.X)
+  // actually filter parent rows instead of just nulling the nested object.
   const parts: string[] = Array.from(rawFields);
   for (const [table, cols] of joinFields) {
-    parts.push(`${table}(${Array.from(cols).join(", ")})`);
+    parts.push(`${table}!inner(${Array.from(cols).join(", ")})`);
   }
   return parts.join(", ");
 }

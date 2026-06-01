@@ -44,6 +44,14 @@ function formatEuro(value: number): string {
   return value < 0 ? `−${formatted}` : formatted;
 }
 
+// Format pie/donut slice label with appropriate unit suffix
+function formatPieLabel(yKey: string | null | undefined, name: string, value: number): string {
+  if (isEuroKey(yKey)) return `${name}: ${formatEuro(value)} €`;
+  if (isVolumeKey(yKey)) return `${name}: ${formatNumber(value)} m³`;
+  if (isAreaKey(yKey)) return `${name}: ${formatNumber(value)} ha`;
+  return `${name}: ${Number.isInteger(value) ? value : value.toFixed(1)}`;
+}
+
 // Detect if a key likely holds euro values by name heuristics
 function isEuroKey(key: string | null | undefined): boolean {
   if (!key) return false;
@@ -510,7 +518,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
               cx="50%"
               cy="50%"
               outerRadius={100}
-              label={({ name, value }) => `${name}: ${isEuroKey(tab.yKey) ? formatEuro(value) + " €" : typeof value === "number" && !Number.isInteger(value) ? value.toFixed(1) : value}`}
+              label={({ name, value }) => formatPieLabel(tab.yKey, name ?? "", value as number)}
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
 
             >
@@ -536,7 +544,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
               cy="50%"
               innerRadius={50}
               outerRadius={100}
-              label={({ name, value }) => `${name}: ${isEuroKey(tab.yKey) ? formatEuro(value) + " €" : typeof value === "number" && !Number.isInteger(value) ? value.toFixed(1) : value}`}
+              label={({ name, value }) => formatPieLabel(tab.yKey, name ?? "", value as number)}
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
 
             >
