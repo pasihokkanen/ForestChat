@@ -4,7 +4,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { executeTool, type ToolContext } from "@/lib/chat/tool-executor";
 
-function makeCtx(overrides: Partial<{ sendSse: typeof vi.fn }> = {}): ToolContext {
+function makeCtx(overrides: Partial<Pick<ToolContext, "sendSse">> = {}): ToolContext {
   return {
     forestId: "test-forest-id",
     userId: "test-user-id",
@@ -22,7 +22,7 @@ function makeCtx(overrides: Partial<{ sendSse: typeof vi.fn }> = {}): ToolContex
         }),
       }),
     }) } as any,
-    sendSse: overrides.sendSse ?? vi.fn(),
+    sendSse: overrides.sendSse ?? (vi.fn() as unknown as (event: string, data: unknown) => void),
   };
 }
 

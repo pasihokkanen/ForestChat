@@ -433,6 +433,7 @@ export async function POST(request: NextRequest) {
       let hasToolCalls = false;
       let createdChart = false;  // track for better fallback messages
       let lastToolResult: string | undefined;  // last successful tool result text
+      const chartIdsCreatedThisTurn = new Set<string>();  // guard against duplicate create_chart calls
 
       for (let iteration = 0; iteration < maxIterations; iteration++) {
         let iterationText = "";
@@ -453,6 +454,19 @@ export async function POST(request: NextRequest) {
             finalContent += chunk.content;
             send({ event: "chunk", data: { content: chunk.content } });
           } else if (chunk.type === "tool_call") {
+            // Guard: skip duplicate create_chart calls within the same turn.
+            // The model sometimes emits multiple create_chart tool calls in a
+            // single response. Only the first one is honored; subsequent ones
+            // are silently skipped to prevent duplicate chart tabs.
+            if (chunk.name === "create_chart") {
+              const chartId = (chunk.arguments as Record<string, unknown>)?.chart_id as string | undefined;
+              if (chartIdsCreatedThisTurn.size > 0) {
+                console.warn(`[route] Skipping duplicate create_chart("${chartId ?? "?"}") — chart already created this turn`);
+                continue;
+              }
+              if (chartId) chartIdsCreatedThisTurn.add(chartId);
+            }
+
             send({ event: "tool_start", data: { name: chunk.name, args: chunk.arguments as Record<string, unknown> } });
 
             const result = await executeTool(chunk.name, chunk.arguments, {

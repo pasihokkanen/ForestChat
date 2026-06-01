@@ -104,11 +104,11 @@ describe("compartmentsToGeoJSON", () => {
             [358600, 6943800],
           ]],
         ],
-      },
+      } as Compartment["geometry"],
     });
 
     const result = compartmentsToGeoJSON([compartment]);
-    const geom = result.features[0].geometry as Record<string, unknown>;
+    const geom = result.features[0].geometry as unknown as Record<string, unknown>;
 
     // CRS should be stripped
     expect(geom.crs).toBeUndefined();
@@ -131,7 +131,7 @@ describe("compartmentsToGeoJSON", () => {
     });
 
     const result = compartmentsToGeoJSON([compartment]);
-    const geom = result.features[0].geometry as Record<string, unknown>;
+    const geom = result.features[0].geometry as unknown as Record<string, unknown>;
     const coords = geom.coordinates as number[][][][];
     expect(coords[0][0][0]).toEqual([24.0, 62.5]);
   });

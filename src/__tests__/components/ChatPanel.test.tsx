@@ -3,8 +3,8 @@ import { render, screen } from "@testing-library/react";
 import ChatPanel from "@/components/chat/ChatPanel";
 
 // Mock the zustand store
-const mockStore = {
-  messages: [],
+const mockStore: Record<string, unknown> = {
+  messages: [] as Array<{ id: string; session_id: string; role: string; content: string; tool_calls: unknown; created_at: string }>,
   isStreaming: false,
   streamingContent: "",
   toolCallStatus: null,

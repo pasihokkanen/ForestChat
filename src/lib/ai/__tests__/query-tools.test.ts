@@ -310,11 +310,12 @@ describe("batchUpdateOperations", () => {
       operations: createQueryableMock([], null),
     });
 
+    const badUpdate = { type: "clear_cut" };
     const result = await batchUpdateOperations(
       supabase,
       "forest-1",
       {},
-      { type: "clear_cut" as any }
+      badUpdate as any
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("Cannot update field \"type\"");
