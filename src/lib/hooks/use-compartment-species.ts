@@ -1,20 +1,24 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import type { Operation } from "@/types/database";
+import type { CompartmentSpecies } from "@/types/database";
 import { createClient } from "@/lib/supabase/client";
 import { useForestStore } from "@/lib/store";
 
-interface UseOperationsResult {
-  data: Operation[];
+interface UseCompartmentSpeciesResult {
+  data: CompartmentSpecies[];
   loading: boolean;
   error: string | null;
 }
 
-export function useOperations(
+/**
+ * Fetches all compartment_species rows for a forest.
+ * Writes them to the Zustand store for use in map popups, charts, etc.
+ */
+export function useCompartmentSpecies(
   forestId: string | null
-): UseOperationsResult {
-  const [data, setData] = useState<Operation[]>([]);
+): UseCompartmentSpeciesResult {
+  const [data, setData] = useState<CompartmentSpecies[]>([]);
   const [loading, setLoading] = useState<boolean>(forestId !== null);
   const [error, setError] = useState<string | null>(null);
   const refetchCounter = useForestStore((s) => s.refetchCounter);
@@ -31,15 +35,15 @@ export function useOperations(
     setLoading(true);
     setError(null);
 
-    const fetchOperations = async () => {
+    const fetchData = async () => {
       try {
         const supabase = createClient();
         const { data: result, error: fetchError } = await supabase
-          .from("operations")
+          .from("compartment_species")
           .select("*")
           .eq("forest_id", forestId)
-          .order("year", { ascending: true })
-          .order("compartment_id", { ascending: true });
+          .order("stand_id")
+          .order("species");
 
         if (cancelled) return;
 
@@ -47,9 +51,9 @@ export function useOperations(
           setError(fetchError.message);
           setData([]);
         } else {
-          const ops = (result as Operation[]) ?? [];
-          setData(ops);
-          useForestStore.getState().setOperations(ops);
+          const species = (result as CompartmentSpecies[]) ?? [];
+          setData(species);
+          useForestStore.getState().setCompartmentSpecies(species);
         }
       } catch (err: unknown) {
         if (cancelled) return;
@@ -62,7 +66,7 @@ export function useOperations(
       }
     };
 
-    fetchOperations();
+    fetchData();
 
     return () => {
       cancelled = true;

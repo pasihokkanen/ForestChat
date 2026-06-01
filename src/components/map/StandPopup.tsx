@@ -1,9 +1,6 @@
 "use client";
 
-import {
-  type CompartmentFeature,
-  type CompartmentFeatureCollection,
-} from "@/types/database";
+import type { CompartmentFeature } from "@/types/database";
 
 export interface StandPopupProps {
   properties: CompartmentFeature["properties"];
@@ -14,16 +11,20 @@ export interface StandPopupProps {
 /**
  * Popup content for a clicked forest stand.
  * Displays key attributes in a compact card.
+ * Note: The map popup in StandLayer.tsx is the actual renderer; this
+ * React component is kept for potential future Maplibre popup usage.
  */
 export default function StandPopup({ properties, onClose }: StandPopupProps) {
   const {
     stand_id,
-    main_species,
     development_class,
     site_type,
     area_ha,
     age_years,
     volume_m3,
+    basal_area,
+    avg_diameter,
+    avg_height,
   } = properties;
 
   return (
@@ -40,10 +41,7 @@ export default function StandPopup({ properties, onClose }: StandPopupProps) {
         Stand {stand_id}
       </h3>
       <dl className="grid grid-cols-2 gap-x-3 gap-y-1">
-        <dt className="text-gray-500 dark:text-gray-400">Main species</dt>
-        <dd>{main_species ?? "—"}</dd>
-
-        <dt className="text-gray-500 dark:text-gray-400">Development class</dt>
+        <dt className="text-gray-500 dark:text-gray-400">Dev. class</dt>
         <dd>{development_class ?? "—"}</dd>
 
         <dt className="text-gray-500 dark:text-gray-400">Site type</dt>
@@ -57,6 +55,15 @@ export default function StandPopup({ properties, onClose }: StandPopupProps) {
 
         <dt className="text-gray-500 dark:text-gray-400">Volume (m³)</dt>
         <dd>{volume_m3 != null ? volume_m3.toFixed(0) : "—"}</dd>
+
+        <dt className="text-gray-500 dark:text-gray-400">Basal area</dt>
+        <dd>{basal_area != null ? basal_area.toFixed(1) : "—"}</dd>
+
+        <dt className="text-gray-500 dark:text-gray-400">Avg diam.</dt>
+        <dd>{avg_diameter != null ? `${avg_diameter.toFixed(1)} cm` : "—"}</dd>
+
+        <dt className="text-gray-500 dark:text-gray-400">Avg height</dt>
+        <dd>{avg_height != null ? `${avg_height.toFixed(1)} m` : "—"}</dd>
       </dl>
     </div>
   );

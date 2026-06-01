@@ -2,6 +2,7 @@ import type { StateCreator } from "zustand";
 import type {
   Forest,
   Compartment,
+  CompartmentSpecies,
   Operation,
   PlanMetadata,
 } from "@/types/database";
@@ -11,6 +12,7 @@ type LoadingKey = "forest" | "compartments";
 export interface ForestSlice {
   forest: Forest | null;
   compartments: Compartment[];
+  compartmentSpecies: CompartmentSpecies[];
   operations: Operation[];
   planMetadata: PlanMetadata | null;
   isLoadingForest: boolean;
@@ -20,6 +22,7 @@ export interface ForestSlice {
 
   setForest: (forest: Forest) => void;
   setCompartments: (compartments: Compartment[]) => void;
+  setCompartmentSpecies: (species: CompartmentSpecies[]) => void;
   setOperations: (operations: Operation[]) => void;
   setPlanMetadata: (metadata: PlanMetadata) => void;
   setLoading: (key: LoadingKey, value: boolean) => void;
@@ -31,6 +34,7 @@ export interface ForestSlice {
 const initialState = {
   forest: null as Forest | null,
   compartments: [] as Compartment[],
+  compartmentSpecies: [] as CompartmentSpecies[],
   operations: [] as Operation[],
   planMetadata: null as PlanMetadata | null,
   isLoadingForest: false,
@@ -45,6 +49,8 @@ export const createForestSlice: StateCreator<ForestSlice> = (set) => ({
   setForest: (forest) => set({ forest }),
 
   setCompartments: (compartments) => set({ compartments }),
+
+  setCompartmentSpecies: (compartmentSpecies) => set({ compartmentSpecies }),
 
   setOperations: (operations) => set({ operations }),
 

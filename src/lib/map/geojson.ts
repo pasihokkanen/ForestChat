@@ -99,6 +99,9 @@ export function compartmentsToGeoJSON(
           area_ha: c.area_ha,
           age_years: c.age_years,
           volume_m3: c.volume_m3,
+          basal_area: c.basal_area,
+          avg_diameter: c.avg_diameter,
+          avg_height: c.avg_height,
         },
       };
     });

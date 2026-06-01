@@ -128,6 +128,9 @@ export interface CompartmentFeature extends GeoJSON.Feature<GeoJSON.MultiPolygon
     area_ha: number | null;
     age_years: number | null;
     volume_m3: number | null;
+    basal_area: number | null;
+    avg_diameter: number | null;
+    avg_height: number | null;
   };
 }
 

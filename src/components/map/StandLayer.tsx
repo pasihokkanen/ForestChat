@@ -54,84 +54,123 @@ function shouldUseAgeColoring(
   return maxPct <= 0.7;
 }
 
-/**
- * Show a custom popup overlay for a forest stand.
- * Uses a fixed-position overlay on the map container.
- */
+/** Show a custom popup overlay for a forest stand. Uses store data for species and operations. */
 function showCustomPopup(
-  map: maplibregl.Map,
-  popupRef: React.MutableRefObject<HTMLElement | null>,
-  props: Record<string, unknown>,
-  lngLat: [number, number],
-) {
-  // Remove any existing custom popup
-  if (popupRef.current) {
-    popupRef.current.remove();
-    popupRef.current = null;
-  }
+   map: maplibregl.Map,
+   popupRef: React.MutableRefObject<HTMLElement | null>,
+   props: Record<string, unknown>,
+   lngLat: [number, number],
+ ) {
+   // Remove any existing custom popup
+   if (popupRef.current) {
+     popupRef.current.remove();
+     popupRef.current = null;
+   }
 
-  const standId = props.stand_id as string;
+   const standId = props.stand_id as string;
 
-  // Create overlay container
-  const el = document.createElement("div");
-  el.className = "forestchat-custom-popup";
-  el.style.cssText = `
-    position: absolute;
-    z-index: 1000;
-    background: white;
-    border-radius: 8px;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.2);
-    padding: 12px;
-    min-width: 200px;
-    font-size: 13px;
-    color: #111;
-    pointer-events: auto;
-    transform: translate(-50%, -100%);
-    margin-top: -10px;
-  `;
+   // Create overlay container
+   const el = document.createElement("div");
+   el.className = "forestchat-custom-popup";
+   el.style.cssText = `
+     position: absolute;
+     z-index: 1000;
+     background: white;
+     border-radius: 8px;
+     box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+     padding: 12px;
+     min-width: 260px;
+     max-width: 340px;
+     font-size: 13px;
+     color: #111;
+     pointer-events: auto;
+     transform: translate(-50%, -100%);
+     margin-top: -10px;
+   `;
 
-  // Position and append to DOM
-  const point = map.project(lngLat);
-  // Append to document.body with fixed positioning to avoid MapLibre container stacking issues
-  const containerRect = map.getContainer().getBoundingClientRect();
-  el.style.position = "fixed";
-  el.style.left = (containerRect.left + point.x) + "px";
-  el.style.top = (containerRect.top + point.y) + "px";
-  document.body.appendChild(el);
-  popupRef.current = el;
+   // Position and append to DOM
+   const point = map.project(lngLat);
+   // Append to document.body with fixed positioning to avoid MapLibre container stacking issues
+   const containerRect = map.getContainer().getBoundingClientRect();
+   el.style.position = "fixed";
+   el.style.left = (containerRect.left + point.x) + "px";
+   el.style.top = (containerRect.top + point.y) + "px";
+   document.body.appendChild(el);
+   popupRef.current = el;
 
-  // Build popup HTML directly (synchronous)
-  const species = (props.main_species as string) ?? "—";
-  const devClass = (props.development_class as string) ?? "—";
-  const siteType = (props.site_type as string) ?? "—";
-  const area = (props.area_ha as number) != null ? (props.area_ha as number).toFixed(1) : "—";
-  const age = (props.age_years as number) != null ? `${props.age_years as number} yr` : "—";
-  const volume = (props.volume_m3 as number) != null ? (props.volume_m3 as number).toFixed(0) : "—";
+   // Build popup HTML — read fresh data from store each time
+   const devClass = (props.development_class as string) ?? "—";
+   const siteType = (props.site_type as string) ?? "—";
+   const area = (props.area_ha as number) != null ? (props.area_ha as number).toFixed(1) : "—";
+   const age = (props.age_years as number) != null ? `${props.age_years as number} yr` : "—";
+   const volume = (props.volume_m3 as number) != null ? (props.volume_m3 as number).toFixed(0) : "—";
+   const basalArea = (props.basal_area as number) != null ? (props.basal_area as number).toFixed(1) : "—";
+   const avgDiam = (props.avg_diameter as number) != null ? (props.avg_diameter as number).toFixed(1) : "—";
+   const avgHt = (props.avg_height as number) != null ? (props.avg_height as number).toFixed(1) : "—";
 
-  el.innerHTML = `
-    <div style="position:relative">
-      <button class="popup-close" style="position:absolute;top:1px;right:1px;border:none;background:transparent;font-size:18px;cursor:pointer;color:#999;line-height:1;width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:4px">×</button>
-      <h3 style="font-weight:600;font-size:15px;margin:0 0 8px 0;padding-bottom:4px;border-bottom:1px solid #e5e7eb">Stand ${standId}</h3>
-      <dl style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin:0;font-size:13px">
-        <dt style="color:#6b7280">Main species</dt><dd style="margin:0;color:#111">${species}</dd>
-        <dt style="color:#6b7280">Development class</dt><dd style="margin:0;color:#111">${devClass}</dd>
-        <dt style="color:#6b7280">Site type</dt><dd style="margin:0;color:#111">${siteType}</dd>
-        <dt style="color:#6b7280">Area (ha)</dt><dd style="margin:0;color:#111">${area}</dd>
-        <dt style="color:#6b7280">Age</dt><dd style="margin:0;color:#111">${age}</dd>
-        <dt style="color:#6b7280">Volume (m³)</dt><dd style="margin:0;color:#111">${volume}</dd>
-      </dl>
-    </div>
-  `;
+   // Look up species breakdown from store
+   const state = useForestStore.getState();
+   const thisSpecies = state.compartmentSpecies.filter((s) => s.stand_id === standId);
+   const speciesRows = thisSpecies
+     .map((s) => `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5">
+       <span>${s.species}</span>
+       <span style="color:#6b7280;text-align:right">${s.volume_m3.toFixed(0)} m³ / ${s.area_ha.toFixed(1)} ha</span>
+     </div>`)
+     .join("");
 
-  // Wire up close button
-  const closeBtn = el.querySelector(".popup-close") as HTMLElement | null;
-  if (closeBtn) {
-    closeBtn.onclick = (e) => {
-      e.stopPropagation();
-      hideCustomPopup(popupRef);
-    };
-  }
-}
+   // Look up operations for this stand from store
+   const compartmentId = props.id as string;
+   const thisOps = state.operations.filter((op) => op.compartment_id === compartmentId);
+   const opsRows = thisOps
+     .map((op) => {
+       const valueStr = op.income_eur != null && op.income_eur > 0
+         ? `+${op.income_eur.toFixed(0)}€`
+         : op.cost_eur != null && op.cost_eur > 0
+           ? `−${op.cost_eur.toFixed(0)}€`
+           : "";
+       return `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5">
+         <span>${op.type} ${op.year}</span>
+         <span style="color:#6b7280;text-align:right">${valueStr}</span>
+       </div>`;
+     })
+     .join("");
+
+   el.innerHTML = `
+     <div style="position:relative">
+       <button class="popup-close" style="position:absolute;top:1px;right:1px;border:none;background:transparent;font-size:18px;cursor:pointer;color:#999;line-height:1;width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:4px">×</button>
+       <h3 style="font-weight:600;font-size:15px;margin:0 0 8px 0;padding-bottom:4px;border-bottom:1px solid #e5e7eb">Stand ${standId}</h3>
+
+       <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px">Stand details</h4>
+       <div style="margin:0 0 8px 0">
+         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:#111">Dev. class</span><span style="color:#6b7280;text-align:right">${devClass}</span></div>
+         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:#111">Site type</span><span style="color:#6b7280;text-align:right">${siteType}</span></div>
+         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:#111">Area (ha)</span><span style="color:#6b7280;text-align:right">${area}</span></div>
+         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:#111">Age</span><span style="color:#6b7280;text-align:right">${age}</span></div>
+         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:#111">Volume (m³)</span><span style="color:#6b7280;text-align:right">${volume}</span></div>
+         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:#111">Basal area</span><span style="color:#6b7280;text-align:right">${basalArea}</span></div>
+         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:#111">Avg diam.</span><span style="color:#6b7280;text-align:right">${avgDiam} cm</span></div>
+         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:#111">Avg height</span><span style="color:#6b7280;text-align:right">${avgHt} m</span></div>
+       </div>
+
+       ${speciesRows ? `
+       <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px">Species</h4>
+       <div style="margin:0 0 8px 0">${speciesRows}</div>` : ""}
+
+       ${opsRows ? `
+       <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px">Operations</h4>
+       <div>${opsRows}</div>` : ""}
+     </div>
+   `;
+
+   // Wire up close button
+   const closeBtn = el.querySelector(".popup-close") as HTMLElement | null;
+   if (closeBtn) {
+     closeBtn.onclick = (e) => {
+       e.stopPropagation();
+       hideCustomPopup(popupRef);
+     };
+   }
+ }
 
 /**
  * Remove the custom popup overlay.
