@@ -577,6 +577,15 @@ export default function ChartCard({ tab }: ChartCardProps) {
               strokeWidth={2}
               activeDot={{ r: 8 }}
             />
+            {tab.yKey2 && (
+              <Line
+                type="monotone"
+                dataKey={tab.yKey2}
+                stroke="#FF9800"
+                strokeWidth={2}
+                activeDot={{ r: 6 }}
+              />
+            )}
           </LineChart>
         </ResponsiveContainer>
       );
