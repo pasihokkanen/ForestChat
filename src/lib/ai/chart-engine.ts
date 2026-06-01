@@ -87,6 +87,11 @@ interface ComputedFieldDef {
 
 // Luke VMI13 + Tapio growth rates (m³/ha/y) for Väli-Suomi (Ähtäri zone).
 // Source: build_plan_v3_fixed.py — Luke VMI13 (2019–2023) published ranges.
+//
+// These are forest-level AVERAGES. Per-stand multipliers (species, age,
+// density) redistribute growth between compartments while preserving the
+// aggregate total. Each multiplier self-normalizes so the area-weighted
+// mean across the forest is ~1.0 — no net change to total growth.
 const GROWTH_MINERAL: Record<string, number> = {
   "herb-rich heath": 7.0,  // OMT — VMI range 6.0–8.0
   mesic: 5.5,              // MT  — VMI range 4.5–6.5
@@ -101,9 +106,143 @@ const GROWTH_PEATLAND: Record<string, number> = {
 };
 const GROWTH_DEFAULT = 3.0; // fallback for unknown site/soil combos
 
-function getGrowthRate(siteType: string, soilType: string): number {
+// Expected basal area (m²/ha) by site type — used for density factor.
+// Calibrated to actual DB means for this forest (161 compartments).
+const EXPECTED_BA: Record<string, number> = {
+  "herb-rich heath": 23,
+  mesic: 20,
+  "sub-xeric": 17,
+  xeric: 14,
+};
+
+// ─── Multiplier normalization constants ─────────────────────────────
+// Each raw multiplier is divided by its area-weighted forest average so
+// the combined product averages ~1.0. Computed once from the 161-compartment
+// forest; update if the forest composition changes significantly.
+const NORM_SPECIES = 1.007;  // speciesFactor avg (nearly 1.0 — species mix)
+const NORM_AGE = 0.931;      // ageFactor avg (seedlings pull this down)
+const NORM_DENSITY = 0.923;  // densityFactor avg (BA=0 stands pull this down)
+
+// ─── Multiplier functions ───────────────────────────────────────────
+
+/**
+ * Species factor: adjusts base growth for tree species.
+ *
+ * General principle: spruce thrives on fertile sites, pine on poor sites,
+ * birch grows slower than conifers on average.
+ *
+ *   Spruce on mesic/herb-rich:  1.08  (+8% — optimal conditions)
+ *   Spruce on sub-xeric/xeric:  0.95  (−5% — struggles on dry/poor soil)
+ *   Pine on mesic/herb-rich:    0.95  (−5% — outcompeted by spruce)
+ *   Pine on sub-xeric/xeric:    1.05  (+5% — drought-tolerant, dominates)
+ *   Birch (any site):           0.88–0.92 (−8-12% — naturally slower)
+ *   Others (larch, alder):      1.0   (neutral)
+ */
+function speciesFactor(species: string, siteType: string): number {
+  const goodSite = siteType === "herb-rich heath" || siteType === "mesic";
+  const sp = (species ?? "").toLowerCase();
+  const raw: Record<string, number> = {
+    pine: goodSite ? 0.95 : 1.05,
+    spruce: goodSite ? 1.08 : 0.95,
+    silver_birch: 0.92,
+    downy_birch: 0.90,
+    larch: 1.02,
+    grey_alder: 0.88,
+  };
+  return (raw[sp] ?? 1.0) / NORM_SPECIES;
+}
+
+/**
+ * Age factor: growth curve over a stand's lifetime.
+ *
+ * Young stands haven't reached full canopy closure yet; very old stands
+ * slow down as trees senesce. Peak growth occurs at 40–70 years.
+ *
+ *   Age   5:  0.75  — seedling, canopy forming
+ *   Age  15:  0.95  — sapling, approaching peak
+ *   Age  30:  0.98  — young thinning stand
+ *   Age 40–70: 1.00  — PEAK GROWTH, full canopy
+ *   Age  90:  0.90  — mature, slowing
+ *   Age 110:  0.82  — over-mature, senescent
+ */
+function ageFactor(ageYears: number | null): number {
+  if (ageYears == null) return 1.0 / NORM_AGE;
+  const a = ageYears;
+  let raw: number;
+  if (a < 15)       raw = 0.65 + 0.02 * a;         // 0.65 → 0.95
+  else if (a < 40)  raw = 0.95 + 0.002 * (a - 15); // 0.95 → 1.00
+  else if (a < 70)  raw = 1.0;                      // plateau
+  else if (a < 100) raw = 1.0 - 0.005 * (a - 70);  // 1.0 → 0.85
+  else              raw = 0.85 - 0.003 * (a - 100); // slow decline
+  return raw / NORM_AGE;
+}
+
+/**
+ * Density factor: stocking level relative to site-type expectation.
+ *
+ * Compares actual basal_area to the expected BA for the site type.
+ * Understocked stands don't use full site potential; overstocked stands
+ * experience competition that reduces individual tree growth.
+ *
+ *   BA = 0  (seedling):  0.65  — growing, just not measured yet
+ *   BA = 0  (open_area): 0.30  — genuinely unstocked
+ *   <50% of expected:    0.80  — understocked
+ *   50-75%:              0.95  — below normal
+ *   75-130%:             1.00  — NORMAL, optimal growth
+ *   130-150%:            0.95  — dense, slight competition
+ *   >150%:               0.85  — overstocked, significant competition
+ */
+function densityFactor(
+  basalArea: number | null,
+  siteType: string,
+  developmentClass: string | null
+): number {
+  if (basalArea == null || basalArea === 0) {
+    // Zero BA: distinguish seedlings (growing, BA not measured) from
+    // open areas (genuinely unstocked).
+    if (developmentClass && developmentClass.includes("seedling")) return 0.65 / NORM_DENSITY;
+    if (developmentClass === "open_area") return 0.30 / NORM_DENSITY;
+    return 0.60 / NORM_DENSITY; // unknown — assume low but growing
+  }
+  const expected = EXPECTED_BA[siteType] ?? 20;
+  const density = basalArea / expected;
+  let raw: number;
+  if (density < 0.5)       raw = 0.80;
+  else if (density < 0.75) raw = 0.95;
+  else if (density < 1.3)  raw = 1.0;
+  else if (density < 1.5)  raw = 0.95;
+  else                     raw = 0.85;
+  return raw / NORM_DENSITY;
+}
+
+/**
+ * Compute per-hectare annual growth (m³/ha/y) for a single compartment.
+ *
+ * Starts from the site-type + soil-type VMI13 base rate, then applies
+ * species, age, and density multipliers. Each multiplier redistributes
+ * growth between compartments without changing the forest-level aggregate
+ * (normalization ensures area-weighted mean ≈ 1.0).
+ *
+ * Used by the growth_m3_per_ha computed field — no DB column needed.
+ */
+function getGrowthRate(
+  siteType: string,
+  soilType: string,
+  species: string,
+  ageYears: number | null,
+  basalArea: number | null,
+  developmentClass: string | null
+): number {
+  // 1. Base rate from Luke VMI13 (site type + mineral/peatland)
   const table = soilType === "peatland" ? GROWTH_PEATLAND : GROWTH_MINERAL;
-  return table[siteType] ?? GROWTH_DEFAULT;
+  const base = table[siteType] ?? GROWTH_DEFAULT;
+
+  // 2. Apply per-stand multipliers (self-normalizing to preserve total)
+  const sf = speciesFactor(species, siteType);
+  const af = ageFactor(ageYears);
+  const df = densityFactor(basalArea, siteType, developmentClass);
+
+  return base * sf * af * df;
 }
 
 const COMPUTED_FIELDS: Record<string, ComputedFieldDef> = {
@@ -125,18 +264,31 @@ const COMPUTED_FIELDS: Record<string, ComputedFieldDef> = {
     compute: (row) =>
       ((row.income_eur as number) ?? 0) - ((row.cost_eur as number) ?? 0),
   },
-  // Per-hectare annual growth (m³/ha/y) computed from site_type + soil_type
-  // via Luke VMI13 growth rates. No DB column needed — computed at query time.
+  // Per-hectare annual growth (m³/ha/y) computed from compartment attributes
+  // via Luke VMI13 base rates × species × age × density multipliers.
+  // No DB column needed — computed at query time from: site_type, soil_type,
+  // main_species, age_years, basal_area, development_class.
   growth_m3_per_ha: {
-    sources: ["site_type", "soil_type"],
+    sources: [
+      "site_type", "soil_type", "main_species",
+      "age_years", "basal_area", "development_class",
+    ],
     sourceTables: {
       site_type: "source",
       soil_type: "source",
+      main_species: "source",
+      age_years: "source",
+      basal_area: "source",
+      development_class: "source",
     },
     compute: (row) =>
       getGrowthRate(
         (row.site_type as string) ?? "",
-        (row.soil_type as string) ?? ""
+        (row.soil_type as string) ?? "",
+        (row.main_species as string) ?? "",
+        row.age_years as number | null,
+        row.basal_area as number | null,
+        row.development_class as string | null
       ),
   },
   // Total annual growth per compartment = growth_m3_per_ha × area_ha.
