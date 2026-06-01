@@ -185,7 +185,7 @@ const toolHandlers: Record<string, ToolHandler> = {
           name_key: chartTab.nameKey,
           color_key: chartTab.colorKey,
           stand_dimension: chartTab.standDimension,
-          waterfall_base: chartTab.waterfall_base,
+          // waterfall_base column not yet in DB (see migration 005)
         }, { onConflict: "forest_id, chart_id" });
 
         ctx.sendSse?.("create_chart", chartTab);
@@ -236,7 +236,7 @@ const toolHandlers: Record<string, ToolHandler> = {
         name_key: chartTab.nameKey,
         color_key: chartTab.colorKey,
         stand_dimension: chartTab.standDimension,
-        waterfall_base: chartTab.waterfall_base,
+        // waterfall_base column not yet in DB (see migration 005)
       }, { onConflict: "forest_id, chart_id" });
     } catch (err) {
       console.error("Failed to persist chart tab:", err);
