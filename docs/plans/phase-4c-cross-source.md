@@ -289,6 +289,10 @@ growth_m3_total: {
 8. **Modify `recomputeChartData()`** — `if (config.source === "cross")` → delegate to `recomputeCrossData()`
 9. **Update `recomputeAllCharts()`** — The `query_config` JSONB column may contain either `ChartQueryConfig` or `CrossQueryConfig`. Widen the type to `ChartQueryConfig | CrossQueryConfig` and use `config.source` as discriminator.
 
+**File:** `src/lib/chat/tool-executor.ts`
+
+- **Guard `resolveAsName()` for cross configs.** `resolveAsName(qc, y_key)` at line 128 iterates `qc.values`, which is undefined on `CrossQueryConfig` (it has `queries` instead). Skip the `resolveAsName` call when `qc.values` is not an array — cross configs rely on explicit `x_key`/`y_key`/`name_key` from the model anyway. Also guard the auto-detect fallback at line 130–131 (`qc.values?.length`) — already uses optional chaining, but the `resolveAsName` call at line 129 needs the explicit guard.
+
 **File:** `src/lib/ai/__tests__/chart-engine.test.ts` (new)
 
 - Test cross-merge with two sub-queries on the same key
@@ -327,6 +331,7 @@ Cross-source queries have more moving parts (N sub-queries, merge semantics, bro
 | File | Change |
 |------|--------|
 | `src/lib/ai/chart-engine.ts` | Phase 4c.1–4c.3: join-prefixed filters, growth_m3_total, cross pipeline |
+| `src/lib/chat/tool-executor.ts` | Phase 4c.3: guard resolveAsName for cross configs |
 | `src/lib/ai/__tests__/chart-engine.test.ts` | Phase 4c.3: cross-source tests (new) |
 | `src/lib/chat/system-prompt.ts` | Phase 4c.1 + 4c.4: updated templates and rules |
 | `src/lib/chat/tools.ts` | Phase 4c.4: cross-source section in create_chart description |
