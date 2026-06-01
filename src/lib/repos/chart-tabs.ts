@@ -70,7 +70,6 @@ function mapRowToChartTab(row: Record<string, unknown>): ChartTab {
     standDimension: (row.stand_dimension as string) ?? null,
     query_config: (row.query_config as Record<string, unknown>) ?? null,
     computed_at: (row.computed_at as string) ?? null,
-    // waterfall_base column not yet in all DBs (see migration 005)
     waterfall_base: (row.waterfall_base as number) ?? null,
   };
 }
