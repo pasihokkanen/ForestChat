@@ -85,6 +85,27 @@ interface ComputedFieldDef {
   compute: (row: Record<string, unknown>) => number;
 }
 
+// Luke VMI13 + Tapio growth rates (m³/ha/y) for Väli-Suomi (Ähtäri zone).
+// Source: build_plan_v3_fixed.py — Luke VMI13 (2019–2023) published ranges.
+const GROWTH_MINERAL: Record<string, number> = {
+  "herb-rich heath": 7.0,  // OMT — VMI range 6.0–8.0
+  mesic: 5.5,              // MT  — VMI range 4.5–6.5
+  "sub-xeric": 3.25,       // VT  — VMI range 2.5–4.0
+  xeric: 1.0,              // CT  — VMI range 0.5–1.5
+};
+const GROWTH_PEATLAND: Record<string, number> = {
+  "herb-rich heath": 6.25, // OMT peatland — VMI range 5.0–7.5
+  mesic: 5.5,              // MT peatland — similar to mineral
+  "sub-xeric": 3.25,       // VT peatland — VMI range 2.5–4.0
+  xeric: 1.5,              // CT peatland — VMI range 0.5–2.0
+};
+const GROWTH_DEFAULT = 3.0; // fallback for unknown site/soil combos
+
+function getGrowthRate(siteType: string, soilType: string): number {
+  const table = soilType === "peatland" ? GROWTH_PEATLAND : GROWTH_MINERAL;
+  return table[siteType] ?? GROWTH_DEFAULT;
+}
+
 const COMPUTED_FIELDS: Record<string, ComputedFieldDef> = {
   removal_m3: {
     sources: ["volume_m3", "removal_pct"],
@@ -104,7 +125,22 @@ const COMPUTED_FIELDS: Record<string, ComputedFieldDef> = {
     compute: (row) =>
       ((row.income_eur as number) ?? 0) - ((row.cost_eur as number) ?? 0),
   },
-  // Phase 4c.2: total annual growth in m³ for compartments source
+  // Per-hectare annual growth (m³/ha/y) computed from site_type + soil_type
+  // via Luke VMI13 growth rates. No DB column needed — computed at query time.
+  growth_m3_per_ha: {
+    sources: ["site_type", "soil_type"],
+    sourceTables: {
+      site_type: "source",
+      soil_type: "source",
+    },
+    compute: (row) =>
+      getGrowthRate(
+        (row.site_type as string) ?? "",
+        (row.soil_type as string) ?? ""
+      ),
+  },
+  // Total annual growth per compartment = growth_m3_per_ha × area_ha.
+  // Depends on growth_m3_per_ha (computed first via chaining).
   growth_m3_total: {
     sources: ["growth_m3_per_ha", "area_ha"],
     sourceTables: {
@@ -116,6 +152,7 @@ const COMPUTED_FIELDS: Record<string, ComputedFieldDef> = {
   },
   // Net volume change per operation: growth − removal. Positive = net growth,
   // negative = net removal. Designed for waterfall charts (growth up, removal down).
+  // Depends on growth_m3_per_ha (computed first via chaining).
   net_volume_change: {
     sources: ["growth_m3_per_ha", "area_ha", "volume_m3", "removal_pct"],
     sourceTables: {
@@ -186,6 +223,38 @@ function resolveJoinField(field: string): { table: string | null; field: string 
   return { table: resolved, field: resolveFieldAlias(fieldPart) };
 }
 
+/** Recursively collect raw DB column sources for a (possibly chained) computed field.
+ *  For non-computed fields, returns the field name itself.
+ *  e.g. collectRawSources("growth_m3_total") → ["site_type", "soil_type", "area_ha"] */
+function collectRawSources(fieldName: string): string[] {
+  const def = COMPUTED_FIELDS[fieldName];
+  if (!def) return [fieldName];
+  const leafSources: string[] = [];
+  for (const src of def.sources) {
+    if (COMPUTED_FIELDS[src]) {
+      leafSources.push(...collectRawSources(src));
+    } else {
+      leafSources.push(src);
+    }
+  }
+  return leafSources;
+}
+
+/** Walk the computed field chain to find which table a leaf column belongs to. */
+function sourceTableFor(topField: string, leafColumn: string): string {
+  function find(field: string): string | null {
+    const def = COMPUTED_FIELDS[field];
+    if (!def) return null;
+    for (const src of def.sources) {
+      if (src === leafColumn) return def.sourceTables[src] ?? "source";
+      const nested = find(src);
+      if (nested) return nested;
+    }
+    return null;
+  }
+  return find(topField) ?? "source";
+}
+
 function buildSelect(config: ChartQueryConfig): string {
   const rawFields = new Set<string>();       // bare columns (no join prefix)
   const joinFields = new Map<string, Set<string>>();  // table → columns
@@ -199,8 +268,6 @@ function buildSelect(config: ChartQueryConfig): string {
       rawFields.add(res.field);
     }
   };
-
-  // Group-by fields
   for (const g of config.aggregate) {
     addField(g.group_by);
   }
@@ -210,32 +277,31 @@ function buildSelect(config: ChartQueryConfig): string {
     const fn = v.fn || "count";
     if (fn === "count") continue;
 
-    const computed = COMPUTED_FIELDS[v.field];
-    if (computed) {
-      for (const src of computed.sources) {
-        // computed.sourceTables tells us which table each source column
-        // belongs to. "compartments" means the joined table; anything else
-        // means the primary source table.
-        const srcTable = computed.sourceTables[src] ?? "source";
+    // Recursively collect raw column sources from computed fields.
+    // When a computed field's source is itself a computed field
+    // (e.g. growth_m3_total ← growth_m3_per_ha ← site_type, soil_type),
+    // we select the leaf columns, not the intermediate null DB column.
+    const sourceColumns = collectRawSources(v.field);
+    for (const src of sourceColumns) {
+      // computed.sourceTables tells us which table each source column
+      // belongs to. "compartments" means the joined table; anything else
+      // means the primary source table.
+      const srcTable = sourceTableFor(v.field, src);
 
-        // When a join is configured, check if this source column is in the
-        // join fields — even if sourceTables says "source" (written for the
-        // case where the source IS compartments). Columns provided via join
-        // must be fetched through the embedded resource, not as bare columns.
-        const isJoinColumn = srcTable === "compartments"
-          || (!!config.join && config.join.fields.includes(src));
+      // When a join is configured, check if this source column is in the
+      // join fields — even if sourceTables says "source" (written for the
+      // case where the source IS compartments). Columns provided via join
+      // must be fetched through the embedded resource, not as bare columns.
+      const isJoinColumn = srcTable === "compartments"
+        || (!!config.join && config.join.fields.includes(src));
 
-        if (isJoinColumn) {
-          if (!joinFields.has("compartments")) joinFields.set("compartments", new Set());
-          joinFields.get("compartments")!.add(resolveFieldAlias(src));
-        } else {
-          rawFields.add(resolveFieldAlias(src));
-        }
+      if (isJoinColumn) {
+        if (!joinFields.has("compartments")) joinFields.set("compartments", new Set());
+        joinFields.get("compartments")!.add(resolveFieldAlias(src));
+      } else {
+        rawFields.add(resolveFieldAlias(src));
       }
-      continue;
     }
-
-    addField(v.field);
   }
 
   // Extra join fields
@@ -337,26 +403,72 @@ function applyComputedFields(
 ): Record<string, unknown>[] {
   if (rows.length === 0) return rows;
 
-  // Only apply computed fields whose source columns are actually present
-  // in the data (e.g., removal_m3 requires volume_m3 from a compartments join).
-  const computedFields = new Set<string>();
+  // Collect which computed fields are requested in config.values.
+  // A field needs computation if it's not in the raw row AND either all its
+  // source columns are raw DB columns, or at least one source is a chained
+  // computed field that will be resolved by topological sort.
+  const needed = new Set<string>();
   for (const v of config.values) {
     const def = COMPUTED_FIELDS[v.field];
-    if (def && def.sources.every((s) => s in rows[0])) {
-      computedFields.add(v.field);
+    if (!def) continue;
+    if (v.field in rows[0]) continue; // already present, use raw value
+    const allRaw = def.sources.every((s) => s in rows[0]);
+    const hasChainableDep = def.sources.some(
+      (s) => COMPUTED_FIELDS[s] && !(s in rows[0])
+    );
+    if (allRaw || hasChainableDep) {
+      needed.add(v.field);
     }
   }
 
-  if (computedFields.size === 0) return rows;
+  if (needed.size === 0) return rows;
+
+  // Topological sort: resolve dependency order so chained computed fields
+  // (e.g. growth_m3_total depends on growth_m3_per_ha) are computed first.
+  // Skips dependencies that are already in the raw row.
+  // Pass rows[0] so we can check which fields exist as raw columns.
+  const order = topologicalSort(needed, rows[0]);
 
   return rows.map((row) => {
     const enriched = { ...row };
-    computedFields.forEach((fieldName) => {
+    for (const fieldName of order) {
       const def = COMPUTED_FIELDS[fieldName];
-      enriched[fieldName] = def.compute(row);
-    });
+      if (!def) continue;
+      enriched[fieldName] = def.compute(enriched);
+    }
     return enriched;
   });
+}
+
+/** Sort computed field names so dependencies are resolved before dependents.
+ *  Skips dependencies that already exist as raw columns in sampleRow. */
+function topologicalSort(fields: Set<string>, sampleRow: Record<string, unknown>): string[] {
+  const result: string[] = [];
+  const visited = new Set<string>();
+  const visiting = new Set<string>();
+
+  function visit(name: string) {
+    if (visited.has(name)) return;
+    if (visiting.has(name)) return; // cycle — skip (shouldn't happen)
+    visiting.add(name);
+    const def = COMPUTED_FIELDS[name];
+    if (def) {
+      for (const src of def.sources) {
+        // If the source is itself a computed field AND not a raw column, visit it first
+        if (COMPUTED_FIELDS[src] && !(src in sampleRow)) {
+          visit(src);
+        }
+      }
+    }
+    visiting.delete(name);
+    visited.add(name);
+    result.push(name);
+  }
+
+  for (const name of fields) {
+    visit(name);
+  }
+  return result;
 }
 
 function aggregateRows(
