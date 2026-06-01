@@ -59,8 +59,8 @@ export const THINNING_BA: Record<string, Record<string, number>> = {
   harvennus:     { pine: 20, spruce: 26, downy_birch: 18, silver_birch: 18, larch: 20, grey_alder: 18 },
 };
 
-export const MIN_AGE_ENSIHARVENNUS: Record<string, number> = { pine: 30, spruce: 25, downy_birch: 20, silver_birch: 20, larch: 25, grey_alder: 20 };
-export const MIN_AGE_HARVENNUS: Record<string, number> =  { pine: 45, spruce: 40, downy_birch: 35, silver_birch: 35, larch: 40, grey_alder: 35 };
+export const MIN_AGE_FIRST_THINNING: Record<string, number> = { pine: 30, spruce: 25, downy_birch: 20, silver_birch: 20, larch: 25, grey_alder: 20 };
+export const MIN_AGE_THINNING: Record<string, number> =  { pine: 45, spruce: 40, downy_birch: 35, silver_birch: 35, larch: 40, grey_alder: 35 };
 
 // ─── Operation type display names (system value → English display) ───
 // Used for chart legends, tooltips, and any user-facing display of operation types.
@@ -153,8 +153,8 @@ export const GROWTH_PEATLAND: Record<string, number> = {
 };
 
 // ─── Site classification mapping ───
-export function classifySite(kasvupaikka: string): string {
-  const kp = kasvupaikka.toLowerCase();
+export function classifySite(siteType: string): string {
+  const kp = siteType.toLowerCase();
   if (kp.includes("herb-rich") || kp.includes("lehto") || kp.includes("lehtomainen") || kp.includes("ruoho")) return "lehtomainen";
   if (kp.includes("mesic") || kp.includes("tuore") || kp.includes("mustikka")) return "tuore";
   if (kp.includes("sub-xeric") || kp.includes("kuivahko") || kp.includes("puolukka")) return "kuivahko";
@@ -163,17 +163,17 @@ export function classifySite(kasvupaikka: string): string {
 }
 
 export function detectPeatland(
-  maalaji: string,
-  kasvupaikka: string,
-  maaluokka: string,
-  ojitustilanne: string
+  soilType: string,
+  siteType: string,
+  landClass: string,
+  drainageStatus: string
 ): boolean {
   const isPeat = ["turve", "räme", "suo", "korpi", "peat", "mire", "bog"].some(
-    (t) => maalaji.toLowerCase().includes(t) ||
-          kasvupaikka.toLowerCase().includes(t) ||
-          maaluokka.toLowerCase().includes(t)
+    (t) => soilType.toLowerCase().includes(t) ||
+          siteType.toLowerCase().includes(t) ||
+          landClass.toLowerCase().includes(t)
   );
-  const isDrained = ojitustilanne.toLowerCase().includes("ojitettu") ||
-                    kasvupaikka.toLowerCase().includes("ojit");
+  const isDrained = drainageStatus.toLowerCase().includes("ojitettu") ||
+                    siteType.toLowerCase().includes("ojit");
   return isPeat && isDrained;
 }

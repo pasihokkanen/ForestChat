@@ -1,7 +1,7 @@
 // src/lib/ai/classify.ts
 
 import type { Compartment } from "@/types/database";
-import type { KuviotData, PlannedOperation } from "./types";
+import type { StandData, PlannedOperation } from "./types";
 import {
   classifySite,
   detectPeatland,
@@ -10,40 +10,40 @@ import {
   GROWTH_PEATLAND,
   GROWTH_MINERAL,
   THINNING_BA,
-  MIN_AGE_ENSIHARVENNUS,
-  MIN_AGE_HARVENNUS,
+  MIN_AGE_FIRST_THINNING,
+  MIN_AGE_THINNING,
   COSTS,
   PRICES,
 } from "./config";
 
 /**
- * Convert a Compartment from the database into the enriched KuviotData format
+ * Convert a Compartment from the database into the enriched StandData format
  * used by the forestry engine.
  */
-function compartmentToKuviotData(c: Compartment): KuviotData {
-  const kasvupaikka = c.site_type ?? "";
-  const maalaji = c.soil_type ?? "";
-  const ojitustilanne = c.drainage_status ?? "";
-  const siteClass = classifySite(kasvupaikka);
-  const isPeatland = detectPeatland(maalaji, kasvupaikka, "", ojitustilanne);
+function compartmentToStandData(c: Compartment): StandData {
+  const siteType = c.site_type ?? "";
+  const soilType = c.soil_type ?? "";
+  const drainageStatus = c.drainage_status ?? "";
+  const siteClass = classifySite(siteType);
+  const isPeatland = detectPeatland(soilType, siteType, "", drainageStatus);
 
   return {
-    numero: c.stand_id,
-    ala: c.area_ha ?? 0,
-    kehitysluokka: c.development_class ?? "",
-    kasvupaikka,
-    maalaji,
-    ojitustilanne,
-    paapuulaji: c.main_species ?? "",
+    standId: c.stand_id,
+    areaHa: c.area_ha ?? 0,
+    developmentClass: c.development_class ?? "",
+    siteType,
+    soilType,
+    drainageStatus,
+    mainSpecies: c.main_species ?? "",
     site_class: siteClass,
     is_peatland: isPeatland,
     annual_growth: 0, // computed below
-    arvo: 0, // computed below
-    tukki_m3: 0, // computed below
-    kuitu_m3: 0, // computed below
-    ikä: c.age_years ?? 0,
+    valueEur: 0, // computed below
+    logM3: 0, // computed below
+    pulpM3: 0, // computed below
+    ageYears: c.age_years ?? 0,
     ba: c.basal_area ?? 0,
-    m3: c.volume_m3 ?? 0,
+    volumeM3: c.volume_m3 ?? 0,
   };
 }
 
@@ -67,55 +67,55 @@ function getSpeciesData(c: Compartment): RawSpecies[] {
 }
 
 /**
- * Calculate stumpage value (arvo) for a stand.
+ * Calculate stumpage value for a stand.
  *
  * For each species:
- *   tukki_m3 = m3 * log_pct / 100
- *   kuitu_m3 = m3 - tukki_m3
- *   value = tukki_m3 * tukki_hinta + kuitu_m3 * kuitu_hinta
+ *   logM3 = m3 * log_pct / 100
+ *   pulpM3 = m3 - logM3
+ *   value = logM3 * log_price + pulpM3 * pulp_price
  *
  * If no species breakdown, use the aggregate volume and the main species prices.
  */
-function calculateValue(k: KuviotData, species: RawSpecies[]): {
-  arvo: number;
-  tukki_m3: number;
-  kuitu_m3: number;
+function calculateValue(k: StandData, species: RawSpecies[]): {
+  valueEur: number;
+  logM3: number;
+  pulpM3: number;
 } {
-  let totalArvo = 0;
-  let totalTukki = 0;
-  let totalKuitu = 0;
+  let totalValue = 0;
+  let totalLog = 0;
+  let totalPulp = 0;
 
   if (species.length > 0) {
     for (const sp of species) {
       const spKey = sp.species === "birch" ? "silver_birch" : sp.species;
       const spPrices = PRICES["uudistushakkuu"]?.[spKey] ?? PRICES["uudistushakkuu"]?.["pine"] ?? { tukki: 70, kuitu: 20 };
-      const tukkiM3 = sp.m3 * sp.log_pct / 100;
-      const kuituM3 = sp.m3 - tukkiM3;
-      totalTukki += tukkiM3;
-      totalKuitu += kuituM3;
-      totalArvo += tukkiM3 * spPrices.tukki + kuituM3 * spPrices.kuitu;
+      const logM3 = sp.m3 * sp.log_pct / 100;
+      const pulpM3 = sp.m3 - logM3;
+      totalLog += logM3;
+      totalPulp += pulpM3;
+      totalValue += logM3 * spPrices.tukki + pulpM3 * spPrices.kuitu;
     }
   } else {
     // Fallback: use aggregate volume and main species prices
-    const pp = k.paapuulaji;
-    const priceKey = pp === "birch" ? "silver_birch" : pp;
+    const sp = k.mainSpecies;
+    const priceKey = sp === "birch" ? "silver_birch" : sp;
     const prices = PRICES["uudistushakkuu"]?.[priceKey] ?? PRICES["uudistushakkuu"]?.["pine"] ?? { tukki: 70, kuitu: 20 };
-    const tukkiM3 = k.m3 * 0.6; // assume ~60% tukki if no species breakdown
-    const kuituM3 = k.m3 - tukkiM3;
-    totalTukki = tukkiM3;
-    totalKuitu = kuituM3;
-    totalArvo = tukkiM3 * prices.tukki + kuituM3 * prices.kuitu;
+    const logM3 = k.volumeM3 * 0.6; // assume ~60% log if no species breakdown
+    const pulpM3 = k.volumeM3 - logM3;
+    totalLog = logM3;
+    totalPulp = pulpM3;
+    totalValue = logM3 * prices.tukki + pulpM3 * prices.kuitu;
   }
 
   return {
-    arvo: Math.round(totalArvo),
-    tukki_m3: Math.round(totalTukki * 10) / 10,
-    kuitu_m3: Math.round(totalKuitu * 10) / 10,
+    valueEur: Math.round(totalValue),
+    logM3: Math.round(totalLog * 10) / 10,
+    pulpM3: Math.round(totalPulp * 10) / 10,
   };
 }
 
 export interface ClassifyResult {
-  forestKuviot: KuviotData[];
+  forestStands: StandData[];
   operations: PlannedOperation[];
   totalArea: number;
   totalVolume: number;
@@ -135,7 +135,7 @@ export function classifyAndValueStands(
   const cy = currentYear ?? new Date().getFullYear();
   const skipKl = ["Muu maa", "Maatalousmaa", "Tontti"];
 
-  const forestKuviot: KuviotData[] = [];
+  const forestStands: StandData[] = [];
   const operations: PlannedOperation[] = [];
   let totalArea = 0;
   let totalVolume = 0;
@@ -143,74 +143,73 @@ export function classifyAndValueStands(
   let totalGrowth = 0;
 
   for (const c of compartments) {
-    const kl = c.development_class ?? "";
+    const devClass = c.development_class ?? "";
     // Skip non-forest, null/empty, zero area, no volume
-    if (skipKl.includes(kl) || kl === "" || kl === "null" || !c.area_ha || c.area_ha <= 0 || !c.volume_m3) {
+    if (skipKl.includes(devClass) || devClass === "" || devClass === "null" || !c.area_ha || c.area_ha <= 0 || !c.volume_m3) {
       continue;
     }
 
-    const k = compartmentToKuviotData(c);
+    const k = compartmentToStandData(c);
     const species = getSpeciesData(c);
 
     // Select growth rate: peatland or mineral soil
     const growthDict = k.is_peatland ? GROWTH_PEATLAND : GROWTH_MINERAL;
     const gr = growthDict[k.site_class] ?? 3.0;
-    k.annual_growth = gr * k.ala;
+    k.annual_growth = gr * k.areaHa;
 
     // Calculate stumpage value
-    const { arvo, tukki_m3, kuitu_m3 } = calculateValue(k, species);
-    k.arvo = arvo;
-    k.tukki_m3 = tukki_m3;
-    k.kuitu_m3 = kuitu_m3;
+    const { valueEur, logM3, pulpM3 } = calculateValue(k, species);
+    k.valueEur = valueEur;
+    k.logM3 = logM3;
+    k.pulpM3 = pulpM3;
 
     // Aggregate totals
-    totalArea += k.ala;
-    totalVolume += k.m3;
-    totalValue += k.arvo;
+    totalArea += k.areaHa;
+    totalVolume += k.volumeM3;
+    totalValue += k.valueEur;
     totalGrowth += k.annual_growth;
 
-    forestKuviot.push(k);
+    forestStands.push(k);
   }
 
   // ── Classify each stand (determine operations) ──
-  for (const k of forestKuviot) {
-    const y = { m3: k.m3, ika: k.ikä, ba: k.ba };
-    const pp = k.paapuulaji;
-    const kl = k.kehitysluokka;
+  for (const k of forestStands) {
+    const sp = k.mainSpecies;
+    const devClass = k.developmentClass;
     const site = k.site_class;
-    const age = y.ika;
-    const ba = y.ba;
-    const ala = k.ala;
-    const m3 = k.m3;
-    const arvo = k.arvo;
-    const knum = parseFloat(k.numero.replace(",", "."));
+    const ba = k.ba;
+    const age = k.ageYears;
+    const areaHa = k.areaHa;
+    const volumeM3 = k.volumeM3;
+    const valueEur = k.valueEur;
+    const standNum = parseFloat(k.standId.replace(",", "."));
 
     // === SPECIAL CASES ===
 
     // K180: selection cutting
-    if (Math.abs(knum - 180.0) < 0.01) {
+    if (Math.abs(standNum - 180.0) < 0.01) {
       operations.push({
-        kuvio: k,
+        stand: k,
         type: "selection_cutting",
         year: cy,
-        income_eur: Math.round(arvo * 0.5),
+        income_eur: Math.round(valueEur * 0.5),
         cost_eur: 0,
-        removal_m3: Math.round(m3 * 0.5),
+        removal_m3: Math.round(volumeM3 * 0.5),
         notes: "Scenic selection cutting 50%",
       });
       continue;
     }
 
     // K128: labeled regeneration_ready but only 57y → thinning, NOT final harvest
-    if (Math.abs(knum - 128.0) < 0.01) {
-      const priceKey = pp === "birch" ? "silver_birch" : pp;
+    if (Math.abs(standNum - 128.0) < 0.01) {
+      const priceKey = sp === "birch" ? "silver_birch" : sp;
       const hp = getPrices("harvennus", priceKey);
       const up = getPrices("uudistushakkuu", priceKey);
       const ratio = (hp.tukki + hp.kuitu) / (up.tukki + up.kuitu);
-      const removal = m3 * 0.30;
-      const income = Math.round(arvo * 0.30 * ratio);
+      const removal = volumeM3 * 0.30;
+      const income = Math.round(valueEur * 0.30 * ratio);
       operations.push({
-        kuvio: k,
+        stand: k,
         type: "thinning",
         year: cy,
         income_eur: income,
@@ -222,24 +221,24 @@ export function classifyAndValueStands(
     }
 
     // K71, K72: recently thinned, do nothing in period 1
-    if (Math.abs(knum - 71.0) < 0.01 || Math.abs(knum - 72.0) < 0.01) {
+    if (Math.abs(standNum - 71.0) < 0.01 || Math.abs(standNum - 72.0) < 0.01) {
       continue;
     }
 
     // Stand 5: delay thinning to later (2033)
-    if (Math.abs(knum - 5.0) < 0.01) {
-      const priceKey = pp === "birch" ? "silver_birch" : pp;
+    if (Math.abs(standNum - 5.0) < 0.01) {
+      const priceKey = sp === "birch" ? "silver_birch" : sp;
       const hp = getPrices("harvennus", priceKey);
       const up = getPrices("uudistushakkuu", priceKey);
       const ratio = (hp.tukki + hp.kuitu) / (up.tukki + up.kuitu);
       // Project growth to 2033 (7 years from 2026)
       const growthYears = 7; // 2033 - 2026
-      const futureM3 = m3 + k.annual_growth * growthYears;
-      const futureArvo = m3 > 0 ? Math.round(arvo * (futureM3 / m3)) : arvo;
+      const futureM3 = volumeM3 + k.annual_growth * growthYears;
+      const futureValue = volumeM3 > 0 ? Math.round(valueEur * (futureM3 / volumeM3)) : valueEur;
       const removal = Math.round(futureM3 * 0.28);
-      const income = Math.round(futureArvo * 0.28 * ratio);
+      const income = Math.round(futureValue * 0.28 * ratio);
       operations.push({
-        kuvio: k,
+        stand: k,
         type: "thinning",
         year: cy,
         income_eur: income,
@@ -251,42 +250,42 @@ export function classifyAndValueStands(
       k._manual_year = 2033;
       k._manual_income = income;
       k._manual_removal = removal;
-      k._manual_arvo = futureArvo;
+      k._manual_value = futureValue;
       continue;
     }
 
     // === REGENERATION_READY → FINAL HARVEST ===
-    if (kl.includes("regeneration_ready")) {
-      const [optMin, optMax] = getOptimalAge(pp, site);
+    if (devClass.includes("regeneration_ready")) {
+      const [optMin, optMax] = getOptimalAge(sp, site);
       operations.push({
-        kuvio: k,
+        stand: k,
         type: "clear_cut",
         year: cy,
-        income_eur: arvo,
+        income_eur: valueEur,
         cost_eur: 0,
-        removal_m3: Math.round(m3),
+        removal_m3: Math.round(volumeM3),
         notes: `Age ${age.toFixed(0)}y [${optMin}-${optMax}y]`,
       });
       continue;
     }
 
     // === SHELTERWOOD → REGENERATION ===
-    if (kl.includes("shelterwood")) {
+    if (devClass.includes("shelterwood")) {
       operations.push({
-        kuvio: k,
+        stand: k,
         type: "site_prep",
         year: cy,
         income_eur: 0,
-        cost_eur: Math.round(COSTS.site_prep * ala),
+        cost_eur: Math.round(COSTS.site_prep * areaHa),
         removal_m3: 0,
         notes: "Regeneration",
       });
       operations.push({
-        kuvio: k,
+        stand: k,
         type: "pine_planting",
         year: cy,
         income_eur: 0,
-        cost_eur: Math.round(COSTS.pine_planting * ala),
+        cost_eur: Math.round(COSTS.pine_planting * areaHa),
         removal_m3: 0,
         notes: "",
       });
@@ -294,21 +293,21 @@ export function classifyAndValueStands(
     }
 
     // === OPEN_AREA → REGENERATION (if no trees) ===
-    if (kl.includes("open_area") && m3 < 5) {
+    if (devClass.includes("open_area") && volumeM3 < 5) {
       operations.push({
-        kuvio: k,
+        stand: k,
         type: "site_prep",
         year: cy,
         income_eur: 0,
-        cost_eur: Math.round(COSTS.site_prep * ala),
+        cost_eur: Math.round(COSTS.site_prep * areaHa),
         removal_m3: 0,
         notes: "Regeneration",
       });
       const opsSpecies = site.includes("tuore") || site.includes("lehto") ? "spruce" : "pine";
       const plantType = `${opsSpecies}_planting`;
-      const plantCost = Math.round(COSTS[plantType] * ala);
+      const plantCost = Math.round(COSTS[plantType] * areaHa);
       operations.push({
-        kuvio: k,
+        stand: k,
         type: plantType,
         year: cy,
         income_eur: 0,
@@ -320,13 +319,13 @@ export function classifyAndValueStands(
     }
 
     // === SEEDLING_SMALL (under 1.3m) ===
-    if (kl.includes("seedling") && age >= 3 && age <= 12) {
+    if (devClass.includes("seedling") && age >= 3 && age <= 12) {
         operations.push({
-          kuvio: k,
+          stand: k,
           type: "early_tending",
           year: cy,
           income_eur: 0,
-          cost_eur: Math.round(COSTS.early_tending * ala),
+          cost_eur: Math.round(COSTS.early_tending * areaHa),
           removal_m3: 0,
           notes: `Age ${age.toFixed(0)}y`,
         });
@@ -334,13 +333,13 @@ export function classifyAndValueStands(
     }
 
     // === SEEDLING_LARGE (over 1.3m) ===
-    if (kl.includes("seedling") && age >= 10 && age <= 25) {
+    if (devClass.includes("seedling") && age >= 10 && age <= 25) {
         operations.push({
-          kuvio: k,
+          stand: k,
           type: "tending",
           year: cy,
           income_eur: 0,
-        cost_eur: Math.round(COSTS.tending * ala),
+        cost_eur: Math.round(COSTS.tending * areaHa),
           removal_m3: 0,
           notes: `Age ${age.toFixed(0)}y`,
         });
@@ -348,18 +347,18 @@ export function classifyAndValueStands(
     }
 
     // === YOUNG_THINNING → FIRST THINNING ===
-    if (kl.includes("young_thinning")) {
-      const thresh = THINNING_BA["ensiharvennus"]?.[pp] ?? 18;
-      const minAge = MIN_AGE_ENSIHARVENNUS?.[pp] ?? 30;
+    if (devClass.includes("young_thinning")) {
+      const thresh = THINNING_BA["ensiharvennus"]?.[sp] ?? 18;
+      const minAge = MIN_AGE_FIRST_THINNING?.[sp] ?? 30;
       if (ba >= thresh && age >= minAge) {
-        const priceKey = pp === "birch" ? "silver_birch" : pp;
+        const priceKey = sp === "birch" ? "silver_birch" : sp;
         const ep = getPrices("ensiharvennus", priceKey);
         const up = getPrices("uudistushakkuu", priceKey);
         const ratio = (ep.tukki + ep.kuitu) / (up.tukki + up.kuitu);
-        const removal = m3 * 0.25;
-        const income = Math.round(arvo * 0.25 * ratio);
+        const removal = volumeM3 * 0.25;
+        const income = Math.round(valueEur * 0.25 * ratio);
         operations.push({
-          kuvio: k,
+          stand: k,
           type: "first_thinning",
           year: cy,
           income_eur: income,
@@ -372,18 +371,18 @@ export function classifyAndValueStands(
     }
 
     // === MATURE_THINNING → THINNING ===
-    if (kl.includes("mature_thinning")) {
-      const thresh = THINNING_BA["harvennus"]?.[pp] ?? 22;
-      const minAge = MIN_AGE_HARVENNUS?.[pp] ?? 40;
+    if (devClass.includes("mature_thinning")) {
+      const thresh = THINNING_BA["harvennus"]?.[sp] ?? 22;
+      const minAge = MIN_AGE_THINNING?.[sp] ?? 40;
       if (ba >= thresh && age >= minAge) {
-        const priceKey = pp === "birch" ? "silver_birch" : pp;
+        const priceKey = sp === "birch" ? "silver_birch" : sp;
         const hp = getPrices("harvennus", priceKey);
         const up = getPrices("uudistushakkuu", priceKey);
         const ratio = (hp.tukki + hp.kuitu) / (up.tukki + up.kuitu);
-        const removal = m3 * 0.28;
-        const income = Math.round(arvo * 0.28 * ratio);
+        const removal = volumeM3 * 0.28;
+        const income = Math.round(valueEur * 0.28 * ratio);
         operations.push({
-          kuvio: k,
+          stand: k,
           type: "thinning",
           year: cy,
           income_eur: income,
@@ -397,7 +396,7 @@ export function classifyAndValueStands(
   }
 
   return {
-    forestKuviot,
+    forestStands,
     operations,
     totalArea,
     totalVolume,

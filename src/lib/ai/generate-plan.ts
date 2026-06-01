@@ -30,16 +30,16 @@ export async function generatePlan(
     }
 
     // 2. Classify and value
-    const { forestKuviot, operations, totalArea, totalVolume, totalValue, totalGrowth } =
+    const { forestStands, operations, totalArea, totalVolume, totalValue, totalGrowth } =
       classifyAndValueStands(compartments);
 
     // 3. Schedule
-    const { p1, p2, summary } = schedulePlan(forestKuviot, operations, args.startYear ?? new Date().getFullYear());
+    const { p1, p2, summary } = schedulePlan(forestStands, operations, args.startYear ?? new Date().getFullYear());
 
     // 4. Build plan operations array
-    const kuvioToCompartment = new Map<string, { id: string; stand_id: string }>();
+    const standToCompartment = new Map<string, { id: string; stand_id: string }>();
     for (const c of compartments) {
-      kuvioToCompartment.set(c.stand_id, { id: c.id, stand_id: c.stand_id });
+      standToCompartment.set(c.stand_id, { id: c.id, stand_id: c.stand_id });
     }
 
     const allPlanOps: Array<{
@@ -56,12 +56,12 @@ export async function generatePlan(
 
     const addPlanOps = (yearPlan: YearPlan[]) => {
       for (const yp of yearPlan) {
-        for (const op of [...yp.paate, ...yp.harvennus, ...yp.taimik, ...yp.uudist]) {
-          const standId = op.kuvio.numero;
-          let comp = kuvioToCompartment.get(standId);
+        for (const op of [...yp.finalHarvests, ...yp.thinnings, ...yp.tendingOps, ...yp.regenerationOps]) {
+          const standId = op.stand.standId;
+          let comp = standToCompartment.get(standId);
           if (!comp) {
             const numVal = parseFloat(standId.replace(",", "."));
-            for (const [key, val] of kuvioToCompartment.entries()) {
+            for (const [key, val] of standToCompartment.entries()) {
               const keyNum = parseFloat(key.replace(",", "."));
               if (Math.abs(keyNum - numVal) < 0.01) {
                 comp = val;
@@ -130,8 +130,8 @@ export async function generatePlan(
       `💰 Stumpage value: ${Math.round(totalValue).toLocaleString()} €`,
       ``,
       `Period 1 (${startYear}-${startYear + 9}):`,
-      `  ${p1.reduce((s, y) => s + y.paate.length, 0)} clearcuts`,
-      `  ${p1.reduce((s, y) => s + y.harvennus.length, 0)} thinnings`,
+      `  ${p1.reduce((s, y) => s + y.finalHarvests.length, 0)} clearcuts`,
+      `  ${p1.reduce((s, y) => s + y.thinnings.length, 0)} thinnings`,
       `  Avg harvest: ${Math.round(summary.p1AverageHarvest)} m³/v (${Math.round(summary.harvestVsGrowth)}% of growth)`,
       ``,
       `Period 2 extension also generated. Would you like any changes?`,

@@ -2,31 +2,31 @@
 import type { Compartment } from "@/types/database";
 
 /** Enriched compartment data used by the forestry engine */
-export interface KuviotData {
-  numero: string;
-  ala: number;
-  kehitysluokka: string;
-  kasvupaikka: string;
-  maalaji: string;
-  ojitustilanne: string;
-  paapuulaji: string;
+export interface StandData {
+  standId: string;
+  areaHa: number;
+  developmentClass: string;
+  siteType: string;
+  soilType: string;
+  drainageStatus: string;
+  mainSpecies: string;
   site_class: string;
   is_peatland: boolean;
   annual_growth: number;
-  arvo: number;
-  tukki_m3: number;
-  kuitu_m3: number;
-  ikä: number;
+  valueEur: number;
+  logM3: number;
+  pulpM3: number;
+  ageYears: number;
   ba: number;
-  m3: number;
+  volumeM3: number;
   _manual_year?: number;
   _manual_income?: number;
   _manual_removal?: number;
-  _manual_arvo?: number;
+  _manual_value?: number;
 }
 
 export interface PlannedOperation {
-  kuvio: KuviotData;
+  stand: StandData;
   type: string;
   year: number;
   income_eur: number;
@@ -37,10 +37,10 @@ export interface PlannedOperation {
 
 export interface YearPlan {
   year: number;
-  paate: PlannedOperation[];
-  harvennus: PlannedOperation[];
-  taimik: PlannedOperation[];
-  uudist: PlannedOperation[];
+  finalHarvests: PlannedOperation[];
+  thinnings: PlannedOperation[];
+  tendingOps: PlannedOperation[];
+  regenerationOps: PlannedOperation[];
 }
 
 export interface PlanSummary {

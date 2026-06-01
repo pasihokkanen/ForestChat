@@ -1,6 +1,6 @@
 // src/lib/ai/schedule.ts
 
-import type { KuviotData, PlannedOperation, YearPlan, PlanSummary } from "./types";
+import type { StandData, PlannedOperation, YearPlan, PlanSummary } from "./types";
 import { getOptimalAge, COSTS } from "./config";
 
 /**
@@ -9,7 +9,7 @@ import { getOptimalAge, COSTS } from "./config";
  * Ported from build_plan_v3_fixed.py lines 391-621.
  */
 export function schedulePlan(
-  forestKuviot: KuviotData[],
+  forestStands: StandData[],
   operations: PlannedOperation[],
   currentYear: number
 ): {
@@ -22,74 +22,74 @@ export function schedulePlan(
   const yearsP2 = Array.from({ length: 10 }, (_, i) => startYear + 10 + i);
 
   // ── Categorize operations ──
-  const paatehakkuut: PlannedOperation[] = [];
-  const harvennukset: PlannedOperation[] = [];
-  const poiminta: PlannedOperation[] = [];
-  const taimikot: PlannedOperation[] = [];
-  const uudist: PlannedOperation[] = [];
+  const finalHarvests: PlannedOperation[] = [];
+  const thinnings: PlannedOperation[] = [];
+  const selectionCuts: PlannedOperation[] = [];
+  const tendingOps: PlannedOperation[] = [];
+  const regenerationOps: PlannedOperation[] = [];
 
   for (const op of operations) {
     switch (op.type) {
       case "clear_cut":
-        paatehakkuut.push(op);
+        finalHarvests.push(op);
         break;
       case "thinning":
       case "first_thinning":
-        harvennukset.push(op);
+        thinnings.push(op);
         break;
       case "selection_cutting":
-        poiminta.push(op);
+        selectionCuts.push(op);
         break;
       case "early_tending":
       case "tending":
-        taimikot.push(op);
+        tendingOps.push(op);
         break;
       case "site_prep":
       case "spruce_planting":
       case "pine_planting":
       case "scalping":
-        uudist.push(op);
+        regenerationOps.push(op);
         break;
     }
   }
 
   // ── Initialize year slots ──
-  const p1: YearPlan[] = yearsP1.map((y) => ({ year: y, paate: [], harvennus: [], taimik: [], uudist: [] }));
-  const p2: YearPlan[] = yearsP2.map((y) => ({ year: y, paate: [], harvennus: [], taimik: [], uudist: [] }));
+  const p1: YearPlan[] = yearsP1.map((y) => ({ year: y, finalHarvests: [], thinnings: [], tendingOps: [], regenerationOps: [] }));
+  const p2: YearPlan[] = yearsP2.map((y) => ({ year: y, finalHarvests: [], thinnings: [], tendingOps: [], regenerationOps: [] }));
 
   const getP1 = (y: number): YearPlan => p1[yearsP1.indexOf(y)];
   const getP2 = (y: number): YearPlan => p2[yearsP2.indexOf(y)];
 
   // ── Urgency sort for final harvests ──
   function urgency(op: PlannedOperation): number {
-    const k = op.kuvio;
-    const age = k.ikä;
-    const pp = k.paapuulaji;
+    const k = op.stand;
+    const age = k.ageYears;
+    const sp = k.mainSpecies;
     const site = k.site_class;
-    const [, optMax] = getOptimalAge(pp, site);
+    const [, optMax] = getOptimalAge(sp, site);
     return -(age - optMax);
   }
-  paatehakkuut.sort((a, b) => urgency(a) - urgency(b));
+  finalHarvests.sort((a, b) => urgency(a) - urgency(b));
 
   // ── Place K7 split (3 parts) ──
-  const k7Idx = paatehakkuut.findIndex((op) => Math.abs(parseFloat(op.kuvio.numero.replace(",", ".")) - 7.0) < 0.01);
+  const k7Idx = finalHarvests.findIndex((op) => Math.abs(parseFloat(op.stand.standId.replace(",", ".")) - 7.0) < 0.01);
   if (k7Idx !== -1) {
-    const k7 = paatehakkuut.splice(k7Idx, 1)[0];
-    const k = k7.kuvio;
-    const val = k7.income_eur;
-    const m3Tot = k7.removal_m3;
-    const ala = k.ala;
+    const k7 = finalHarvests.splice(k7Idx, 1)[0];
+    const k = k7.stand;
+    const income = k7.income_eur;
+    const volumeTotal = k7.removal_m3;
+    const areaHa = k.areaHa;
 
     const parts: [number, number][] = [[2026, 0.35], [2028, 0.33], [2031, 0.32]];
     for (let partI = 0; partI < parts.length; partI++) {
       const [yr, frac] = parts[partI];
-      const sv = Math.round(val * frac);
-      const sm = Math.round(m3Tot * frac);
-      const sa = Math.round(ala * frac * 10) / 10;
-      const subK = { ...k, ala: sa };
+      const sv = Math.round(income * frac);
+      const sm = Math.round(volumeTotal * frac);
+      const sa = Math.round(areaHa * frac * 10) / 10;
+      const subK = { ...k, areaHa: sa };
 
-      getP1(yr).paate.push({
-        kuvio: subK,
+      getP1(yr).finalHarvests.push({
+        stand: subK,
         type: "clear_cut",
         year: yr,
         income_eur: sv,
@@ -97,8 +97,8 @@ export function schedulePlan(
         removal_m3: sm,
         notes: `Stand 7 part ${partI + 1}/3`,
       });
-      getP1(yr).uudist.push({
-        kuvio: subK,
+      getP1(yr).regenerationOps.push({
+        stand: subK,
         type: "site_prep",
         year: yr,
         income_eur: 0,
@@ -108,8 +108,8 @@ export function schedulePlan(
       });
       const plantYr = yr + 1;
       if (plantYr <= 2035) {
-        getP1(plantYr).uudist.push({
-          kuvio: subK,
+        getP1(plantYr).regenerationOps.push({
+          stand: subK,
           type: "spruce_planting",
           year: plantYr,
           income_eur: 0,
@@ -122,24 +122,24 @@ export function schedulePlan(
   }
 
   // ── Place K184 split (2 parts) ──
-  const k184Idx = paatehakkuut.findIndex((op) => Math.abs(parseFloat(op.kuvio.numero.replace(",", ".")) - 184.0) < 0.01);
+  const k184Idx = finalHarvests.findIndex((op) => Math.abs(parseFloat(op.stand.standId.replace(",", ".")) - 184.0) < 0.01);
   if (k184Idx !== -1) {
-    const k184 = paatehakkuut.splice(k184Idx, 1)[0];
-    const k = k184.kuvio;
-    const val = k184.income_eur;
-    const m3Tot = k184.removal_m3;
-    const ala = k.ala;
+    const k184 = finalHarvests.splice(k184Idx, 1)[0];
+    const k = k184.stand;
+    const income = k184.income_eur;
+    const volumeTotal = k184.removal_m3;
+    const areaHa = k.areaHa;
 
     const parts: [number, number][] = [[2029, 0.5], [2034, 0.5]];
     for (let partI = 0; partI < parts.length; partI++) {
       const [yr, frac] = parts[partI];
-      const sv = Math.round(val * frac);
-      const sm = Math.round(m3Tot * frac);
-      const sa = Math.round(ala * frac * 10) / 10;
-      const subK = { ...k, ala: sa };
+      const sv = Math.round(income * frac);
+      const sm = Math.round(volumeTotal * frac);
+      const sa = Math.round(areaHa * frac * 10) / 10;
+      const subK = { ...k, areaHa: sa };
 
-      getP1(yr).paate.push({
-        kuvio: subK,
+      getP1(yr).finalHarvests.push({
+        stand: subK,
         type: "clear_cut",
         year: yr,
         income_eur: sv,
@@ -147,8 +147,8 @@ export function schedulePlan(
         removal_m3: sm,
         notes: `Stand 184 part ${partI + 1}/2`,
       });
-      getP1(yr).uudist.push({
-        kuvio: subK,
+      getP1(yr).regenerationOps.push({
+        stand: subK,
         type: "site_prep",
         year: yr,
         income_eur: 0,
@@ -158,8 +158,8 @@ export function schedulePlan(
       });
       const plantYr = yr + 1;
       if (plantYr <= 2035) {
-        getP1(plantYr).uudist.push({
-          kuvio: subK,
+        getP1(plantYr).regenerationOps.push({
+          stand: subK,
           type: "pine_planting",
           year: plantYr,
           income_eur: 0,
@@ -172,22 +172,22 @@ export function schedulePlan(
   }
 
   // ── Place K180 selection cutting 2028 ──
-  if (poiminta.length > 0) {
-    const k180 = poiminta[0];
-    getP1(2028).paate.push({
+  if (selectionCuts.length > 0) {
+    const k180 = selectionCuts[0];
+    getP1(2028).finalHarvests.push({
       ...k180,
       year: 2028,
     });
   }
 
   // ── Hand-place stand 5 thinning to 2033 ──
-  const k5 = forestKuviot.find((k) => Math.abs(parseFloat(k.numero.replace(",", ".")) - 5.0) < 0.01);
+  const k5 = forestStands.find((k) => Math.abs(parseFloat(k.standId.replace(",", ".")) - 5.0) < 0.01);
   if (k5 && k5._manual_year) {
     const my = k5._manual_year;
-    const op5Idx = harvennukset.findIndex((op) => Math.abs(parseFloat(op.kuvio.numero.replace(",", ".")) - 5.0) < 0.01);
+    const op5Idx = thinnings.findIndex((op) => Math.abs(parseFloat(op.stand.standId.replace(",", ".")) - 5.0) < 0.01);
     if (op5Idx !== -1) {
-      const op5 = harvennukset.splice(op5Idx, 1)[0];
-      getP1(my).harvennus.push({
+      const op5 = thinnings.splice(op5Idx, 1)[0];
+      getP1(my).thinnings.push({
         ...op5,
         year: my,
         notes: `BA estimated ~28 (2020→2033, 13y gap). MOVED 2026→2033`,
@@ -201,16 +201,16 @@ export function schedulePlan(
 
   const p1AvailableYears = yearsP1.filter((y) => ![2026, 2028, 2029, 2031, 2034].includes(y));
 
-  const p1Remaining = paatehakkuut.slice(0, slotsForP1);
-  const p2Remaining = paatehakkuut.slice(slotsForP1);
+  const p1Remaining = finalHarvests.slice(0, slotsForP1);
+  const p2Remaining = finalHarvests.slice(slotsForP1);
 
   // ── Distribute remaining final harvests to P1 ──
   let p1YearIdx = 0;
   for (const op of p1Remaining) {
     const yr = p1AvailableYears[p1YearIdx % p1AvailableYears.length];
-    const k = op.kuvio;
-    getP1(yr).paate.push({
-      kuvio: k,
+    const k = op.stand;
+    getP1(yr).finalHarvests.push({
+      stand: k,
       type: "clear_cut",
       year: yr,
       income_eur: op.income_eur,
@@ -218,9 +218,9 @@ export function schedulePlan(
       removal_m3: op.removal_m3,
       notes: op.notes,
     });
-    const costMounding = Math.round(COSTS.site_prep * k.ala);
-    getP1(yr).uudist.push({
-      kuvio: k,
+    const costMounding = Math.round(COSTS.site_prep * k.areaHa);
+    getP1(yr).regenerationOps.push({
+      stand: k,
       type: "site_prep",
       year: yr,
       income_eur: 0,
@@ -232,9 +232,9 @@ export function schedulePlan(
     if (plantYr <= 2035) {
       const isMoist = k.site_class.includes("tuore") || k.site_class.includes("lehto");
       const plantType = isMoist ? "spruce_planting" : "pine_planting";
-      const plantCost = Math.round(COSTS[plantType] * k.ala);
-      getP1(plantYr).uudist.push({
-        kuvio: k,
+      const plantCost = Math.round(COSTS[plantType] * k.areaHa);
+      getP1(plantYr).regenerationOps.push({
+        stand: k,
         type: plantType,
         year: plantYr,
         income_eur: 0,
@@ -251,24 +251,24 @@ export function schedulePlan(
   let p2YearIdx = 0;
   for (const op of p2Remaining) {
     const yr = p2Interleaved[p2YearIdx % p2Interleaved.length];
-    const k = op.kuvio;
+    const k = op.stand;
     const yearsFromNow = yr - startYear;
-    const ageAtYr = k.ikä + yearsFromNow;
-    const m3Grown = k.m3 + k.annual_growth * yearsFromNow;
-    const arvoGrown = k.m3 > 0 ? Math.round(op.income_eur * (m3Grown / k.m3)) : 0;
+    const ageAtYr = k.ageYears + yearsFromNow;
+    const m3Grown = k.volumeM3 + k.annual_growth * yearsFromNow;
+    const valueGrown = k.volumeM3 > 0 ? Math.round(op.income_eur * (m3Grown / k.volumeM3)) : 0;
 
-    getP2(yr).paate.push({
-      kuvio: k,
+    getP2(yr).finalHarvests.push({
+      stand: k,
       type: "clear_cut",
       year: yr,
-      income_eur: arvoGrown,
+      income_eur: valueGrown,
       cost_eur: 0,
       removal_m3: Math.round(m3Grown),
       notes: `Extended period, projected age ${ageAtYr.toFixed(0)}y`,
     });
-    const costMounding = Math.round(COSTS.site_prep * k.ala);
-    getP2(yr).uudist.push({
-      kuvio: k,
+    const costMounding = Math.round(COSTS.site_prep * k.areaHa);
+    getP2(yr).regenerationOps.push({
+      stand: k,
       type: "site_prep",
       year: yr,
       income_eur: 0,
@@ -280,9 +280,9 @@ export function schedulePlan(
     if (plantYr <= yearsP2[yearsP2.length - 1]) {
       const isMoist = k.site_class.includes("tuore") || k.site_class.includes("lehto");
       const plantType = isMoist ? "spruce_planting" : "pine_planting";
-      const plantCost = Math.round(COSTS[plantType] * k.ala);
-      getP2(plantYr).uudist.push({
-        kuvio: k,
+      const plantCost = Math.round(COSTS[plantType] * k.areaHa);
+      getP2(plantYr).regenerationOps.push({
+        stand: k,
         type: plantType,
         year: plantYr,
         income_eur: 0,
@@ -301,21 +301,21 @@ export function schedulePlan(
       harvYearsPool.push(y);
     }
   }
-  const trimmedPool = harvYearsPool.slice(0, harvennukset.length);
+  const trimmedPool = harvYearsPool.slice(0, thinnings.length);
 
-  for (let i = 0; i < harvennukset.length; i++) {
-    const op = harvennukset[i];
+  for (let i = 0; i < thinnings.length; i++) {
+    const op = thinnings[i];
     const yr = trimmedPool[i];
-    getP1(yr).harvennus.push({
+    getP1(yr).thinnings.push({
       ...op,
       year: yr,
     });
   }
 
-  // ── Schedule taimikonhoidot ──
-  for (const op of taimikot) {
-    const k = op.kuvio;
-    const age = k.ikä;
+  // ── Schedule tending operations ──
+  for (const op of tendingOps) {
+    const k = op.stand;
+    const age = k.ageYears;
     let target: number | null = null;
 
     if (op.type === "early_tending") {
@@ -323,33 +323,33 @@ export function schedulePlan(
       else if (age <= 12) target = startYear;
       else continue;
     } else {
-      // Taimikonhoito
+      // Tending
       if (age < 10) target = startYear + Math.floor(10 - age);
       else if (age <= 25) target = startYear + Math.min(3, Math.floor(25 - age));
       else continue;
     }
 
     if (target !== null && target <= yearsP1[yearsP1.length - 1]) {
-      getP1(target).taimik.push({
+      getP1(target).tendingOps.push({
         ...op,
         year: target,
       });
     }
   }
 
-  // ── Future taimikonhoito for young saplings in P2 ──
-  for (const k of forestKuviot) {
-    const kl = k.kehitysluokka;
-    const age = k.ikä;
-    if (kl.includes("seedling") && age < 3) {
+  // ── Future tending for young saplings in P2 ──
+  for (const k of forestStands) {
+    const devClass = k.developmentClass;
+    const age = k.ageYears;
+    if (devClass.includes("seedling") && age < 3) {
       const target = startYear + Math.floor(10 - age);
       if (target >= yearsP2[0] && target <= yearsP2[yearsP2.length - 1]) {
-        getP2(target).taimik.push({
-          kuvio: k,
+        getP2(target).tendingOps.push({
+          stand: k,
           type: "tending",
           year: target,
           income_eur: 0,
-          cost_eur: Math.round(COSTS.tending * k.ala),
+          cost_eur: Math.round(COSTS.tending * k.areaHa),
           removal_m3: 0,
           notes: "Projected",
         });
@@ -361,32 +361,32 @@ export function schedulePlan(
   interface K2Candidate {
     urgencyScore: number;
     targetYr: number;
-    k: KuviotData;
+    k: StandData;
   }
   const k2Candidates: K2Candidate[] = [];
 
-  for (const k of forestKuviot) {
-    const kl = k.kehitysluokka;
-    const pp = k.paapuulaji;
+  for (const k of forestStands) {
+    const devClass = k.developmentClass;
+    const sp = k.mainSpecies;
     const site = k.site_class;
-    const age = k.ikä;
-    const knum = parseFloat(k.numero.replace(",", "."));
+    const age = k.ageYears;
+    const standNum = parseFloat(k.standId.replace(",", "."));
 
     // Skip already scheduled or special
     const alreadyScheduled = p1.some((yp) =>
-      [...yp.paate, ...yp.harvennus, ...yp.taimik, ...yp.uudist].some((op) => op.kuvio === k && op.type === "clear_cut")
+      [...yp.finalHarvests, ...yp.thinnings, ...yp.tendingOps, ...yp.regenerationOps].some((op) => op.stand === k && op.type === "clear_cut")
     );
     if (alreadyScheduled) continue;
-    if (Math.abs(knum - 180.0) < 0.01 || Math.abs(knum - 128.0) < 0.01) continue;
-    if (Math.abs(knum - 71.0) < 0.01 || Math.abs(knum - 72.0) < 0.01) continue;
+    if (Math.abs(standNum - 180.0) < 0.01 || Math.abs(standNum - 128.0) < 0.01) continue;
+    if (Math.abs(standNum - 71.0) < 0.01 || Math.abs(standNum - 72.0) < 0.01) continue;
 
-    const [optMin] = getOptimalAge(pp, site);
+    const [optMin] = getOptimalAge(sp, site);
 
-    if (kl.includes("regeneration_ready") || (kl.includes("mature_thinning") && age + (yearsP2[0] - startYear) >= optMin)) {
+    if (devClass.includes("regeneration_ready") || (devClass.includes("mature_thinning") && age + (yearsP2[0] - startYear) >= optMin)) {
       const yearsToOpt = Math.max(0, optMin - age);
       const targetYr = startYear + Math.floor(yearsToOpt);
       if (targetYr <= yearsP2[yearsP2.length - 1] && targetYr >= yearsP2[0]) {
-        const [, optMax] = getOptimalAge(pp, site);
+        const [, optMax] = getOptimalAge(sp, site);
         const urgencyScore = age - optMax;
         k2Candidates.push({ urgencyScore, targetYr, k });
       }
@@ -400,10 +400,10 @@ export function schedulePlan(
   let k2Idx = 0;
 
   for (const { k } of k2Candidates) {
-    const ala = k.ala;
-    const m3 = k.m3;
-    const arvo = k.arvo;
-    const age = k.ikä;
+    const areaHa = k.areaHa;
+    const volumeM3 = k.volumeM3;
+    const valueEur = k.valueEur;
+    const age = k.ageYears;
     const site = k.site_class;
 
     const spreadYr = k2AllYears[k2Idx % k2AllYears.length];
@@ -411,21 +411,21 @@ export function schedulePlan(
 
     const yearsFromNow = spreadYr - startYear;
     const ageAtTarget = age + yearsFromNow;
-    const m3Grown = m3 + k.annual_growth * yearsFromNow;
-    const arvoGrown = m3 > 0 ? Math.round(arvo * (m3Grown / m3)) : 0;
+    const m3Grown = volumeM3 + k.annual_growth * yearsFromNow;
+    const valueGrown = volumeM3 > 0 ? Math.round(valueEur * (m3Grown / volumeM3)) : 0;
 
-    getP2(spreadYr).paate.push({
-      kuvio: k,
+    getP2(spreadYr).finalHarvests.push({
+      stand: k,
       type: "clear_cut",
       year: spreadYr,
-      income_eur: arvoGrown,
+      income_eur: valueGrown,
       cost_eur: 0,
       removal_m3: Math.round(m3Grown),
       notes: `Matures in period 2, age ${ageAtTarget.toFixed(0)}y`,
     });
-    const costMounding = Math.round(COSTS.site_prep * ala);
-    getP2(spreadYr).uudist.push({
-      kuvio: k,
+    const costMounding = Math.round(COSTS.site_prep * areaHa);
+    getP2(spreadYr).regenerationOps.push({
+      stand: k,
       type: "site_prep",
       year: spreadYr,
       income_eur: 0,
@@ -437,9 +437,9 @@ export function schedulePlan(
     if (plantYr <= yearsP2[yearsP2.length - 1]) {
       const isMoist = site.includes("tuore") || site.includes("lehto");
       const plantType = isMoist ? "spruce_planting" : "pine_planting";
-      const plantCost = Math.round(COSTS[plantType] * ala);
-      getP2(plantYr).uudist.push({
-        kuvio: k,
+      const plantCost = Math.round(COSTS[plantType] * areaHa);
+      getP2(plantYr).regenerationOps.push({
+        stand: k,
         type: plantType,
         year: plantYr,
         income_eur: 0,
@@ -456,10 +456,10 @@ export function schedulePlan(
     let cost = 0;
     let harvest = 0;
     for (const yp of period) {
-      for (const op of yp.paate) { income += op.income_eur; harvest += op.removal_m3; }
-      for (const op of yp.harvennus) { income += op.income_eur; harvest += op.removal_m3; }
-      for (const op of yp.uudist) { cost += op.cost_eur; }
-      for (const op of yp.taimik) { cost += op.cost_eur; }
+      for (const op of yp.finalHarvests) { income += op.income_eur; harvest += op.removal_m3; }
+      for (const op of yp.thinnings) { income += op.income_eur; harvest += op.removal_m3; }
+      for (const op of yp.regenerationOps) { cost += op.cost_eur; }
+      for (const op of yp.tendingOps) { cost += op.cost_eur; }
     }
     return { income, cost, harvest };
   }
@@ -467,9 +467,9 @@ export function schedulePlan(
   const p1Stats = calcPeriodStats(p1);
   const p2Stats = calcPeriodStats(p2);
 
-  const totalGrowth = forestKuviot.reduce((s, k) => s + k.annual_growth, 0);
-  const totalVolume = forestKuviot.reduce((s, k) => s + k.m3, 0);
-  const totalValue = forestKuviot.reduce((s, k) => s + k.arvo, 0);
+  const totalGrowth = forestStands.reduce((s, k) => s + k.annual_growth, 0);
+  const totalVolume = forestStands.reduce((s, k) => s + k.volumeM3, 0);
+  const totalValue = forestStands.reduce((s, k) => s + k.valueEur, 0);
 
   const p1AvgHarvest = p1Stats.harvest / yearsP1.length;
   const p2AvgHarvest = p2Stats.harvest / yearsP2.length;

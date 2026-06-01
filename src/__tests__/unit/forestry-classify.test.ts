@@ -34,11 +34,11 @@ describe("classifyAndValueStands", () => {
       makeCompartment({ stand_id: "2", development_class: "mature_thinning" }),
     ];
     const result = classifyAndValueStands(compartments);
-    expect(result.forestKuviot.length).toBe(1);
-    expect(result.forestKuviot[0].numero).toBe("2");
+    expect(result.forestStands.length).toBe(1);
+    expect(result.forestStands[0].standId).toBe("2");
   });
 
-  it("classifies regeneration_ready as päätehakkuu", () => {
+  it("classifies regeneration_ready as final harvest", () => {
     const compartments = [
       makeCompartment({ stand_id: "3", development_class: "regeneration_ready", age_years: 85 }),
     ];
@@ -74,7 +74,7 @@ describe("classifyAndValueStands", () => {
       makeCompartment({ stand_id: "5", site_type: "herb-rich heath" }),
     ];
     const result = classifyAndValueStands(compartments);
-    expect(result.forestKuviot[0].site_class).toBe("lehtomainen");
+    expect(result.forestStands[0].site_class).toBe("lehtomainen");
   });
 
   it("classifies seedling as early tending", () => {
@@ -95,6 +95,6 @@ describe("classifyAndValueStands", () => {
     ];
     const result = classifyAndValueStands(compartments);
     // Value should be positive — based on timber prices
-    expect(result.forestKuviot[0].arvo).toBeGreaterThan(0);
+    expect(result.forestStands[0].valueEur).toBeGreaterThan(0);
   });
 });

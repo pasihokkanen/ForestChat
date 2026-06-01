@@ -5,8 +5,8 @@ import {
   OPTIMAL_AGES,
   getOptimalAge,
   THINNING_BA,
-  MIN_AGE_ENSIHARVENNUS,
-  MIN_AGE_HARVENNUS,
+  MIN_AGE_FIRST_THINNING,
+  MIN_AGE_THINNING,
   COSTS,
   GROWTH_MINERAL,
   GROWTH_PEATLAND,
@@ -52,15 +52,15 @@ describe("Forestry Config", () => {
     expect(THINNING_BA.ensiharvennus.spruce).toBe(24);
   });
 
-  it("MIN_AGE_ENSIHARVENNUS has correct values", () => {
-    expect(MIN_AGE_ENSIHARVENNUS.pine).toBe(30);
-    expect(MIN_AGE_ENSIHARVENNUS.spruce).toBe(25);
-    expect(MIN_AGE_ENSIHARVENNUS.downy_birch).toBe(20);
+  it("MIN_AGE_FIRST_THINNING has correct values", () => {
+    expect(MIN_AGE_FIRST_THINNING.pine).toBe(30);
+    expect(MIN_AGE_FIRST_THINNING.spruce).toBe(25);
+    expect(MIN_AGE_FIRST_THINNING.downy_birch).toBe(20);
   });
 
-  it("MIN_AGE_HARVENNUS has correct values", () => {
-    expect(MIN_AGE_HARVENNUS.pine).toBe(45);
-    expect(MIN_AGE_HARVENNUS.spruce).toBe(40);
+  it("MIN_AGE_THINNING has correct values", () => {
+    expect(MIN_AGE_THINNING.pine).toBe(45);
+    expect(MIN_AGE_THINNING.spruce).toBe(40);
   });
 
   it("COSTS has all silvicultural operations", () => {
