@@ -5,6 +5,7 @@ import {
   DEVELOPMENTCLASS_MAP,
   mapWfsCode,
   mapWfsNumericCode,
+  mapSoilType,
 } from "./code-tables";
 import { reproject3067to4326 } from "./mml-client";
 
@@ -122,7 +123,7 @@ export async function fetchStandsByBbox(
       mainSpecies: mapWfsNumericCode(MAINGROUP_MAP, p.MAINGROUP),
       developmentClass: mapWfsCode(DEVELOPMENTCLASS_MAP, p.DEVELOPMENTCLASS),
       siteType: mapWfsNumericCode(FERTILITYCLASS_MAP, p.FERTILITYCLASS),
-      soilType: p.SOILTYPE != null ? String(p.SOILTYPE) : null,
+      soilType: mapSoilType(p.SOILTYPE),
       drainageStatus:
         p.DRAINAGESTATE != null ? String(p.DRAINAGESTATE) : null,
       ageYears: p.MEANAGE ?? null,

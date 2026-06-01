@@ -31,12 +31,12 @@ function normalizeType(type: string): string {
 // ── Species & site maps (reused from query-tools for batch_update filtering) ──
 
 const SPECIES_MAP: Record<string, string> = {
-  mänty: "Mänty", pine: "Mänty",
-  kuusi: "Kuusi", spruce: "Kuusi",
-  rauduskoivu: "Rauduskoivu", birch: "Rauduskoivu", koivu: "Rauduskoivu",
-  hieskoivu: "Hieskoivu",
-  lehtikuusi: "Lehtikuusi", larch: "Lehtikuusi",
-  harmaaleppä: "Harmaaleppä", alder: "Harmaaleppä",
+  mänty: "pine", pine: "pine",
+  kuusi: "spruce", spruce: "spruce",
+  rauduskoivu: "silver_birch", birch: "silver_birch", koivu: "silver_birch",
+  hieskoivu: "downy_birch",
+  lehtikuusi: "larch", larch: "larch",
+  harmaaleppä: "grey_alder", alder: "grey_alder",
 };
 
 const SITE_MAP: Record<string, string> = {

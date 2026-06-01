@@ -9,58 +9,58 @@ interface PriceSet {
 // Three tiers: uudistushakkuu, harvennus, ensiharvennus
 export const PRICES: Record<string, Record<string, PriceSet>> = {
   uudistushakkuu: {
-    Mänty:      { tukki: 78.99, kuitu: 25.28 },
-    Kuusi:      { tukki: 82.52, kuitu: 26.36 },
-    Rauduskoivu:{ tukki: 61.76, kuitu: 25.79 },
-    Hieskoivu:  { tukki: 53.73, kuitu: 21.58 },
-    Lehtikuusi: { tukki: 58.00, kuitu: 20.00 },
-    Harmaaleppä:{ tukki: 15.00, kuitu: 12.00 },
+    pine:        { tukki: 78.99, kuitu: 25.28 },
+    spruce:      { tukki: 82.52, kuitu: 26.36 },
+    silver_birch:{ tukki: 61.76, kuitu: 25.79 },
+    downy_birch: { tukki: 53.73, kuitu: 21.58 },
+    larch:       { tukki: 58.00, kuitu: 20.00 },
+    grey_alder:  { tukki: 15.00, kuitu: 12.00 },
   },
   harvennus: {
-    Mänty:      { tukki: 68.66, kuitu: 20.44 },
-    Kuusi:      { tukki: 70.32, kuitu: 20.78 },
-    Rauduskoivu:{ tukki: 53.73, kuitu: 21.58 },
-    Hieskoivu:  { tukki: 50.00, kuitu: 18.00 },
-    Lehtikuusi: { tukki: 52.00, kuitu: 18.00 },
-    Harmaaleppä:{ tukki: 12.00, kuitu: 10.00 },
+    pine:        { tukki: 68.66, kuitu: 20.44 },
+    spruce:      { tukki: 70.32, kuitu: 20.78 },
+    silver_birch:{ tukki: 53.73, kuitu: 21.58 },
+    downy_birch: { tukki: 50.00, kuitu: 18.00 },
+    larch:       { tukki: 52.00, kuitu: 18.00 },
+    grey_alder:  { tukki: 12.00, kuitu: 10.00 },
   },
   ensiharvennus: {
-    Mänty:      { tukki: 50.93, kuitu: 15.96 },
-    Kuusi:      { tukki: 48.20, kuitu: 17.01 },
-    Rauduskoivu:{ tukki: 37.83, kuitu: 16.20 },
-    Hieskoivu:  { tukki: 35.00, kuitu: 14.00 },
-    Lehtikuusi: { tukki: 40.00, kuitu: 14.00 },
-    Harmaaleppä:{ tukki: 10.00, kuitu: 8.00 },
+    pine:        { tukki: 50.93, kuitu: 15.96 },
+    spruce:      { tukki: 48.20, kuitu: 17.01 },
+    silver_birch:{ tukki: 37.83, kuitu: 16.20 },
+    downy_birch: { tukki: 35.00, kuitu: 14.00 },
+    larch:       { tukki: 40.00, kuitu: 14.00 },
+    grey_alder:  { tukki: 10.00, kuitu: 8.00 },
   },
 };
 
 export function getPrices(tier: string, species: string): { tukki: number; kuitu: number } {
-  const key = species === "Koivu" ? "Rauduskoivu" : species;
-  return (PRICES[tier]?.[key] ?? PRICES[tier]?.Mänty ?? { tukki: 70, kuitu: 20 }) as { tukki: number; kuitu: number };
+  const key = species === "birch" ? "silver_birch" : species;
+  return (PRICES[tier]?.[key] ?? PRICES[tier]?.pine ?? { tukki: 70, kuitu: 20 }) as { tukki: number; kuitu: number };
 }
 
 // ─── Optimal rotation ages (Väli-Suomi, ~62-63°N) ───
 // [min, max]
 export const OPTIMAL_AGES: Record<string, Record<string, [number, number]>> = {
-  Mänty:      { lehtomainen: [55, 70], tuore: [65, 90], kuivahko: [75, 100], kuiva: [90, 120] },
-  Kuusi:      { lehtomainen: [50, 65], tuore: [60, 80], kuivahko: [65, 85] },
-  Hieskoivu:  { tuore: [45, 65], kuivahko: [50, 70] },
-  Rauduskoivu:{ lehtomainen: [45, 60], tuore: [50, 65] },
+  pine:        { lehtomainen: [55, 70], tuore: [65, 90], kuivahko: [75, 100], kuiva: [90, 120] },
+  spruce:      { lehtomainen: [50, 65], tuore: [60, 80], kuivahko: [65, 85] },
+  downy_birch: { tuore: [45, 65], kuivahko: [50, 70] },
+  silver_birch:{ lehtomainen: [45, 60], tuore: [50, 65] },
 };
 
 export function getOptimalAge(species: string, site: string): [number, number] {
-  const sp = species === "Koivu" ? "Rauduskoivu" : species;
+  const sp = species === "birch" ? "silver_birch" : species;
   return OPTIMAL_AGES[sp]?.[site] ?? [65, 90];
 }
 
 // ─── Thinning thresholds ───
 export const THINNING_BA: Record<string, Record<string, number>> = {
-  ensiharvennus: { Mänty: 16, Kuusi: 24, Hieskoivu: 16, Rauduskoivu: 16, Lehtikuusi: 18, Harmaaleppä: 16 },
-  harvennus:     { Mänty: 20, Kuusi: 26, Hieskoivu: 18, Rauduskoivu: 18, Lehtikuusi: 20, Harmaaleppä: 18 },
+  ensiharvennus: { pine: 16, spruce: 24, downy_birch: 16, silver_birch: 16, larch: 18, grey_alder: 16 },
+  harvennus:     { pine: 20, spruce: 26, downy_birch: 18, silver_birch: 18, larch: 20, grey_alder: 18 },
 };
 
-export const MIN_AGE_ENSIHARVENNUS: Record<string, number> = { Mänty: 30, Kuusi: 25, Hieskoivu: 20, Rauduskoivu: 20, Lehtikuusi: 25, Harmaaleppä: 20 };
-export const MIN_AGE_HARVENNUS: Record<string, number> =  { Mänty: 45, Kuusi: 40, Hieskoivu: 35, Rauduskoivu: 35, Lehtikuusi: 40, Harmaaleppä: 35 };
+export const MIN_AGE_ENSIHARVENNUS: Record<string, number> = { pine: 30, spruce: 25, downy_birch: 20, silver_birch: 20, larch: 25, grey_alder: 20 };
+export const MIN_AGE_HARVENNUS: Record<string, number> =  { pine: 45, spruce: 40, downy_birch: 35, silver_birch: 35, larch: 40, grey_alder: 35 };
 
 // ─── Operation type display names (system value → English display) ───
 // Used for chart legends, tooltips, and any user-facing display of operation types.
@@ -168,7 +168,7 @@ export function detectPeatland(
   maaluokka: string,
   ojitustilanne: string
 ): boolean {
-  const isPeat = ["turve", "räme", "suo", "korpi"].some(
+  const isPeat = ["turve", "räme", "suo", "korpi", "peat", "mire", "bog"].some(
     (t) => maalaji.toLowerCase().includes(t) ||
           kasvupaikka.toLowerCase().includes(t) ||
           maaluokka.toLowerCase().includes(t)

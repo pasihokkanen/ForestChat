@@ -95,7 +95,7 @@ Returns: operations per stand, key metrics.`,
       type: "function",
       function: {
         name: "query_operations",
-        description: "Search planned operations by any combination of criteria. Returns each operation with full stand data (species, age, development class, etc.) via a single JOINed query. All parameters optional — omit years to search all years. Filter values in Finnish OR English — auto-translated. The fields parameter limits database columns AND response text for efficiency.",
+        description: "Search planned operations by any combination of criteria. Returns each operation with full stand data (species, age, development class, etc.) via a single JOINed query. All parameters optional — omit years to search all years. The fields parameter limits database columns AND response text for efficiency.",
         parameters: {
           type: "object",
           properties: {

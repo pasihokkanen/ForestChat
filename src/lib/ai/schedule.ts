@@ -60,7 +60,7 @@ export function schedulePlan(
   const getP1 = (y: number): YearPlan => p1[yearsP1.indexOf(y)];
   const getP2 = (y: number): YearPlan => p2[yearsP2.indexOf(y)];
 
-  // ── Urgency sort for päätehakkuut ──
+  // ── Urgency sort for final harvests ──
   function urgency(op: PlannedOperation): number {
     const k = op.kuvio;
     const age = k.ikä;
@@ -95,7 +95,7 @@ export function schedulePlan(
         income_eur: sv,
         cost_eur: 0,
         removal_m3: sm,
-        notes: `Kuvio 7 osa ${partI + 1}/3`,
+        notes: `Stand 7 part ${partI + 1}/3`,
       });
       getP1(yr).uudist.push({
         kuvio: subK,
@@ -115,7 +115,7 @@ export function schedulePlan(
           income_eur: 0,
           cost_eur: Math.round(COSTS.spruce_planting * sa),
           removal_m3: 0,
-          notes: `Istutus osa ${partI + 1}`,
+          notes: `Planting part ${partI + 1}`,
         });
       }
     }
@@ -145,7 +145,7 @@ export function schedulePlan(
         income_eur: sv,
         cost_eur: 0,
         removal_m3: sm,
-        notes: `Kuvio 184 osa ${partI + 1}/2`,
+        notes: `Stand 184 part ${partI + 1}/2`,
       });
       getP1(yr).uudist.push({
         kuvio: subK,
@@ -165,13 +165,13 @@ export function schedulePlan(
           income_eur: 0,
           cost_eur: Math.round(COSTS.pine_planting * sa),
           removal_m3: 0,
-          notes: `Istutus osa ${partI + 1}`,
+          notes: `Planting part ${partI + 1}`,
         });
       }
     }
   }
 
-  // ── Place K180 poimintahakkuu 2028 ──
+  // ── Place K180 selection cutting 2028 ──
   if (poiminta.length > 0) {
     const k180 = poiminta[0];
     getP1(2028).paate.push({
@@ -180,7 +180,7 @@ export function schedulePlan(
     });
   }
 
-  // ── Hand-place kuvio 5 harvennus to 2033 ──
+  // ── Hand-place stand 5 thinning to 2033 ──
   const k5 = forestKuviot.find((k) => Math.abs(parseFloat(k.numero.replace(",", ".")) - 5.0) < 0.01);
   if (k5 && k5._manual_year) {
     const my = k5._manual_year;
@@ -190,7 +190,7 @@ export function schedulePlan(
       getP1(my).harvennus.push({
         ...op5,
         year: my,
-        notes: `BA arviolta ~28 (2020→2033, 13v väli). SIIRRETTY 2026→2033`,
+        notes: `BA estimated ~28 (2020→2033, 13y gap). MOVED 2026→2033`,
       });
     }
   }
@@ -204,7 +204,7 @@ export function schedulePlan(
   const p1Remaining = paatehakkuut.slice(0, slotsForP1);
   const p2Remaining = paatehakkuut.slice(slotsForP1);
 
-  // ── Distribute remaining päätehakkuut to P1 ──
+  // ── Distribute remaining final harvests to P1 ──
   let p1YearIdx = 0;
   for (const op of p1Remaining) {
     const yr = p1AvailableYears[p1YearIdx % p1AvailableYears.length];
@@ -264,7 +264,7 @@ export function schedulePlan(
       income_eur: arvoGrown,
       cost_eur: 0,
       removal_m3: Math.round(m3Grown),
-      notes: `Jatkokausi, projisoitu ikä ${ageAtYr.toFixed(0)}v`,
+      notes: `Extended period, projected age ${ageAtYr.toFixed(0)}y`,
     });
     const costMounding = Math.round(COSTS.site_prep * k.ala);
     getP2(yr).uudist.push({
@@ -294,7 +294,7 @@ export function schedulePlan(
     p2YearIdx++;
   }
 
-  // ── Distribute harvennukset evenly (excluding kuvio 5, already removed) ──
+  // ── Distribute thinnings evenly (excluding stand 5, already removed) ──
   const harvYearsPool: number[] = [];
   for (const y of yearsP1) {
     for (let i = 0; i < 5; i++) {
@@ -351,7 +351,7 @@ export function schedulePlan(
           income_eur: 0,
           cost_eur: Math.round(COSTS.tending * k.ala),
           removal_m3: 0,
-          notes: "Projisoitu",
+          notes: "Projected",
         });
       }
     }
@@ -421,7 +421,7 @@ export function schedulePlan(
       income_eur: arvoGrown,
       cost_eur: 0,
       removal_m3: Math.round(m3Grown),
-      notes: `Kypsyy kaudella 2, ikä ${ageAtTarget.toFixed(0)}v`,
+      notes: `Matures in period 2, age ${ageAtTarget.toFixed(0)}y`,
     });
     const costMounding = Math.round(COSTS.site_prep * ala);
     getP2(spreadYr).uudist.push({

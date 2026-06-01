@@ -88,7 +88,7 @@ function calculateValue(k: KuviotData, species: RawSpecies[]): {
   if (species.length > 0) {
     for (const sp of species) {
       const spKey = sp.species === "birch" ? "silver_birch" : sp.species;
-      const spPrices = PRICES["uudistushakkuu"]?.[spKey] ?? PRICES["uudistushakkuu"]?.["Mänty"] ?? { tukki: 70, kuitu: 20 };
+      const spPrices = PRICES["uudistushakkuu"]?.[spKey] ?? PRICES["uudistushakkuu"]?.["pine"] ?? { tukki: 70, kuitu: 20 };
       const tukkiM3 = sp.m3 * sp.log_pct / 100;
       const kuituM3 = sp.m3 - tukkiM3;
       totalTukki += tukkiM3;
@@ -98,8 +98,8 @@ function calculateValue(k: KuviotData, species: RawSpecies[]): {
   } else {
     // Fallback: use aggregate volume and main species prices
     const pp = k.paapuulaji;
-    const priceKey = pp === "Koivu" ? "Rauduskoivu" : pp;
-    const prices = PRICES["uudistushakkuu"]?.[priceKey] ?? PRICES["uudistushakkuu"]?.["Mänty"] ?? { tukki: 70, kuitu: 20 };
+    const priceKey = pp === "birch" ? "silver_birch" : pp;
+    const prices = PRICES["uudistushakkuu"]?.[priceKey] ?? PRICES["uudistushakkuu"]?.["pine"] ?? { tukki: 70, kuitu: 20 };
     const tukkiM3 = k.m3 * 0.6; // assume ~60% tukki if no species breakdown
     const kuituM3 = k.m3 - tukkiM3;
     totalTukki = tukkiM3;
@@ -172,7 +172,7 @@ export function classifyAndValueStands(
     forestKuviot.push(k);
   }
 
-  // ── Classify each kuvio (determine operations) ──
+  // ── Classify each stand (determine operations) ──
   for (const k of forestKuviot) {
     const y = { m3: k.m3, ika: k.ikä, ba: k.ba };
     const pp = k.paapuulaji;
@@ -196,14 +196,14 @@ export function classifyAndValueStands(
         income_eur: Math.round(arvo * 0.5),
         cost_eur: 0,
         removal_m3: Math.round(m3 * 0.5),
-        notes: "Maisemallinen poimintahakkuu 50%",
+        notes: "Scenic selection cutting 50%",
       });
       continue;
     }
 
-    // K128: labeled uudistuskypsä but only 57v → harvennus, NOT final harvest
+    // K128: labeled regeneration_ready but only 57y → thinning, NOT final harvest
     if (Math.abs(knum - 128.0) < 0.01) {
-      const priceKey = pp === "Koivu" ? "Rauduskoivu" : pp;
+      const priceKey = pp === "birch" ? "silver_birch" : pp;
       const hp = getPrices("harvennus", priceKey);
       const up = getPrices("uudistushakkuu", priceKey);
       const ratio = (hp.tukki + hp.kuitu) / (up.tukki + up.kuitu);
@@ -216,7 +216,7 @@ export function classifyAndValueStands(
         income_eur: income,
         cost_eur: 0,
         removal_m3: Math.round(removal),
-        notes: "EI päätehakkuu – 57 v liian nuori. Voimakas harvennus 30%",
+        notes: "NOT final harvest – 57y too young. Heavy thinning 30%",
       });
       continue;
     }
@@ -226,9 +226,9 @@ export function classifyAndValueStands(
       continue;
     }
 
-    // Kuvio 5: siirretään harvennus myöhemmäksi (2033)
+    // Stand 5: delay thinning to later (2033)
     if (Math.abs(knum - 5.0) < 0.01) {
-      const priceKey = pp === "Koivu" ? "Rauduskoivu" : pp;
+      const priceKey = pp === "birch" ? "silver_birch" : pp;
       const hp = getPrices("harvennus", priceKey);
       const up = getPrices("uudistushakkuu", priceKey);
       const ratio = (hp.tukki + hp.kuitu) / (up.tukki + up.kuitu);
@@ -245,7 +245,7 @@ export function classifyAndValueStands(
         income_eur: income,
         cost_eur: 0,
         removal_m3: removal,
-        notes: `BA=${ba.toFixed(0)}, ikä ${age.toFixed(0)}v → SIIRRETTY 2026→2033 (ed. harvennus 2020, väli 13v)`,
+        notes: `BA=${ba.toFixed(0)}, age ${age.toFixed(0)}y → MOVED 2026→2033 (prev. thinning 2020, gap 13y)`,
       });
       // Mark for manual placement in schedule
       k._manual_year = 2033;
@@ -255,7 +255,7 @@ export function classifyAndValueStands(
       continue;
     }
 
-    // === REGENERATION_READY → PÄÄTEHAKKUU ===
+    // === REGENERATION_READY → FINAL HARVEST ===
     if (kl.includes("regeneration_ready")) {
       const [optMin, optMax] = getOptimalAge(pp, site);
       operations.push({
@@ -265,12 +265,12 @@ export function classifyAndValueStands(
         income_eur: arvo,
         cost_eur: 0,
         removal_m3: Math.round(m3),
-        notes: `Ikä ${age.toFixed(0)}v [${optMin}-${optMax}v]`,
+        notes: `Age ${age.toFixed(0)}y [${optMin}-${optMax}y]`,
       });
       continue;
     }
 
-    // === SIEMENPUUMETSIKKÖ → UUDISTAMINEN ===
+    // === SHELTERWOOD → REGENERATION ===
     if (kl.includes("shelterwood")) {
       operations.push({
         kuvio: k,
@@ -279,7 +279,7 @@ export function classifyAndValueStands(
         income_eur: 0,
         cost_eur: Math.round(COSTS.site_prep * ala),
         removal_m3: 0,
-        notes: "Uudistaminen",
+        notes: "Regeneration",
       });
       operations.push({
         kuvio: k,
@@ -293,7 +293,7 @@ export function classifyAndValueStands(
       continue;
     }
 
-    // === AUKEA → UUDISTAMINEN (jos ei puita) ===
+    // === OPEN_AREA → REGENERATION (if no trees) ===
     if (kl.includes("open_area") && m3 < 5) {
       operations.push({
         kuvio: k,
@@ -302,7 +302,7 @@ export function classifyAndValueStands(
         income_eur: 0,
         cost_eur: Math.round(COSTS.site_prep * ala),
         removal_m3: 0,
-        notes: "Uudistaminen",
+        notes: "Regeneration",
       });
       const opsSpecies = site.includes("tuore") || site.includes("lehto") ? "spruce" : "pine";
       const plantType = `${opsSpecies}_planting`;
@@ -319,7 +319,7 @@ export function classifyAndValueStands(
       continue;
     }
 
-    // === TAIMIKKO / SEEDLING (alle 1,3 m) ===
+    // === SEEDLING_SMALL (under 1.3m) ===
     if (kl.includes("seedling") && age >= 3 && age <= 12) {
         operations.push({
           kuvio: k,
@@ -328,12 +328,12 @@ export function classifyAndValueStands(
           income_eur: 0,
           cost_eur: Math.round(COSTS.early_tending * ala),
           removal_m3: 0,
-          notes: `Ikä ${age.toFixed(0)}v`,
+          notes: `Age ${age.toFixed(0)}y`,
         });
       continue;
     }
 
-    // === TAIMIKKO / SEEDLING (yli 1,3 m) ===
+    // === SEEDLING_LARGE (over 1.3m) ===
     if (kl.includes("seedling") && age >= 10 && age <= 25) {
         operations.push({
           kuvio: k,
@@ -342,17 +342,17 @@ export function classifyAndValueStands(
           income_eur: 0,
         cost_eur: Math.round(COSTS.tending * ala),
           removal_m3: 0,
-          notes: `Ikä ${age.toFixed(0)}v`,
+          notes: `Age ${age.toFixed(0)}y`,
         });
       continue;
     }
 
-    // === YOUNG_THINNING → ENSIHARVENNUS ===
+    // === YOUNG_THINNING → FIRST THINNING ===
     if (kl.includes("young_thinning")) {
       const thresh = THINNING_BA["ensiharvennus"]?.[pp] ?? 18;
       const minAge = MIN_AGE_ENSIHARVENNUS?.[pp] ?? 30;
       if (ba >= thresh && age >= minAge) {
-        const priceKey = pp === "Koivu" ? "Rauduskoivu" : pp;
+        const priceKey = pp === "birch" ? "silver_birch" : pp;
         const ep = getPrices("ensiharvennus", priceKey);
         const up = getPrices("uudistushakkuu", priceKey);
         const ratio = (ep.tukki + ep.kuitu) / (up.tukki + up.kuitu);
@@ -365,18 +365,18 @@ export function classifyAndValueStands(
           income_eur: income,
           cost_eur: 0,
           removal_m3: Math.round(removal),
-          notes: `BA=${ba.toFixed(0)}, ikä ${age.toFixed(0)}v`,
+          notes: `BA=${ba.toFixed(0)}, age ${age.toFixed(0)}y`,
         });
       }
       continue;
     }
 
-    // === MATURE_THINNING → HARVENNUS ===
+    // === MATURE_THINNING → THINNING ===
     if (kl.includes("mature_thinning")) {
       const thresh = THINNING_BA["harvennus"]?.[pp] ?? 22;
       const minAge = MIN_AGE_HARVENNUS?.[pp] ?? 40;
       if (ba >= thresh && age >= minAge) {
-        const priceKey = pp === "Koivu" ? "Rauduskoivu" : pp;
+        const priceKey = pp === "birch" ? "silver_birch" : pp;
         const hp = getPrices("harvennus", priceKey);
         const up = getPrices("uudistushakkuu", priceKey);
         const ratio = (hp.tukki + hp.kuitu) / (up.tukki + up.kuitu);
@@ -389,7 +389,7 @@ export function classifyAndValueStands(
           income_eur: income,
           cost_eur: 0,
           removal_m3: Math.round(removal),
-          notes: `BA=${ba.toFixed(0)}, ikä ${age.toFixed(0)}v`,
+          notes: `BA=${ba.toFixed(0)}, age ${age.toFixed(0)}y`,
         });
       }
       continue;

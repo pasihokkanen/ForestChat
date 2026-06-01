@@ -18,8 +18,8 @@ import { batchUpdateOperations } from "../edit-tools";
 const mockCompartments: Compartment[] = [
   {
     id: "c001", forest_id: "forest-1", stand_id: "1",
-    area_ha: 1.2, main_species: "Mänty", development_class: "mature_thinning",
-    site_type: "mesic", soil_type: "Kangas", drainage_status: null,
+    area_ha: 1.2, main_species: "pine", development_class: "mature_thinning",
+    site_type: "mesic", soil_type: "mineral soil", drainage_status: null,
     age_years: 55, volume_m3: 120, basal_area: 18.5,
     avg_diameter: 22.0, avg_height: 16.5, growth_m3_per_ha: 4.2,
     geometry: null, attributes: null,
@@ -27,8 +27,8 @@ const mockCompartments: Compartment[] = [
   },
   {
     id: "c002", forest_id: "forest-1", stand_id: "2",
-    area_ha: 2.1, main_species: "Kuusi", development_class: "regeneration_ready",
-    site_type: "herb-rich heath", soil_type: "Kangas", drainage_status: null,
+    area_ha: 2.1, main_species: "spruce", development_class: "regeneration_ready",
+    site_type: "herb-rich heath", soil_type: "mineral soil", drainage_status: null,
     age_years: 80, volume_m3: 340, basal_area: 26.0,
     avg_diameter: 30.0, avg_height: 22.0, growth_m3_per_ha: 5.8,
     geometry: null, attributes: null,
@@ -36,8 +36,8 @@ const mockCompartments: Compartment[] = [
   },
   {
     id: "c003", forest_id: "forest-1", stand_id: "5",
-    area_ha: 0.9, main_species: "Rauduskoivu", development_class: "young_thinning",
-    site_type: "mesic", soil_type: "Kangas", drainage_status: null,
+    area_ha: 0.9, main_species: "silver_birch", development_class: "young_thinning",
+    site_type: "mesic", soil_type: "mineral soil", drainage_status: null,
     age_years: 28, volume_m3: 45, basal_area: 12.0,
     avg_diameter: 15.0, avg_height: 12.0, growth_m3_per_ha: 6.1,
     geometry: null, attributes: null,
@@ -171,10 +171,10 @@ describe("searchStands", () => {
       compartments: createQueryableMock([mockCompartments[0]], null),
     });
 
-    const result = await searchStands(supabase, "forest-1", { species: ["Mänty"] });
+    const result = await searchStands(supabase, "forest-1", { species: ["pine"] });
     expect(result.success).toBe(true);
     expect(result.result).toContain("Found 1 stand(s)");
-    expect(result.result).toContain("Mänty");
+    expect(result.result).toContain("pine");
   });
 
   it("filters by species array (English → auto-translate)", async () => {
@@ -184,7 +184,7 @@ describe("searchStands", () => {
 
     const result = await searchStands(supabase, "forest-1", { species: ["spruce"] });
     expect(result.success).toBe(true);
-    expect(result.result).toContain("Kuusi");
+    expect(result.result).toContain("spruce");
   });
 
   it("filters by age range", async () => {
@@ -202,7 +202,7 @@ describe("searchStands", () => {
       compartments: createQueryableMock([], null),
     });
 
-    const result = await searchStands(supabase, "forest-1", { species: ["Lehtikuusi"] });
+    const result = await searchStands(supabase, "forest-1", { species: ["larch"] });
     expect(result.success).toBe(true);
     expect(result.result).toBe("No matching stands found.");
   });
@@ -212,9 +212,9 @@ describe("searchStands", () => {
       compartments: createQueryableMock([mockCompartments[0]], null),
     });
 
-    const result = await searchStands(supabase, "forest-1", { species: ["Mänty"] as any });
+    const result = await searchStands(supabase, "forest-1", { species: ["pine"] as any });
     expect(result.success).toBe(true);
-    expect(result.result).toContain("Mänty");
+    expect(result.result).toContain("pine");
   });
 
   it("returns error on database failure", async () => {
@@ -251,7 +251,7 @@ describe("queryOperations", () => {
     const result = await queryOperations(supabase, "forest-1", { years: [2026] });
     expect(result.success).toBe(true);
     expect(result.result).toContain("Stand 1");
-    expect(result.result).toContain("Mänty");
+    expect(result.result).toContain("pine");
     expect(result.result).toContain("2026");
     expect(result.result).toContain("thinning");
   });

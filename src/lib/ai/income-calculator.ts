@@ -59,7 +59,7 @@ export async function calculateOperationIncome(
   removalPct: number
 ): Promise<number> {
   const totalM3 = compartment.volume_m3 ?? 0;
-  const species = compartment.main_species ?? "Mänty";
+  const species = compartment.main_species ?? "pine";
   const tier = tierForType(type);
 
   if (totalM3 <= 0) return 0;

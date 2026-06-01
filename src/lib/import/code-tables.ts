@@ -47,3 +47,26 @@ export function mapWfsNumericCode(
   const num = typeof code === "string" ? parseInt(code, 10) : (code as number);
   return table[num] ?? null;
 }
+
+// Finnish soil type text → English (for WFS string values)
+export const SOILTYPE_TEXT_MAP: Record<string, string> = {
+  "Hienoainesmoreeni": "fine-grained till",
+  "Keskikarkea tai karkea kangasmaa": "medium or coarse mineral soil",
+  "Turvemaa": "peatland",
+  "Hienojakoinen lajittunut maalaji": "fine sorted soil",
+  "Karkea lajittunut maalaji": "coarse sorted soil",
+  "Kangas": "mineral soil",
+  // lowercase variants
+  "hienoainesmoreeni": "fine-grained till",
+  "keskikarkea tai karkea kangasmaa": "medium or coarse mineral soil",
+  "turvemaa": "peatland",
+  "hienojakoinen lajittunut maalaji": "fine sorted soil",
+  "karkea lajittunut maalaji": "coarse sorted soil",
+  "kangas": "mineral soil",
+};
+
+export function mapSoilType(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const str = String(value);
+  return SOILTYPE_TEXT_MAP[str] ?? str;
+}

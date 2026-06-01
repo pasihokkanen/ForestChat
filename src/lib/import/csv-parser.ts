@@ -91,6 +91,23 @@ const FI_DRAINAGE_TEXT_MAP: Record<string, string> = {
   "Luonnontilainen": "natural_state",
 };
 
+const FI_SOILTYPE_TEXT_MAP: Record<string, string> = {
+  // Finnish capitalized (exact CSV match)
+  "Hienoainesmoreeni": "fine-grained till",
+  "Keskikarkea tai karkea kangasmaa": "medium or coarse mineral soil",
+  "Turvemaa": "peatland",
+  "Hienojakoinen lajittunut maalaji": "fine sorted soil",
+  "Karkea lajittunut maalaji": "coarse sorted soil",
+  "Kangas": "mineral soil",
+  // Finnish lowercase (fallback for variant capitalization)
+  "hienoainesmoreeni": "fine-grained till",
+  "keskikarkea tai karkea kangasmaa": "medium or coarse mineral soil",
+  "turvemaa": "peatland",
+  "hienojakoinen lajittunut maalaji": "fine sorted soil",
+  "karkea lajittunut maalaji": "coarse sorted soil",
+  "kangas": "mineral soil",
+};
+
 // English species field names (for detecting suffix is already English)
 const ENGLISH_FIELD_NAMES = new Set(Object.values(SPECIES_FIELD_SUFFIX_MAP));
 
@@ -212,6 +229,8 @@ function translateValue(fieldName: string, value: string): string {
       return FI_SITETYPE_TEXT_MAP[value] ?? value;
     case "drainage_status":
       return FI_DRAINAGE_TEXT_MAP[value] ?? value;
+    case "soil_type":
+      return FI_SOILTYPE_TEXT_MAP[value] ?? value;
     default:
       return value;
   }
@@ -331,14 +350,17 @@ export function parseForestDataCsv(csvContent: string): ParsedCsvData {
       "site_type",
       row["site_type"] ?? row["kasvupaikka"] ?? ""
     );
-    const soilType = row["soil_type"] ?? row["maalaji"] ?? "";
+    const soilType = translateValue(
+      "soil_type",
+      row["soil_type"] ?? row["maalaji"] ?? ""
+    );
     const drainageStatus = translateValue(
       "drainage_status",
       row["drainage_status"] ?? row["ojitustilanne"] ?? ""
     );
     const rawMainSpecies = row["main_species"] ?? row["paapuulaji"] ?? "";
     const mainSpecies =
-      SPECIES_NAME_MAP[rawMainSpecies] ?? rawMainSpecies;
+      SPECIES_NAME_MAP[rawMainSpecies.toLowerCase()] ?? rawMainSpecies;
 
     const polygonWkt = row["polygon_wkt"] ?? "";
     const centerLat = parseNum(row["center_lat"]) ?? 0;

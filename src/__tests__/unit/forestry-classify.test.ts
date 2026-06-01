@@ -9,10 +9,10 @@ function makeCompartment(overrides: Partial<Compartment> & { stand_id: string })
     forest_id: "test-forest",
     stand_id: overrides.stand_id,
     area_ha: overrides.area_ha ?? 2.0,
-    main_species: overrides.main_species ?? "Mänty",
+    main_species: overrides.main_species ?? "pine",
     development_class: overrides.development_class ?? "mature_thinning",
     site_type: overrides.site_type ?? "mesic",
-    soil_type: overrides.soil_type ?? "kivennäismaa",
+    soil_type: overrides.soil_type ?? "mineral soil",
     drainage_status: overrides.drainage_status ?? "ei ojia",
     age_years: overrides.age_years ?? 50,
     volume_m3: overrides.volume_m3 ?? 200,
@@ -60,7 +60,7 @@ describe("classifyAndValueStands", () => {
 
   it("calculates volume and value correctly", () => {
     const compartments = [
-      makeCompartment({ stand_id: "4", volume_m3: 300, area_ha: 3.0, main_species: "Kuusi" }),
+      makeCompartment({ stand_id: "4", volume_m3: 300, area_ha: 3.0, main_species: "spruce" }),
     ];
     const result = classifyAndValueStands(compartments);
     expect(result.totalVolume).toBe(300);
@@ -89,9 +89,9 @@ describe("classifyAndValueStands", () => {
   });
 
   it("calculates per-species stumpage value", () => {
-    // A compartment with 50% Mänty, 50% Kuusi by volume
+    // A compartment with 50% pine, 50% spruce by volume
     const compartments = [
-      makeCompartment({ stand_id: "7", volume_m3: 200, main_species: "Mänty" }),
+      makeCompartment({ stand_id: "7", volume_m3: 200, main_species: "pine" }),
     ];
     const result = classifyAndValueStands(compartments);
     // Value should be positive — based on timber prices
