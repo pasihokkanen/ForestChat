@@ -268,6 +268,32 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightedStandIds]);
 
+  // Sync popup with multi-selection from non-map-click sources (lists, charts, AI).
+  // Map-clicks handle their own popup directly in the click handler;
+  // this effect is idempotent — calling selectStand/showCustomPopup when
+  // already set is harmless (showCustomPopup replaces any existing popup).
+  useEffect(() => {
+    if (!map || activeMainTab !== "map") return;
+
+    if (highlightedStandIds.length === 1) {
+      // Single stand selected — sync selectedStandId (zoom effect handles popup)
+      const standId = highlightedStandIds[0];
+      // Only update if different, to avoid triggering zoom when map click
+      // already handled everything
+      const currentSelected = useForestStore.getState().selectedStandId;
+      if (currentSelected !== standId) {
+        selectStand(standId);
+      }
+    } else if (highlightedStandIds.length !== 1) {
+      // No selection or multiple selected — hide popup
+      hideCustomPopup(popupRef);
+      if (useForestStore.getState().selectedStandId !== null) {
+        selectStand(null);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightedStandIds, map, activeMainTab]);
+
   // Build MapLibre match expression for fill-color
   const buildMatchExpression = useCallback((): maplibregl.Expression => {
     if (useAgeColor) {
@@ -352,24 +378,48 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
         const feature = features[0];
         const props = feature.properties as Record<string, unknown>;
         const standId = props.stand_id as string;
-        const lngLat: [number, number] = [e.lngLat.lng, e.lngLat.lat];
+        const ctrlKey = e.originalEvent.ctrlKey || e.originalEvent.metaKey;
+        const current = useForestStore.getState().highlightedStandIds;
 
-        // Track that this selection came from a map click (prevents zoom)
-        clickedStandRef.current = standId;
+        if (ctrlKey) {
+          // Ctrl+click: additive selection — toggle stand
+          if (current.includes(standId)) {
+            // Remove from selection
+            const newIds = current.filter((id) => id !== standId);
+            setHighlightedStands(newIds);
+            if (newIds.length === 1) {
+              // Exactly one left — show popup for it
+              selectStand(newIds[0]);
+            } else {
+              selectStand(null);
+              hideCustomPopup(popupRef);
+            }
+          } else {
+            // Add to selection — hide popup (multiple stands)
+            setHighlightedStands([...current, standId]);
+            selectStand(null);
+            hideCustomPopup(popupRef);
+          }
+        } else {
+          // No modifier: single selection (replace)
+          if (current.length === 1 && current[0] === standId) {
+            // Click same stand → deselect
+            setHighlightedStands([]);
+            selectStand(null);
+            hideCustomPopup(popupRef);
+            clickedStandRef.current = null;
+            return;
+          }
 
-        // Toggle selection — clicking same stand deselects
-        // Read fresh from store (handler closure has stale value)
-        if (useForestStore.getState().selectedStandId === standId) {
-          selectStand(null);
-          setHighlightedStands([]);
-          return; // popup already removed below
+          // Track that this selection came from a map click (prevents zoom)
+          clickedStandRef.current = standId;
+
+          selectStand(standId);
+          setHighlightedStands([standId]);
+
+          // Show popup at persisted position
+          showCustomPopup(map, popupRef, props, isDark);
         }
-
-        selectStand(standId);
-        setHighlightedStands([standId]);
-
-        // Show popup at persisted position
-        showCustomPopup(map, popupRef, props, isDark);
       } else {
         // Clicked on background — close popup and deselect
         hideCustomPopup(popupRef);

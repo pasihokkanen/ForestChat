@@ -56,6 +56,7 @@ const opPersist = {
   standFilter: "",
   speciesFilter: [] as string[],
   globalFilter: "",
+  lastClickedStandId: null as string | null,
 };
 
 export default function OperationList({ map }: OperationListProps) {
@@ -149,10 +150,92 @@ export default function OperationList({ map }: OperationListProps) {
     }
   };
 
-  const handleOperationRowClick = (standId: string, operationId: string) => {
-    setHighlightedStands([standId]);
-    // Don't call selectStand — highlight only, no popup
-    setHighlightedOperations([operationId]);
+  // Build stand → operation-IDs map for bulk selection
+  const standToOpIds = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const op of operations) {
+      const comp = compMap.get(op.compartment_id);
+      if (!comp) continue;
+      const standId = comp.stand_id;
+      const ids = map.get(standId);
+      if (ids) {
+        ids.push(op.id);
+      } else {
+        map.set(standId, [op.id]);
+      }
+    }
+    return map;
+  }, [operations, compMap]);
+
+  const handleOperationRowClick = (standId: string, _operationId: string, event: React.MouseEvent) => {
+    const ctrlKey = event.ctrlKey || event.metaKey;
+    const shiftKey = event.shiftKey;
+    const currentStands = useForestStore.getState().highlightedStandIds;
+    const currentOps = useForestStore.getState().highlightedOperationIds;
+    let newStandIds: string[];
+
+    if (shiftKey && opPersist.lastClickedStandId) {
+      // Shift+click: range select between last clicked stand and current
+      // Use unique stand IDs in display order
+      const seen = new Set<string>();
+      const orderedIds: string[] = [];
+      for (const row of displayRows) {
+        if (row.comp && !seen.has(row.comp.stand_id)) {
+          seen.add(row.comp.stand_id);
+          orderedIds.push(row.comp.stand_id);
+        }
+      }
+      const lastIdx = orderedIds.indexOf(opPersist.lastClickedStandId);
+      const currIdx = orderedIds.indexOf(standId);
+      if (lastIdx !== -1 && currIdx !== -1) {
+        const from = Math.min(lastIdx, currIdx);
+        const to = Math.max(lastIdx, currIdx);
+        newStandIds = orderedIds.slice(from, to + 1);
+      } else {
+        newStandIds = [standId];
+      }
+    } else if (ctrlKey) {
+      // Ctrl+click: toggle stand
+      if (currentStands.includes(standId)) {
+        newStandIds = currentStands.filter((id) => id !== standId);
+      } else {
+        newStandIds = [...currentStands, standId];
+      }
+    } else {
+      // No modifier: replace selection
+      newStandIds = [standId];
+    }
+
+    opPersist.lastClickedStandId = standId;
+    setHighlightedStands(newStandIds);
+
+    // Bulk operation selection: when a stand is selected, all its operations
+    // are selected; when a stand is deselected, all its operations are removed.
+    let newOpIds: string[];
+    if (ctrlKey) {
+      // Toggle: add/remove operations for the toggled stand only
+      const wasSelected = currentStands.includes(standId);
+      if (wasSelected) {
+        // Removing stand — remove its operation IDs
+        const removedOps = standToOpIds.get(standId) ?? [];
+        const removedSet = new Set(removedOps);
+        newOpIds = currentOps.filter((id) => !removedSet.has(id));
+      } else {
+        // Adding stand — add its operation IDs
+        const addedOps = standToOpIds.get(standId) ?? [];
+        newOpIds = [...currentOps, ...addedOps];
+      }
+    } else {
+      // Replace or range: rebuild operation IDs from the new stand set
+      const opSet = new Set<string>();
+      for (const sid of newStandIds) {
+        const ops = standToOpIds.get(sid);
+        if (ops) for (const oid of ops) opSet.add(oid);
+      }
+      newOpIds = Array.from(opSet);
+    }
+    setHighlightedOperations(newOpIds);
+    // Popup visibility is handled by StandLayer's popup-sync useEffect
   };
 
   const handleShowOnMap = (standId: string) => {
@@ -422,7 +505,7 @@ export default function OperationList({ map }: OperationListProps) {
                   className={`cursor-pointer border-b border-gray-100 dark:border-gray-800 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50 ${
                     isHighlighted ? "bg-blue-50 dark:bg-blue-900/20" : ""
                   }`}
-                  onClick={() => handleOperationRowClick(standId, op.id)}
+                  onClick={(e) => handleOperationRowClick(standId, op.id, e)}
                 >
                   <td className="px-2 py-1 font-mono text-xs">{standId}</td>
                   <td className="px-2 py-1 text-xs">{displayOperationType(op.type)}</td>

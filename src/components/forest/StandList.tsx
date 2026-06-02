@@ -71,6 +71,7 @@ const standPersist = {
   volumeMin: null as number | null,
   volumeMax: null as number | null,
   globalFilter: "",
+  lastClickedStandId: null as string | null,
 };
 
 export default function StandList({ map }: StandListProps) {
@@ -193,13 +194,42 @@ export default function StandList({ map }: StandListProps) {
     }
   };
 
-  const handleStandRowClick = (standId: string) => {
+  const handleStandRowClick = (standId: string, event: React.MouseEvent) => {
+    const ctrlKey = event.ctrlKey || event.metaKey;
+    const shiftKey = event.shiftKey;
     const current = useForestStore.getState().highlightedStandIds;
-    const newIds = current.includes(standId)
-      ? current.filter((id) => id !== standId)
-      : [standId];
+    let newIds: string[];
+
+    if (shiftKey && standPersist.lastClickedStandId) {
+      // Shift+click: range select between last clicked stand and current
+      // Use the displayed order (filtered + sorted stands)
+      const orderedIds = displayRows
+        .filter((r): r is StandDisplayRow & { rowType: "stand" } => r.rowType === "stand")
+        .map((r) => r.data.stand_id);
+      const lastIdx = orderedIds.indexOf(standPersist.lastClickedStandId);
+      const currIdx = orderedIds.indexOf(standId);
+      if (lastIdx !== -1 && currIdx !== -1) {
+        const from = Math.min(lastIdx, currIdx);
+        const to = Math.max(lastIdx, currIdx);
+        newIds = orderedIds.slice(from, to + 1);
+      } else {
+        newIds = [standId];
+      }
+    } else if (ctrlKey) {
+      // Ctrl+click: toggle
+      if (current.includes(standId)) {
+        newIds = current.filter((id) => id !== standId);
+      } else {
+        newIds = [...current, standId];
+      }
+    } else {
+      // No modifier: replace selection
+      newIds = [standId];
+    }
+
+    standPersist.lastClickedStandId = standId;
     setHighlightedStands(newIds);
-    // Don't call selectStand — highlight only, no popup
+    // Popup visibility is handled by StandLayer's popup-sync useEffect
   };
 
   const handleShowOnMap = (standId: string) => {
@@ -529,7 +559,7 @@ export default function StandList({ map }: StandListProps) {
                     className={`cursor-pointer border-b border-gray-100 dark:border-gray-800 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50 ${
                       isHighlighted ? "bg-blue-50 dark:bg-blue-900/20" : ""
                     }`}
-                    onClick={() => handleStandRowClick(row.data.stand_id)}
+                    onClick={(e) => handleStandRowClick(row.data.stand_id, e)}
                   >
                     <td className="px-1 py-1 text-center text-gray-400">
                       <button
