@@ -8,7 +8,7 @@
 
 **Tech Stack:** Next.js 16, React 19, Zustand 5, TanStack Table 8, MapLibre GL 5, Recharts 3, Tailwind CSS 4
 
-**Version:** 2.1
+**Version:** 2.2
 **Date:** 2026-06-02
 
 **Changelog v2.2 (architectural review):**
@@ -113,7 +113,7 @@ T0: Fix chart opacity (broken getActiveOpacity)
  └──► T6: Smoke tests
 ```
 
-T0 is critical — fixes the already-broken chart opacity. T1 is a shared prerequisite. T2a (tree table) and T3 can run in parallel after T1. T2b (filter bar) depends on T2a. T4 wires everything together. T5 adds AI integration.
+T0 is critical — fixes the already-broken chart opacity. T1 is a shared prerequisite. T2a (tree table) and T3 can run in parallel after T1. T2b (filter bar) depends on T2a. T4 wires highlighting across all components (list↔chart↔map). T5 adds AI integration and depends on T4 for highlight state propagation (the SSE handler calls `setHighlightedStands`). T6 runs last.
 
 ---
 
@@ -612,7 +612,7 @@ Same as v1.0 plan: join operations with compartments via a Map for O(1) lookup.
 ### T3.5 — Row click behavior
 
 - Click row → highlights the stand on map + in charts (via highlightedStandIds)
-- Click row → also highlights the operation (via highlightedOperationIds, for chart correlation)
+- Click row → also highlights the specific operation row (via highlightedOperationIds, for list-row visual feedback only — charts cannot use per-op IDs due to aggregation)
 - Does NOT auto-switch to map tab
 - "Show on map" button → switches to map tab
 
@@ -758,7 +758,7 @@ Then in the tool executor, after `search_stands` or `query_operations` executes 
 // In search_stands handler, after successful query:
 ctx.sendSse?.("show_in_ui", {
   target: "stands",
-  standIds: results.map(r => r.stand_id), // IDs to highlight/filter
+  standIds: result.data?.map(r => r.stand_id as string) ?? [], // IDs from ToolResult.data
   filters: { /* the filter criteria used */ }
 });
 
@@ -771,14 +771,43 @@ ctx.sendSse?.("show_in_ui", {
 
 ### T5.3 — Handle event on client
 
-**Modify:** `src/components/chat/ChatPanel.tsx` (or a new hook)
+**Modify:** `src/lib/chat/sse-client.ts`
 
-Listen for `show_in_ui` SSE events:
+Three changes needed in the browser-side SSE parser — the event never reaches `ChatPanel.tsx` without these:
+
+1. **Add to SseEventType union (line 3-13):**
+   ```typescript
+   | "show_in_ui"
+   ```
+
+2. **Add callback to SseCallbacks interface (after line 25):**
+   ```typescript
+   onShowInUi?: (payload: ShowInUiPayload) => void;
+   ```
+
+3. **Add case to switch statement (after line 100):**
+   ```typescript
+   case "show_in_ui":
+     callbacks.onShowInUi?.(data as ShowInUiPayload);
+     break;
+   ```
+
+**Define the payload type** (near the top of sse-client.ts):
+```typescript
+export interface ShowInUiPayload {
+  target: "stands" | "operations";
+  standIds?: string[];
+  filters?: Record<string, unknown>;
+}
+```
+
+**Modify:** `src/components/chat/ChatPanel.tsx`
+
+Register the callback when calling `streamChat`:
 
 ```typescript
-case "show_in_ui": {
-  const payload = data as { target: string; standIds?: string[]; filters?: Record<string, unknown> };
-
+// In ChatPanel.tsx, add to the streamChat callbacks object:
+onShowInUi: (payload) => {
   // Switch to the target tab
   useForestStore.getState().setActiveMainTab(payload.target as MainTab);
 
@@ -797,8 +826,7 @@ case "show_in_ui": {
     // Push filter criteria to OperationList's filter bar — via tab slice
     useForestStore.getState().setAiOperationFilters(payload.filters);
   }
-  break;
-}
+},
 ```
 
 ### T5.4 — AI-applied filter state
@@ -922,6 +950,8 @@ describe("MainTabBar", () => {
 ### T6.2 — StandList smoke test
 
 **Create:** `src/__tests__/components/StandList.test.tsx`
+
+**⚠️ Pitfall:** These tests assume the StandList component capitalizes `main_species` for display and renders the chevron as a text character (▶/▼). If the implementation uses raw DB values (`pine` not `Pine`) or SVG-based chevrons, update the test assertions accordingly — `screen.getByText("Pine")` becomes `screen.getByText("pine")`, and `screen.getByText("▶")` becomes a data-testid lookup.
 
 ```typescript
 describe("StandList", () => {
