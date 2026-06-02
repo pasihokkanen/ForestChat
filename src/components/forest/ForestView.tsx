@@ -70,6 +70,7 @@ export default function ForestView({ forestId }: ForestViewProps) {
 
   const [map, setMap] = useState<maplibregl.Map | null>(null);
   const [mapStyleVersion, setMapStyleVersion] = useState(0);
+  const [isDark, setIsDark] = useState(false);
 
   // Use real compartments if they have geometry, otherwise test data
   // Only fall back to test data after loading completes (avoid flash)
@@ -151,12 +152,13 @@ export default function ForestView({ forestId }: ForestViewProps) {
           >
             <MapView
               onMapReady={setMap}
-              onStyleChange={({ styleVersion }) =>
-                setMapStyleVersion(styleVersion)
-              }
+              onStyleChange={({ isDark, styleVersion }) => {
+                setMapStyleVersion(styleVersion);
+                setIsDark(isDark);
+              }}
             />
           </Suspense>
-          <StandLayer map={map} compartments={geojson} styleVersion={mapStyleVersion} />
+          <StandLayer map={map} compartments={geojson} styleVersion={mapStyleVersion} isDark={isDark} />
           <StandLegend />
 
           {compartmentsError && (

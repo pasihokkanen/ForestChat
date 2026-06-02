@@ -23,6 +23,8 @@ export interface StandLayerProps {
   compartments: CompartmentFeatureCollection;
   /** Incremented on every map style switch so the layer re-registers. */
   styleVersion?: number;
+  /** Whether the map is in dark mode (for popup theming). */
+  isDark?: boolean;
 }
 
 /**
@@ -60,33 +62,44 @@ function showCustomPopup(
    popupRef: React.MutableRefObject<HTMLElement | null>,
    props: Record<string, unknown>,
    lngLat: [number, number],
+   isDark: boolean,
  ) {
-   // Remove any existing custom popup
-   if (popupRef.current) {
-     popupRef.current.remove();
-     popupRef.current = null;
-   }
+  // Remove any existing custom popup
+  if (popupRef.current) {
+    popupRef.current.remove();
+    popupRef.current = null;
+  }
 
-   const standId = props.stand_id as string;
+  const standId = props.stand_id as string;
 
-   // Create overlay container
-   const el = document.createElement("div");
-   el.className = "forestchat-custom-popup";
-   el.style.cssText = `
-     position: absolute;
-     z-index: 1000;
-     background: white;
-     border-radius: 8px;
-     box-shadow: 0 4px 16px rgba(0,0,0,0.2);
-     padding: 12px;
-     min-width: 260px;
-     max-width: 340px;
-     font-size: 13px;
-     color: #111;
-     pointer-events: auto;
-     transform: translate(-50%, -100%);
-     margin-top: -10px;
-   `;
+  // Theme-aware colors
+  const bgColor = isDark ? "#1f2937" : "white";
+  const textColor = isDark ? "#f3f4f6" : "#111";
+  const mutedColor = isDark ? "#9ca3af" : "#6b7280";
+  const borderColor = isDark ? "#374151" : "#e5e7eb";
+  const closeBtnColor = isDark ? "#6b7280" : "#999";
+  const closeBtnHoverBg = isDark ? "#374151" : "#f3f4f6";
+  const sectionTitleColor = isDark ? "#9ca3af" : "#6b7280";
+  const labelColor = isDark ? "#d1d5db" : "#111";
+
+  // Create overlay container
+  const el = document.createElement("div");
+  el.className = "forestchat-custom-popup";
+  el.style.cssText = `
+    position: absolute;
+    z-index: 1000;
+    background: ${bgColor};
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+    padding: 12px;
+    min-width: 260px;
+    max-width: 340px;
+    font-size: 13px;
+    color: ${textColor};
+    pointer-events: auto;
+    transform: translate(-50%, -100%);
+    margin-top: -10px;
+  `;
 
    // Position and append to DOM
    const point = map.project(lngLat);
@@ -114,7 +127,7 @@ function showCustomPopup(
    const speciesRows = thisSpecies
      .map((s) => `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5">
        <span>${s.species}</span>
-       <span style="color:#6b7280;text-align:right">${s.volume_m3.toFixed(0)} m³ / ${s.area_ha.toFixed(1)} ha</span>
+       <span style="color:${mutedColor};text-align:right">${s.volume_m3.toFixed(0)} m³ / ${s.area_ha.toFixed(1)} ha</span>
      </div>`)
      .join("");
 
@@ -130,34 +143,34 @@ function showCustomPopup(
            : "";
        return `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5">
          <span>${op.type} ${op.year}</span>
-         <span style="color:#6b7280;text-align:right">${valueStr}</span>
+         <span style="color:${mutedColor};text-align:right">${valueStr}</span>
        </div>`;
      })
      .join("");
 
    el.innerHTML = `
      <div style="position:relative">
-       <button class="popup-close" style="position:absolute;top:1px;right:1px;border:none;background:transparent;font-size:18px;cursor:pointer;color:#999;line-height:1;width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:4px">×</button>
-       <h3 style="font-weight:600;font-size:15px;margin:0 0 8px 0;padding-bottom:4px;border-bottom:1px solid #e5e7eb">Stand ${standId}</h3>
+       <button class="popup-close" style="position:absolute;top:1px;right:1px;border:none;background:transparent;font-size:18px;cursor:pointer;color:${closeBtnColor};line-height:1;width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:4px">×</button>
+       <h3 style="font-weight:600;font-size:15px;margin:0 0 8px 0;padding-bottom:4px;border-bottom:1px solid ${borderColor};color:${textColor}">Stand ${standId}</h3>
 
-       <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px">Stand details</h4>
+       <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:${sectionTitleColor};text-transform:uppercase;letter-spacing:0.5px">Stand details</h4>
        <div style="margin:0 0 8px 0">
-         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:#111">Dev. class</span><span style="color:#6b7280;text-align:right">${devClass}</span></div>
-         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:#111">Site type</span><span style="color:#6b7280;text-align:right">${siteType}</span></div>
-         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:#111">Area (ha)</span><span style="color:#6b7280;text-align:right">${area}</span></div>
-         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:#111">Age</span><span style="color:#6b7280;text-align:right">${age}</span></div>
-         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:#111">Volume (m³)</span><span style="color:#6b7280;text-align:right">${volume}</span></div>
-         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:#111">Basal area</span><span style="color:#6b7280;text-align:right">${basalArea}</span></div>
-         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:#111">Avg diam.</span><span style="color:#6b7280;text-align:right">${avgDiam} cm</span></div>
-         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:#111">Avg height</span><span style="color:#6b7280;text-align:right">${avgHt} m</span></div>
+         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Dev. class</span><span style="color:${mutedColor};text-align:right">${devClass}</span></div>
+         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Site type</span><span style="color:${mutedColor};text-align:right">${siteType}</span></div>
+         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Area (ha)</span><span style="color:${mutedColor};text-align:right">${area}</span></div>
+         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Age</span><span style="color:${mutedColor};text-align:right">${age}</span></div>
+         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Volume (m³)</span><span style="color:${mutedColor};text-align:right">${volume}</span></div>
+         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Basal area</span><span style="color:${mutedColor};text-align:right">${basalArea}</span></div>
+         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Avg diam.</span><span style="color:${mutedColor};text-align:right">${avgDiam} cm</span></div>
+         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Avg height</span><span style="color:${mutedColor};text-align:right">${avgHt} m</span></div>
        </div>
 
        ${speciesRows ? `
-       <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px">Species</h4>
+       <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:${sectionTitleColor};text-transform:uppercase;letter-spacing:0.5px">Species</h4>
        <div style="margin:0 0 8px 0">${speciesRows}</div>` : ""}
 
        ${opsRows ? `
-       <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px">Operations</h4>
+       <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:${sectionTitleColor};text-transform:uppercase;letter-spacing:0.5px">Operations</h4>
        <div>${opsRows}</div>` : ""}
      </div>
    `;
@@ -168,6 +181,12 @@ function showCustomPopup(
      closeBtn.onclick = (e) => {
        e.stopPropagation();
        hideCustomPopup(popupRef);
+     };
+     closeBtn.onmouseenter = () => {
+       closeBtn.style.backgroundColor = closeBtnHoverBg;
+     };
+     closeBtn.onmouseleave = () => {
+       closeBtn.style.backgroundColor = "transparent";
      };
    }
  }
@@ -186,7 +205,7 @@ function hideCustomPopup(popupRef: React.MutableRefObject<HTMLElement | null>) {
  * Renders forest stand polygons on a MapLibre map and handles
  * click-to-inspect via popups.
  */
-export default function StandLayer({ map, compartments, styleVersion = 0 }: StandLayerProps) {
+export default function StandLayer({ map, compartments, styleVersion = 0, isDark = false }: StandLayerProps) {
   const popupRef = useRef<HTMLElement | null>(null);
   const hasZoomed = useRef(false);
   const clickedStandRef = useRef<string | null>(null); // non-null = selection came from map click
@@ -299,7 +318,7 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
         setHighlightedStands([standId]);
 
         // Show popup at click coordinates immediately (no zoom)
-        showCustomPopup(map, popupRef, props, lngLat);
+        showCustomPopup(map, popupRef, props, lngLat, isDark);
       } else {
         // Clicked on background — close popup and deselect
         hideCustomPopup(popupRef);
@@ -453,7 +472,7 @@ export default function StandLayer({ map, compartments, styleVersion = 0 }: Stan
 
       const onMoveEnd = () => {
         if (useForestStore.getState().selectedStandId !== selectedStandId) return;
-        showCustomPopup(map, popupRef, props, lngLat);
+        showCustomPopup(map, popupRef, props, lngLat, isDark);
       };
       // Use once() so it auto-removes after firing
       map.once("moveend", onMoveEnd);
