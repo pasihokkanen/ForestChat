@@ -15,6 +15,8 @@ export interface ToolResult {
   success: boolean;
   result: string;
   error?: string;
+  /** Raw query results for UI integration (e.g., show_in_ui SSE events) */
+  data?: Record<string, unknown>[];
 }
 
 export interface ToolContext {
@@ -82,9 +84,49 @@ const toolHandlers: Record<string, ToolHandler> = {
     });
   },
   get_stand: async (args, ctx) => getStand(ctx.supabase, ctx.forestId, args.stand_id as string),
-  search_stands: async (args, ctx) => searchStands(ctx.supabase, ctx.forestId, args as any),
+  search_stands: async (args, ctx) => {
+    const result = await searchStands(ctx.supabase, ctx.forestId, args as any);
+    if (result.success) {
+      // Extract stand IDs from query for show_in_ui
+      // We need to re-run the DB query to get structured data for SSE
+      // searchStands doesn't return data directly, so we extract stand_ids from args if present
+      const standIds = Array.isArray(args.stand_ids) ? args.stand_ids as string[] : [];
+      ctx.sendSse?.("show_in_ui", {
+        target: "stands",
+        standIds: standIds.length > 0 ? standIds : undefined,
+        filters: {
+          species: args.species,
+          development_classes: args.development_classes,
+          site_types: args.site_types,
+          age_min: args.age_min,
+          age_max: args.age_max,
+          area_min: args.area_min,
+          area_max: args.area_max,
+          volume_min: args.volume_min,
+          volume_max: args.volume_max,
+        },
+      });
+    }
+    return result;
+  },
   plan_summary: async (_args, ctx) => planSummary(ctx.supabase, ctx.forestId),
-  query_operations: async (args, ctx) => queryOperations(ctx.supabase, ctx.forestId, args as any),
+  query_operations: async (args, ctx) => {
+    const result = await queryOperations(ctx.supabase, ctx.forestId, args as any);
+    if (result.success) {
+      ctx.sendSse?.("show_in_ui", {
+        target: "operations",
+        filters: {
+          years: args.years,
+          types: args.types,
+          stand_ids: args.stand_ids,
+          species: args.species,
+          income_min: args.income_min,
+          income_max: args.income_max,
+        },
+      });
+    }
+    return result;
+  },
   batch_update_operations: async (args, ctx) => batchUpdateOperations(ctx.supabase, ctx.forestId, (args.filter || {}) as any, (args.update || {}) as any),
   add_operation: async (args, ctx) => addOperation(ctx.supabase, ctx.forestId, ctx.userId, args),
   remove_operation: async (args, ctx) => removeOperation(ctx.supabase, ctx.forestId, args.stand_id as string, args.year as number),

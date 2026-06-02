@@ -21,7 +21,8 @@ export interface SseEvent {
     | "create_chart"
     | "remove_chart"
     | "clear_charts"
-    | "charts_refreshed";
+    | "charts_refreshed"
+    | "show_in_ui";
   data: {
     content?: string;
     name?: string;
@@ -34,6 +35,12 @@ export interface SseEvent {
     stand_id?: string;
     chart_id?: string;
     chart_ids?: string[];
+    /** show_in_ui target tab */
+    target?: "stands" | "operations";
+    /** show_in_ui stand IDs for highlighting */
+    standIds?: string[];
+    /** show_in_ui filter criteria */
+    filters?: Record<string, unknown>;
     [key: string]: unknown;
   };
 }

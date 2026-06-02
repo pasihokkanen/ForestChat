@@ -297,19 +297,17 @@ export default function ChartCard({ tab }: ChartCardProps) {
     return filtered;
   }, [translatedData, tab.type, tab.nameKey]);
 
-  // Determine if a data point is "active" (highlighted)
-  const isActive = (_entry: Record<string, unknown>): boolean => {
-    return false; // Simplified — full active highlighting handled by Cell opacity
+  // Determine if a data point corresponds to a highlighted stand
+  const isDataPointHighlighted = (entry: Record<string, unknown>): boolean => {
+    if (!tab.standDimension || highlightedStandIds.length === 0) return true;
+    const entryStandId = entry[tab.standDimension];
+    if (entryStandId == null) return true;
+    return highlightedStandIds.includes(String(entryStandId));
   };
 
   // Choose fill based on active state
   const getCellFill = (index: number, baseColor?: string): string => {
     return baseColor ?? CHART_COLORS[index % CHART_COLORS.length];
-  };
-
-  const getActiveOpacity = (_entry: Record<string, unknown>): number => {
-    if (tab.standDimension && highlightedStandIds.length > 0) return 1;
-    return 1;
   };
 
   switch (tab.type) {
@@ -338,7 +336,18 @@ export default function ChartCard({ tab }: ChartCardProps) {
               fill="#4CAF50"
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
               radius={[4, 4, 0, 0]}
-            />
+            >
+              {translatedData.map((entry, index) => {
+                const highlighted = isDataPointHighlighted(entry);
+                return (
+                  <Cell
+                    key={`cell-${index}`}
+                    fill={highlighted ? CHART_COLORS[index % CHART_COLORS.length] : "#e5e5e5"}
+                    fillOpacity={highlighted ? 1 : 0.3}
+                  />
+                );
+              })}
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
       );
@@ -502,7 +511,18 @@ export default function ChartCard({ tab }: ChartCardProps) {
               fill="#FF9800"
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
               radius={[0, 4, 4, 0]}
-            />
+            >
+              {translatedData.map((entry, index) => {
+                const highlighted = isDataPointHighlighted(entry);
+                return (
+                  <Cell
+                    key={`cell-${index}`}
+                    fill={highlighted ? CHART_COLORS[index % CHART_COLORS.length] : "#e5e5e5"}
+                    fillOpacity={highlighted ? 1 : 0.3}
+                  />
+                );
+              })}
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
       );
@@ -522,9 +542,16 @@ export default function ChartCard({ tab }: ChartCardProps) {
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
 
             >
-              {cleanData.map((_, i) => (
-                <Cell key={i} fill={getCellFill(i)} />
-              ))}
+              {cleanData.map((entry, i) => {
+                const highlighted = isDataPointHighlighted(entry);
+                return (
+                  <Cell
+                    key={i}
+                    fill={highlighted ? getCellFill(i) : "#e5e5e5"}
+                    opacity={highlighted ? 1 : 0.3}
+                  />
+                );
+              })}
             </Pie>
             <Tooltip content={<EuroTooltip />} />
             <Legend />
@@ -548,9 +575,16 @@ export default function ChartCard({ tab }: ChartCardProps) {
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
 
             >
-              {cleanData.map((_, i) => (
-                <Cell key={i} fill={getCellFill(i)} />
-              ))}
+              {cleanData.map((entry, i) => {
+                const highlighted = isDataPointHighlighted(entry);
+                return (
+                  <Cell
+                    key={i}
+                    fill={highlighted ? getCellFill(i) : "#e5e5e5"}
+                    opacity={highlighted ? 1 : 0.3}
+                  />
+                );
+              })}
             </Pie>
             <Tooltip content={<EuroTooltip />} />
             <Legend />
@@ -661,7 +695,15 @@ export default function ChartCard({ tab }: ChartCardProps) {
               fill="#E91E63"
               isAnimationActive={false}
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
-            />
+            >
+              {translatedData.map((entry, index) => (
+                <Cell
+                  key={`cell-${index}`}
+                  fill={isDataPointHighlighted(entry) ? "#E91E63" : "#e5e5e5"}
+                  fillOpacity={isDataPointHighlighted(entry) ? 1 : 0.3}
+                />
+              ))}
+            </Scatter>
           </ScatterChart>
         </ResponsiveContainer>
       );

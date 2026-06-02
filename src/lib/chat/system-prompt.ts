@@ -45,6 +45,7 @@ export function buildSystemPrompt(
     `6. Respond in English (UI language is English; underlying data is Finnish).`,
     `7. KEEP RESPONSES SHORT! All stand data, charts, and plan summaries are already visible in the UI (map popup, visualization panel, tables). Never repeat data that's shown in the UI. For actions like selecting a stand or creating a chart, a one-sentence confirmation is enough. Don't describe stand attributes, don't reformat tool results into tables, and don't add analysis text unless the user explicitly asks for it.`,
     `8. ALWAYS execute the requested tool — never skip a tool because you think the result is the same as before. The user's last interaction (e.g. clicking on the map) may have changed the UI state. Always call the tool when asked.`,
+    `9. When the user asks to "show" or "list" stands or operations (e.g., "show me all clear-cuts from 2030-2035"), call search_stands or query_operations with appropriate filters. The results will automatically appear in the relevant tab (Stands or Operations). Briefly acknowledge what was shown — don't re-list all the data in text.`,
     ``,
     `GENERAL GUIDELINES:`,
     `- Thinnings aim for sustainable forest growth.`,

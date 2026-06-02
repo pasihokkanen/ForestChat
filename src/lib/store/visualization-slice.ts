@@ -45,6 +45,10 @@ export interface VisualizationSlice {
 
   highlightedStandIds: string[];
   setHighlightedStands: (ids: string[]) => void;
+
+  /** Operation-level highlighting for list-row visual feedback only (charts use aggregated data) */
+  highlightedOperationIds: string[];
+  setHighlightedOperations: (ids: string[]) => void;
 }
 
 export function persistActiveTab(forestId: string, tabId: string | null) {
@@ -121,4 +125,7 @@ export const createVisualizationSlice: StateCreator<VisualizationSlice> = (
 
   highlightedStandIds: [],
   setHighlightedStands: (ids) => set({ highlightedStandIds: ids }),
+
+  highlightedOperationIds: [],
+  setHighlightedOperations: (ids) => set({ highlightedOperationIds: ids }),
 });

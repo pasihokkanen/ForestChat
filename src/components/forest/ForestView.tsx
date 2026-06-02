@@ -15,6 +15,8 @@ import StandLegend from "@/components/map/StandLegend";
 import ChatPanel from "@/components/chat/ChatPanel";
 import PanelLayout from "@/components/layout/PanelLayout";
 import ChartsPanel from "@/components/charts/ChartsPanel";
+import StandList from "@/components/forest/StandList";
+import OperationList from "@/components/forest/OperationList";
 import { testCompartments } from "@/lib/test-data";
 import type maplibregl from "maplibre-gl";
 
@@ -71,6 +73,20 @@ export default function ForestView({ forestId }: ForestViewProps) {
   const [map, setMap] = useState<maplibregl.Map | null>(null);
   const [mapStyleVersion, setMapStyleVersion] = useState(0);
   const [isDark, setIsDark] = useState(false);
+
+  // Handle onMapReady with pending stand selection
+  const handleMapReady = (mapInstance: maplibregl.Map) => {
+    setMap(mapInstance);
+    // Apply any pending selection from "Show on map" clicks before map was ready
+    const pending = useForestStore.getState().consumePendingSelection();
+    if (pending) {
+      // Small delay to let StandLayer render before selecting
+      setTimeout(() => {
+        useForestStore.getState().selectStand(pending);
+        useForestStore.getState().setHighlightedStands([pending]);
+      }, 300);
+    }
+  };
 
   // Use real compartments if they have geometry, otherwise test data
   // Only fall back to test data after loading completes (avoid flash)
@@ -141,33 +157,37 @@ export default function ForestView({ forestId }: ForestViewProps) {
   return (
     <PanelLayout
       chartsPanel={<ChartsPanel />}
-      mapPanel={
-        <div className="flex-1 relative min-w-0 h-full">
-          <Suspense
-            fallback={
-              <div className="w-full h-full flex items-center justify-center text-gray-500">
-                Loading map...
-              </div>
-            }
-          >
-            <MapView
-              onMapReady={setMap}
-              onStyleChange={({ isDark, styleVersion }) => {
-                setMapStyleVersion(styleVersion);
-                setIsDark(isDark);
-              }}
-            />
-          </Suspense>
-          <StandLayer map={map} compartments={geojson} styleVersion={mapStyleVersion} isDark={isDark} />
-          <StandLegend />
+      tabs={{
+        map: (
+          <div className="flex-1 relative min-w-0 h-full">
+            <Suspense
+              fallback={
+                <div className="w-full h-full flex items-center justify-center text-gray-500">
+                  Loading map...
+                </div>
+              }
+            >
+              <MapView
+                onMapReady={handleMapReady}
+                onStyleChange={({ isDark, styleVersion }) => {
+                  setMapStyleVersion(styleVersion);
+                  setIsDark(isDark);
+                }}
+              />
+            </Suspense>
+            <StandLayer map={map} compartments={geojson} styleVersion={mapStyleVersion} isDark={isDark} />
+            <StandLegend />
 
-          {compartmentsError && (
-            <div className="absolute top-4 left-4 z-10 bg-red-50 border border-red-200 rounded-md px-3 py-2 text-xs text-red-700 max-w-xs">
-              {compartmentsError}
-            </div>
-          )}
-        </div>
-      }
+            {compartmentsError && (
+              <div className="absolute top-4 left-4 z-10 bg-red-50 border border-red-200 rounded-md px-3 py-2 text-xs text-red-700 max-w-xs">
+                {compartmentsError}
+              </div>
+            )}
+          </div>
+        ),
+        stands: <StandList map={map} />,
+        operations: <OperationList map={map} />,
+      }}
       chatPanel={<ChatPanel forestId={forestId} />}
     />
   );

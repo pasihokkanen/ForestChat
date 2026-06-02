@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { streamChat as sseStreamChat } from "@/lib/chat/sse-client";
+import type { ShowInUiPayload } from "@/lib/chat/sse-client";
 import { useForestStore } from "@/lib/store";
+import type { MainTab } from "@/lib/store/tab-slice";
 import ChatHeader from "./ChatHeader";
 import ChatMessages from "./ChatMessages";
 import ChatInput from "./ChatInput";
@@ -37,6 +39,9 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
     removeChartTab,
     clearAllCharts,
     setChartTabs,
+    setActiveMainTab,
+    setAiStandFilters,
+    setAiOperationFilters,
   } = useForestStore();
 
   // Load existing conversation on mount
@@ -163,6 +168,23 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
             }
           } catch {
             // Silently fail — charts will update on next page load
+          }
+        },
+        onShowInUi: (payload: ShowInUiPayload) => {
+          // Switch to the target tab
+          setActiveMainTab(payload.target as MainTab);
+
+          if (payload.target === "stands") {
+            if (payload.standIds?.length) {
+              setHighlightedStands(payload.standIds);
+            }
+            if (payload.filters) {
+              setAiStandFilters(payload.filters);
+            }
+          }
+
+          if (payload.target === "operations" && payload.filters) {
+            setAiOperationFilters(payload.filters);
           }
         },
       });

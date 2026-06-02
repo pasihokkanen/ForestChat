@@ -10,7 +10,14 @@ export type SseEventType =
   | "create_chart"
   | "remove_chart"
   | "clear_charts"
-  | "charts_refreshed";
+  | "charts_refreshed"
+  | "show_in_ui";
+
+export interface ShowInUiPayload {
+  target: "stands" | "operations";
+  standIds?: string[];
+  filters?: Record<string, unknown>;
+}
 
 interface SseCallbacks {
   onChunk?: (text: string) => void;
@@ -23,6 +30,7 @@ interface SseCallbacks {
   onRemoveChart?: (chartId: string) => void;
   onClearCharts?: () => void;
   onChartsRefreshed?: (chartIds: string[]) => void;
+  onShowInUi?: (payload: ShowInUiPayload) => void;
 }
 
 export async function streamChat(
@@ -97,6 +105,9 @@ export async function streamChat(
               break;
             case "charts_refreshed":
               callbacks.onChartsRefreshed?.(data.chart_ids as string[] ?? []);
+              break;
+            case "show_in_ui":
+              callbacks.onShowInUi?.(data as ShowInUiPayload);
               break;
           }
         } catch {

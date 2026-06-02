@@ -216,6 +216,7 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
   const highlightedStandIds = useForestStore((s) => s.highlightedStandIds);
   const selectStand = useForestStore((s) => s.selectStand);
   const setHighlightedStands = useForestStore((s) => s.setHighlightedStands);
+  const activeMainTab = useForestStore((s) => s.activeMainTab);
 
   // Build MapLibre match expression for fill-color
   const buildMatchExpression = useCallback((): maplibregl.Expression => {
@@ -434,8 +435,9 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
 
   // Zoom to selected stand when selection changes via AI or chart click
   // (NOT on direct map click — those are handled separately with clickedStandRef)
+  // Skip if map tab is not active — popup uses getBoundingClientRect which fails on hidden elements
   useEffect(() => {
-    if (!map || !selectedStandId) return;
+    if (!map || !selectedStandId || activeMainTab !== "map") return;
 
     // If selection came from map click, skip zoom
     if (clickedStandRef.current === selectedStandId) {
@@ -484,7 +486,7 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
     } catch {
       // Silently handle geometry format issues
     }
-  }, [map, selectedStandId, compartments]);
+  }, [map, selectedStandId, compartments, activeMainTab]);
 
   // Auto-zoom to fit stands on first load
   useEffect(() => {

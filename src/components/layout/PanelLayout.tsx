@@ -4,10 +4,17 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useMediaQuery } from "@/lib/hooks/use-media-query";
 import { useForestStore } from "@/lib/store";
 import PanelResizer from "./PanelResizer";
+import MainTabBar from "./MainTabBar";
+
+interface PanelLayoutTabs {
+  map: React.ReactNode;
+  stands: React.ReactNode;
+  operations: React.ReactNode;
+}
 
 interface PanelLayoutProps {
   chartsPanel: React.ReactNode;
-  mapPanel: React.ReactNode;
+  tabs: PanelLayoutTabs;
   chatPanel: React.ReactNode;
 }
 
@@ -54,9 +61,32 @@ function ChartBadgeButton({
   );
 }
 
+function TabContainer({ tabs }: { tabs: PanelLayoutTabs }) {
+  const activeMainTab = useForestStore((s) => s.activeMainTab);
+
+  return (
+    <div className="flex flex-col flex-1 min-w-0 min-h-0">
+      <MainTabBar />
+      <div className="flex-1 relative min-h-0">
+        {/* Map tab — always mounted, hidden when inactive */}
+        <div className={activeMainTab === "map" ? "h-full" : "hidden"}>
+          {tabs.map}
+        </div>
+        {/* Stands/Operations tabs — conditionally rendered (no heavy init) */}
+        {activeMainTab === "stands" && (
+          <div className="h-full">{tabs.stands}</div>
+        )}
+        {activeMainTab === "operations" && (
+          <div className="h-full">{tabs.operations}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function PanelLayout({
   chartsPanel,
-  mapPanel,
+  tabs,
   chatPanel,
 }: PanelLayoutProps) {
   const isLarge = useMediaQuery("(min-width: 1280px)");
@@ -97,10 +127,8 @@ export default function PanelLayout({
           <div className={chartsFullscreen ? "hidden" : "contents"}>
             <PanelResizer onResize={handleChartsResize} />
           </div>
-          {/* Map panel — always rendered */}
-          <div className="flex-1 relative min-w-0">
-            {mapPanel}
-          </div>
+          {/* Tab container with map, stands, operations */}
+          <TabContainer tabs={tabs} />
           {/* Map-chat resizer — always rendered */}
           <PanelResizer onResize={handleChatResize} />
           {/* Chat panel — always rendered */}
@@ -125,7 +153,7 @@ export default function PanelLayout({
       <div className="h-full relative">
         <div className="flex flex-col h-full">
           <div className="flex flex-1 min-h-0">
-            <div className="flex-1 relative min-w-0">{mapPanel}</div>
+            <TabContainer tabs={tabs} />
             <div className="w-[380px] border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shrink-0">
               {chatPanel}
             </div>
@@ -160,7 +188,7 @@ export default function PanelLayout({
     <div className="h-full relative">
       <div className="flex h-full">
         <div className={`flex-1 relative min-w-0 ${chartsFullscreen ? "hidden" : ""}`}>
-          {mapPanel}
+          <TabContainer tabs={tabs} />
         </div>
         <div
           className={`w-[380px] border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shrink-0 ${
