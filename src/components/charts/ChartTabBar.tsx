@@ -35,7 +35,7 @@ export default function ChartTabBar({
           >
             <span className="truncate max-w-[120px]">{tab.title}</span>
             <span
-              className="ml-0.5 text-gray-400 hover:text-red-500 dark:hover:text-red-400 cursor-pointer flex-shrink-0"
+              className="ml-1 text-gray-400 hover:text-red-500 dark:hover:text-red-400 cursor-pointer flex-shrink-0 text-xl leading-none"
               onClick={(e) => {
                 e.stopPropagation();
                 onClose(tab.id);
