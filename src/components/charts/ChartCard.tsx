@@ -235,15 +235,20 @@ export default function ChartCard({ tab }: ChartCardProps) {
   const setSelectedYear = useForestStore((s) => s.setSelectedYear);
   const setHighlightedStands = useForestStore((s) => s.setHighlightedStands);
 
-  // Handle click on chart element — uses _stand_ids for cross-highlighting
+  // Handle click on chart element — uses _stand_ids for cross-highlighting.
+  // Toggle semantics prevent selection loops: clicking a bar whose stands
+  // are already selected deselects them; clicking a different bar replaces
+  // the selection. This way no accumulation cascade can build up.
   const handleChartClick = (data: Record<string, unknown> | undefined) => {
     if (!data) return;
 
     // If data has _stand_ids, use them for multi-selection (works for ALL chart types)
     const standIds = data["_stand_ids"] as string[] | undefined;
     if (standIds && standIds.length > 0) {
-      // Toggle: if all are already selected, deselect; otherwise select all
-      const allSelected = standIds.every((id) => highlightedStandIds.includes(id));
+      // Toggle: if all stands from this bar are already selected, deselect.
+      // Otherwise select exactly these stands (replaces previous selection).
+      const current = useForestStore.getState().highlightedStandIds;
+      const allSelected = standIds.length > 0 && standIds.every((id) => current.includes(id));
       setHighlightedStands(allSelected ? [] : standIds);
       return;
     }
@@ -312,15 +317,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
     case "bar":
       return (
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart
-            data={translatedData}
-            onClick={(e) =>
-              handleChartClick(
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                (e as any)?.activePayload?.[0]?.payload as Record<string, unknown> | undefined
-              )
-            }
-          >
+          <BarChart data={translatedData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
             <XAxis
               dataKey={effectiveXKey ?? undefined}
@@ -432,15 +429,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
 
       return (
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart
-            data={pivoted}
-            onClick={(e) =>
-              handleChartClick(
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                (e as any)?.activePayload?.[0]?.payload as Record<string, unknown> | undefined
-              )
-            }
-          >
+          <BarChart data={pivoted}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
             <XAxis
               dataKey={effectiveXKey ?? undefined}
@@ -461,6 +450,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
                         stackId="income"
                         fill={CHART_COLORS[i % CHART_COLORS.length]}
                         name={`${cat}`}
+                        onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
                       >
                         {pivoted.map((entry, j) => (
                           <Cell
@@ -479,6 +469,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
                         stackId="cost"
                         fill={COST_COLORS[i % COST_COLORS.length]}
                         name={`${cat}`}
+                        onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
                       >
                         {pivoted.map((entry, j) => (
                           <Cell
@@ -497,6 +488,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
                     dataKey={key}
                     stackId="a"
                     fill={CHART_COLORS[i % CHART_COLORS.length]}
+                    onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
                   >
                     {pivoted.map((entry, j) => (
                       <Cell
@@ -513,16 +505,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
     case "horizontal_bar":
       return (
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart
-            data={translatedData}
-            layout="vertical"
-            onClick={(e) =>
-              handleChartClick(
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                (e as any)?.activePayload?.[0]?.payload as Record<string, unknown> | undefined
-              )
-            }
-          >
+          <BarChart data={translatedData} layout="vertical">
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
             <XAxis
               type="number"
@@ -774,15 +757,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
     case "composed":
       return (
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart
-            data={translatedData}
-            onClick={(e) =>
-              handleChartClick(
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                (e as any)?.activePayload?.[0]?.payload as Record<string, unknown> | undefined
-              )
-            }
-          >
+          <ComposedChart data={translatedData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
             <XAxis
               dataKey={effectiveXKey ?? undefined}
@@ -792,7 +767,9 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <YAxis {...yAxisProps(tab.yKey, tab.yKey2)} />
             <Tooltip content={<EuroTooltip />} />
             <Legend />
-            <Bar dataKey={tab.yKey} fill="#4CAF50" radius={[4, 4, 0, 0]}>
+            <Bar dataKey={tab.yKey} fill="#4CAF50" radius={[4, 4, 0, 0]}
+              onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
+            >
               {translatedData.map((entry, i) => (
                 <Cell
                   key={`comp-${i}`}
@@ -819,15 +796,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
       const wfData = buildWaterfallData(translatedData, tab.yKey, tab.waterfall_base);
       return (
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart
-            data={wfData}
-            onClick={(e) =>
-              handleChartClick(
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                (e as any)?.activePayload?.[0]?.payload as Record<string, unknown> | undefined
-              )
-            }
-          >
+          <BarChart data={wfData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
             <XAxis
               dataKey={effectiveXKey ?? undefined}
