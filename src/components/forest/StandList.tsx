@@ -50,6 +50,29 @@ function formatDisplayDevClass(dc: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/** Natural sort: "2" < "10", "a2" < "a10". Falls back to localeCompare for non-numeric strings. */
+const naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+function naturalCompare(a: unknown, b: unknown): number {
+  return naturalCollator.compare(String(a ?? ""), String(b ?? ""));
+}
+
+// ── Module-level state so filter/sort/expand survive tab switches ──
+const standPersist = {
+  sortKey: "stand_id" as string | null,
+  sortDir: "asc" as "asc" | "desc",
+  expandedStands: [] as string[],
+  speciesFilter: [] as string[],
+  devClassFilter: [] as string[],
+  siteTypeFilter: [] as string[],
+  ageMin: null as number | null,
+  ageMax: null as number | null,
+  areaMin: null as number | null,
+  areaMax: null as number | null,
+  volumeMin: null as number | null,
+  volumeMax: null as number | null,
+  globalFilter: "",
+};
+
 export default function StandList({ map }: StandListProps) {
   const compartments = useForestStore((s) => s.compartments);
   const compartmentSpecies = useForestStore((s) => s.compartmentSpecies);
@@ -61,21 +84,75 @@ export default function StandList({ map }: StandListProps) {
   const setPendingStandSelection = useForestStore((s) => s.setPendingStandSelection);
   const aiStandFilters = useForestStore((s) => s.aiStandFilters);
 
-  const [expandedStands, setExpandedStands] = useState<Set<string>>(new Set());
-  const [sortKey, setSortKey] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  // ── State backed by module-level standPersist to survive tab switches ──
+  const [expandedStands, setExpandedStandsRaw] = useState<Set<string>>(
+    () => new Set(standPersist.expandedStands)
+  );
+  const setExpandedStands = (v: Set<string> | ((prev: Set<string>) => Set<string>)) => {
+    setExpandedStandsRaw((prev) => {
+      const next = typeof v === "function" ? v(prev) : v;
+      standPersist.expandedStands = Array.from(next);
+      return next;
+    });
+  };
 
-  // Filter state
-  const [speciesFilter, setSpeciesFilter] = useState<Set<string>>(new Set());
-  const [devClassFilter, setDevClassFilter] = useState<Set<string>>(new Set());
-  const [siteTypeFilter, setSiteTypeFilter] = useState<Set<string>>(new Set());
-  const [ageMin, setAgeMin] = useState<number | null>(null);
-  const [ageMax, setAgeMax] = useState<number | null>(null);
-  const [areaMin, setAreaMin] = useState<number | null>(null);
-  const [areaMax, setAreaMax] = useState<number | null>(null);
-  const [volumeMin, setVolumeMin] = useState<number | null>(null);
-  const [volumeMax, setVolumeMax] = useState<number | null>(null);
-  const [globalFilter, setGlobalFilter] = useState("");
+  const [sortKey, setSortKeyRaw] = useState<string | null>(standPersist.sortKey);
+  const setSortKey = (k: string | null) => { standPersist.sortKey = k; setSortKeyRaw(k); };
+  const [sortDir, setSortDirRaw] = useState<"asc" | "desc">(standPersist.sortDir);
+  const setSortDir: React.Dispatch<React.SetStateAction<"asc" | "desc">> = (v) => {
+    setSortDirRaw((prev) => {
+      const next = typeof v === "function" ? v(prev) : v;
+      standPersist.sortDir = next;
+      return next;
+    });
+  };
+
+  // Filter state — backed by standPersist
+  const [speciesFilter, setSpeciesFilterRaw] = useState<Set<string>>(
+    () => new Set(standPersist.speciesFilter)
+  );
+  const setSpeciesFilter: React.Dispatch<React.SetStateAction<Set<string>>> = (v) => {
+    setSpeciesFilterRaw((prev) => {
+      const next = typeof v === "function" ? v(prev) : v;
+      standPersist.speciesFilter = Array.from(next);
+      return next;
+    });
+  };
+  const [devClassFilter, setDevClassFilterRaw] = useState<Set<string>>(
+    () => new Set(standPersist.devClassFilter)
+  );
+  const setDevClassFilter: React.Dispatch<React.SetStateAction<Set<string>>> = (v) => {
+    setDevClassFilterRaw((prev) => {
+      const next = typeof v === "function" ? v(prev) : v;
+      standPersist.devClassFilter = Array.from(next);
+      return next;
+    });
+  };
+  const [siteTypeFilter, setSiteTypeFilterRaw] = useState<Set<string>>(
+    () => new Set(standPersist.siteTypeFilter)
+  );
+  const setSiteTypeFilter: React.Dispatch<React.SetStateAction<Set<string>>> = (v) => {
+    setSiteTypeFilterRaw((prev) => {
+      const next = typeof v === "function" ? v(prev) : v;
+      standPersist.siteTypeFilter = Array.from(next);
+      return next;
+    });
+  };
+
+  const [ageMin, setAgeMinRaw] = useState<number | null>(standPersist.ageMin);
+  const setAgeMin = (v: number | null) => { standPersist.ageMin = v; setAgeMinRaw(v); };
+  const [ageMax, setAgeMaxRaw] = useState<number | null>(standPersist.ageMax);
+  const setAgeMax = (v: number | null) => { standPersist.ageMax = v; setAgeMaxRaw(v); };
+  const [areaMin, setAreaMinRaw] = useState<number | null>(standPersist.areaMin);
+  const setAreaMin = (v: number | null) => { standPersist.areaMin = v; setAreaMinRaw(v); };
+  const [areaMax, setAreaMaxRaw] = useState<number | null>(standPersist.areaMax);
+  const setAreaMax = (v: number | null) => { standPersist.areaMax = v; setAreaMaxRaw(v); };
+  const [volumeMin, setVolumeMinRaw] = useState<number | null>(standPersist.volumeMin);
+  const setVolumeMin = (v: number | null) => { standPersist.volumeMin = v; setVolumeMinRaw(v); };
+  const [volumeMax, setVolumeMaxRaw] = useState<number | null>(standPersist.volumeMax);
+  const setVolumeMax = (v: number | null) => { standPersist.volumeMax = v; setVolumeMaxRaw(v); };
+  const [globalFilter, setGlobalFilterRaw] = useState(standPersist.globalFilter);
+  const setGlobalFilter = (v: string) => { standPersist.globalFilter = v; setGlobalFilterRaw(v); };
 
   // Apply AI-pushed filters
   useEffect(() => {
@@ -199,7 +276,7 @@ export default function StandList({ map }: StandListProps) {
         const bVal = (b as unknown as Record<string, unknown>)[sortKey] ?? 0;
         const cmp = typeof aVal === "number" && typeof bVal === "number"
           ? aVal - bVal
-          : String(aVal).localeCompare(String(bVal));
+          : naturalCompare(aVal, bVal);
         return sortDir === "asc" ? cmp : -cmp;
       });
     }

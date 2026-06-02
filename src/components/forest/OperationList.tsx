@@ -41,6 +41,23 @@ function formatDisplayDevClass(dc: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+const naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+function naturalCompare(a: unknown, b: unknown): number {
+  return naturalCollator.compare(String(a ?? ""), String(b ?? ""));
+}
+
+// ── Module-level state so filter/sort survive tab switches ──
+const opPersist = {
+  sortKey: null as string | null,
+  sortDir: "asc" as "asc" | "desc",
+  yearFrom: null as number | null,
+  yearTo: null as number | null,
+  typeFilter: [] as string[],
+  standFilter: "",
+  speciesFilter: [] as string[],
+  globalFilter: "",
+};
+
 export default function OperationList({ map }: OperationListProps) {
   const operations = useForestStore((s) => s.operations);
   const compartments = useForestStore((s) => s.compartments);
@@ -60,17 +77,51 @@ export default function OperationList({ map }: OperationListProps) {
     return m;
   }, [compartments]);
 
-  // Filters
-  const [yearFrom, setYearFrom] = useState<number | null>(null);
-  const [yearTo, setYearTo] = useState<number | null>(null);
-  const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
-  const [standFilter, setStandFilter] = useState("");
-  const [speciesFilter, setSpeciesFilter] = useState<Set<string>>(new Set());
-  const [globalFilter, setGlobalFilter] = useState("");
+  // ── State backed by module-level opPersist to survive tab switches ──
+  const [yearFrom, setYearFromRaw] = useState<number | null>(opPersist.yearFrom);
+  const setYearFrom = (v: number | null) => { opPersist.yearFrom = v; setYearFromRaw(v); };
+  const [yearTo, setYearToRaw] = useState<number | null>(opPersist.yearTo);
+  const setYearTo = (v: number | null) => { opPersist.yearTo = v; setYearToRaw(v); };
+
+  const [typeFilter, setTypeFilterRaw] = useState<Set<string>>(
+    () => new Set(opPersist.typeFilter)
+  );
+  const setTypeFilter: React.Dispatch<React.SetStateAction<Set<string>>> = (v) => {
+    setTypeFilterRaw((prev) => {
+      const next = typeof v === "function" ? v(prev) : v;
+      opPersist.typeFilter = Array.from(next);
+      return next;
+    });
+  };
+
+  const [standFilter, setStandFilterRaw] = useState(opPersist.standFilter);
+  const setStandFilter = (v: string) => { opPersist.standFilter = v; setStandFilterRaw(v); };
+
+  const [speciesFilter, setSpeciesFilterRaw] = useState<Set<string>>(
+    () => new Set(opPersist.speciesFilter)
+  );
+  const setSpeciesFilter: React.Dispatch<React.SetStateAction<Set<string>>> = (v) => {
+    setSpeciesFilterRaw((prev) => {
+      const next = typeof v === "function" ? v(prev) : v;
+      opPersist.speciesFilter = Array.from(next);
+      return next;
+    });
+  };
+
+  const [globalFilter, setGlobalFilterRaw] = useState(opPersist.globalFilter);
+  const setGlobalFilter = (v: string) => { opPersist.globalFilter = v; setGlobalFilterRaw(v); };
 
   // Sort state
-  const [sortKey, setSortKey] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [sortKey, setSortKeyRaw] = useState<string | null>(opPersist.sortKey);
+  const setSortKey = (k: string | null) => { opPersist.sortKey = k; setSortKeyRaw(k); };
+  const [sortDir, setSortDirRaw] = useState<"asc" | "desc">(opPersist.sortDir);
+  const setSortDir: React.Dispatch<React.SetStateAction<"asc" | "desc">> = (v) => {
+    setSortDirRaw((prev) => {
+      const next = typeof v === "function" ? v(prev) : v;
+      opPersist.sortDir = next;
+      return next;
+    });
+  };
 
   // Apply AI-pushed filters
   useEffect(() => {
@@ -169,60 +220,43 @@ export default function OperationList({ map }: OperationListProps) {
       });
     }
 
-    // Sort
-    if (sortKey) {
-      filtered.sort((a, b) => {
-        let aVal: unknown, bVal: unknown;
-        switch (sortKey) {
-          case "stand_id":
-            aVal = a.comp?.stand_id ?? "";
-            bVal = b.comp?.stand_id ?? "";
-            break;
-          case "type":
-            aVal = a.op.type;
-            bVal = b.op.type;
-            break;
-          case "year":
-            aVal = a.op.year;
-            bVal = b.op.year;
-            break;
-          case "species":
-            aVal = a.comp?.main_species ?? "";
-            bVal = b.comp?.main_species ?? "";
-            break;
-          case "area_ha":
-            aVal = a.comp?.area_ha ?? 0;
-            bVal = b.comp?.area_ha ?? 0;
-            break;
-          case "volume_m3":
-            aVal = a.comp?.volume_m3 ?? 0;
-            bVal = b.comp?.volume_m3 ?? 0;
-            break;
-          case "removal_pct":
-            aVal = a.op.removal_pct ?? 0;
-            bVal = b.op.removal_pct ?? 0;
-            break;
-          case "income_eur":
-            aVal = a.op.income_eur ?? 0;
-            bVal = b.op.income_eur ?? 0;
-            break;
-          case "cost_eur":
-            aVal = a.op.cost_eur ?? 0;
-            bVal = b.op.cost_eur ?? 0;
-            break;
-          case "development_class":
-            aVal = a.comp?.development_class ?? "";
-            bVal = b.comp?.development_class ?? "";
-            break;
-          default:
-            return 0;
-        }
+    // Sort with multi-key fallback: primary → year → type → stand_id
+    // Always applies so initial order is year/type/stand_id even without a click
+    const SORT_KEYS = [sortKey, "year", "type", "stand_id"].filter(
+      (k, i, arr) => k != null && arr.indexOf(k) === i  // dedupe
+    ) as string[];
+
+    const getSortVal = (row: typeof filtered[0], key: string): unknown => {
+      switch (key) {
+        case "stand_id": return row.comp?.stand_id ?? "";
+        case "type": return row.op.type;
+        case "year": return row.op.year;
+        case "species": return row.comp?.main_species ?? "";
+        case "area_ha": return row.comp?.area_ha ?? 0;
+        case "volume_m3": return row.comp?.volume_m3 ?? 0;
+        case "removal_pct": return row.op.removal_pct ?? 0;
+        case "income_eur": return row.op.income_eur ?? 0;
+        case "cost_eur": return row.op.cost_eur ?? 0;
+        case "development_class": return row.comp?.development_class ?? "";
+        default: return "";
+      }
+    };
+
+    filtered.sort((a, b) => {
+      for (const key of SORT_KEYS) {
+        const aVal = getSortVal(a, key);
+        const bVal = getSortVal(b, key);
         const cmp = typeof aVal === "number" && typeof bVal === "number"
           ? aVal - bVal
-          : String(aVal).localeCompare(String(bVal));
-        return sortDir === "asc" ? cmp : -cmp;
-      });
-    }
+          : naturalCompare(aVal, bVal);
+        if (cmp !== 0) {
+          // Direction only applies to the primary sort key
+          const dir = key === sortKey ? (sortDir === "asc" ? 1 : -1) : 1;
+          return cmp * dir;
+        }
+      }
+      return 0;
+    });
 
     return filtered;
   }, [operations, compMap, yearFrom, yearTo, typeFilter, speciesFilter, standFilter, globalFilter, sortKey, sortDir]);
