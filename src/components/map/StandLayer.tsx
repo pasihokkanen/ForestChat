@@ -279,6 +279,17 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
   const setHighlightedStands = useForestStore((s) => s.setHighlightedStands);
   const activeMainTab = useForestStore((s) => s.activeMainTab);
 
+  // When highlighting changes (e.g. from list row click), close popup if
+  // the selected stand no longer matches the highlight
+  useEffect(() => {
+    if (!selectedStandId) return;
+    if (highlightedStandIds.length === 0 || !highlightedStandIds.includes(selectedStandId)) {
+      hideCustomPopup(popupRef);
+      selectStand(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightedStandIds]);
+
   // Build MapLibre match expression for fill-color
   const buildMatchExpression = useCallback((): maplibregl.Expression => {
     if (useAgeColor) {
