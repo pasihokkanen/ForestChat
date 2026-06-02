@@ -253,6 +253,11 @@ QUERY_CONFIG format:
 - aggregate: array of { group_by: "column_name" }
 - values: array of { field: "column", as: "output_name", fn: "sum"|"count"|"avg"|"min"|"max" }
   - Optional multiply: number — e.g. multiply: -1 for costs to display below zero
+  - Optional op: "multiply"|"divide" + operand: "column" — per-row arithmetic BEFORE aggregation.
+    Example: values:[{field:"volume_m3", as:"vol_ha", fn:"avg", op:"divide", operand:"comp.area_ha"}]
+    This computes volume_m3/area_ha on each raw row, then averages the results (per-stand volume/ha).
+    Use comp. prefix for join columns on operations source; use bare names on compartments source.
+  - Optional cumulative: true — convert period sums to running totals (for area charts).
 - filters (optional): object with column:value pairs (arrays for IN filters)
 - sort (optional): { by: "column", dir: "asc"|"desc" }
 - limit (optional): max rows (default 500)

@@ -28,6 +28,10 @@ export interface ChartQueryConfig {
      *  totals after aggregation. Only works on sorted data — the cumulative
      *  direction follows the sort order (typically year ascending). */
     cumulative?: boolean;
+    /** Apply a per-row operation BEFORE aggregation (e.g. "divide" volume by area). */
+    op?: "multiply" | "divide";
+    /** Second column for the per-row op. Supports dot-prefix notation (e.g. "comp.area_ha"). */
+    operand?: string;
   }>;
   filters?: Record<string, unknown>;
   sort?: { by: string; dir?: "asc" | "desc" };
@@ -59,6 +63,8 @@ export interface SubQueryConfig {
     fn: "sum" | "count" | "avg" | "min" | "max";
     multiply?: number;
     cumulative?: boolean;
+    op?: "multiply" | "divide";
+    operand?: string;
   }>;
   filters?: Record<string, unknown>;
   limit?: number;
@@ -302,6 +308,21 @@ const COMPUTED_FIELDS: Record<string, ComputedFieldDef> = {
     compute: (row) =>
       ((row.growth_m3_per_ha as number) ?? 0) * ((row.area_ha as number) ?? 0),
   },
+  // Volume per hectare (m³/ha): total standing volume divided by area.
+  // Available on compartments source natively; for operations source, the
+  // AI must include volume_m3 and area_ha in the join fields.
+  volume_per_ha: {
+    sources: ["volume_m3", "area_ha"],
+    sourceTables: {
+      volume_m3: "source",
+      area_ha: "source",
+    },
+    compute: (row) => {
+      const vol = (row.volume_m3 as number) ?? 0;
+      const area = (row.area_ha as number) ?? 0;
+      return area > 0 ? vol / area : 0;
+    },
+  },
   // Net volume change per operation: growth − removal. Positive = net growth,
   // negative = net removal. Designed for waterfall charts (growth up, removal down).
   // Depends on growth_m3_per_ha (computed first via chaining).
@@ -466,6 +487,26 @@ function buildSelect(config: ChartQueryConfig): string {
         joinFields.get("compartments")!.add(resolveFieldAlias(src));
       } else {
         rawFields.add(resolveFieldAlias(src));
+      }
+    }
+  }
+
+  // Operand columns for per-row multiply/divide ops
+  for (const v of config.values) {
+    if (!v.operand) continue;
+    // Support dot-prefix notation (e.g. "comp.area_ha") for join columns
+    const res = resolveJoinField(v.operand);
+    if (res.table) {
+      if (!joinFields.has(res.table)) joinFields.set(res.table, new Set());
+      joinFields.get(res.table)!.add(res.field);
+    } else {
+      // Bare column — if it's in the join fields list, route there
+      const isJoinCol = !!config.join && config.join.fields.includes(res.field);
+      if (isJoinCol) {
+        if (!joinFields.has("compartments")) joinFields.set("compartments", new Set());
+        joinFields.get("compartments")!.add(res.field);
+      } else {
+        rawFields.add(res.field);
       }
     }
   }
@@ -650,7 +691,13 @@ function aggregateRows(
   if (groupKeys.length === 0) {
     const result: Record<string, unknown> = {};
     for (const v of config.values) {
-      result[v.as] = (aggregateFn(v.fn, rows, v.field)) * (v.multiply ?? 1);
+      if (v.op && v.operand) {
+        // Per-row arithmetic before aggregation (e.g. volume_m3 / area_ha)
+        const computed = computePerRowValues(rows, v.field, v.operand, v.op);
+        result[v.as] = aggregateOnNumbers(v.fn, computed) * (v.multiply ?? 1);
+      } else {
+        result[v.as] = (aggregateFn(v.fn, rows, v.field)) * (v.multiply ?? 1);
+      }
     }
     const standIds = new Set<string>();
     for (const row of rows) {
@@ -683,7 +730,12 @@ function aggregateRows(
   groups.forEach((group) => {
     const aggregated: Record<string, unknown> = { ...group.key };
     for (const v of config.values) {
-      aggregated[v.as] = (aggregateFn(v.fn, group.rows, v.field)) * (v.multiply ?? 1);
+      if (v.op && v.operand) {
+        const computed = computePerRowValues(group.rows, v.field, v.operand, v.op);
+        aggregated[v.as] = aggregateOnNumbers(v.fn, computed) * (v.multiply ?? 1);
+      } else {
+        aggregated[v.as] = (aggregateFn(v.fn, group.rows, v.field)) * (v.multiply ?? 1);
+      }
     }
     // Collect unique stand_ids for cross-highlighting (ChartCard ↔ map/list)
     const standIds = new Set<string>();
@@ -722,6 +774,52 @@ function aggregateFn(
       return Math.min(...values);
     case "max":
       return Math.max(...values);
+    default:
+      return 0;
+  }
+}
+
+/** Compute per-row values by applying an arithmetic op between two columns.
+ *  Used for row-level multiply/divide before aggregation (e.g. volume_m3 / area_ha). */
+function computePerRowValues(
+  rows: Record<string, unknown>[],
+  field: string,
+  operand: string,
+  op: "multiply" | "divide"
+): number[] {
+  const result: number[] = [];
+  for (const row of rows) {
+    const a = (row[field] as number) ?? 0;
+    const b = (row[operand] as number) ?? 0;
+    if (op === "divide") {
+      result.push(b !== 0 ? a / b : 0);
+    } else {
+      result.push(a * b);
+    }
+  }
+  return result;
+}
+
+/** Aggregate pre-computed per-row values (for per-row op results). */
+function aggregateOnNumbers(
+  fn: "sum" | "count" | "avg" | "min" | "max" | undefined,
+  values: number[]
+): number {
+  const effectiveFn = fn || "count";
+  if (effectiveFn === "count") return values.length;
+
+  const clean = values.filter((v) => typeof v === "number" && !isNaN(v));
+  if (clean.length === 0) return 0;
+
+  switch (effectiveFn) {
+    case "sum":
+      return clean.reduce((a, b) => a + b, 0);
+    case "avg":
+      return clean.reduce((a, b) => a + b, 0) / clean.length;
+    case "min":
+      return Math.min(...clean);
+    case "max":
+      return Math.max(...clean);
     default:
       return 0;
   }
