@@ -543,6 +543,9 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
 
       // Cancel any in-progress animation before fitting
       map.stop();
+      // Resize so the map knows its current container dimensions —
+      // essential when the container was just un-hidden by a tab switch
+      map.resize();
       map.fitBounds(bounds, { padding: 80, maxZoom: 16, duration: 800 });
 
       // Show popup AFTER the zoom animation completes (moveend)
