@@ -56,15 +56,15 @@ function shouldUseAgeColoring(
   return maxPct <= 0.7;
 }
 
+// ── Persisted popup position — remembered across open/close, default top-left ──
+const popupPos = { left: 12, top: 12 };
+
 /** Show a custom popup overlay for a forest stand. Uses store data for species and operations.
- *  @param polyBounds — the stand polygon's bounding box in screen coordinates {left, top, right, bottom}
- *  @param containerBounds — the map container's bounding rect for clipping */
+ *  Position persists across open/close; draggable by the header. */
 function showCustomPopup(
    map: maplibregl.Map,
    popupRef: React.MutableRefObject<HTMLElement | null>,
    props: Record<string, unknown>,
-   polyBounds: { left: number; top: number; right: number; bottom: number },
-   containerBounds: DOMRect,
    isDark: boolean,
  ) {
   // Remove any existing custom popup
@@ -85,58 +85,16 @@ function showCustomPopup(
   const sectionTitleColor = isDark ? "#9ca3af" : "#6b7280";
   const labelColor = isDark ? "#d1d5db" : "#111";
 
-  // ── Smart placement: pick the side with the most available space ──
   const POPUP_WIDTH = 280;
-  const POPUP_HEIGHT = 300; // approximate, will be sized by content
-  const GAP = 12; // px gap between polygon edge and popup
 
-  // Available space in each direction (within container bounds)
-  const spaceTop = polyBounds.top - containerBounds.top;
-  const spaceBottom = containerBounds.bottom - polyBounds.bottom;
-  const spaceLeft = polyBounds.left - containerBounds.left;
-  const spaceRight = containerBounds.right - polyBounds.right;
-
-  // Prefer bottom or right if there's enough room, otherwise top or left
-  let posX: number;
-  let posY: number;
-  let transformX: string;
-  let transformY: string;
-
-  // Horizontal: prefer center-aligned over polygon, clamped to container
-  const polyCenterX = (polyBounds.left + polyBounds.right) / 2 - containerBounds.left;
-  // Clamp center so popup doesn't go outside container
-  const minX = POPUP_WIDTH / 2 + 8;
-  const maxX = containerBounds.width - POPUP_WIDTH / 2 - 8;
-  posX = Math.max(minX, Math.min(maxX, polyCenterX));
-  transformX = "-50%";
-
-  // Vertical: pick best side
-  if (spaceBottom >= POPUP_HEIGHT + GAP) {
-    // Place below polygon
-    posY = polyBounds.bottom - containerBounds.top + GAP;
-    transformY = "0";
-  } else if (spaceTop >= POPUP_HEIGHT + GAP) {
-    // Place above polygon
-    posY = polyBounds.top - containerBounds.top - GAP;
-    transformY = "-100%";
-  } else if (spaceBottom >= spaceTop) {
-    // Both tight — below if it has more room
-    posY = Math.min(polyBounds.bottom - containerBounds.top + GAP, containerBounds.height - POPUP_HEIGHT - 4);
-    transformY = "0";
-  } else {
-    posY = Math.max(polyBounds.top - containerBounds.top - GAP, 4);
-    transformY = "-100%";
-  }
-
-  // Create overlay container — append to map container so it stays inside
+  // Create overlay container — append to map container, position from top-left
   const el = document.createElement("div");
   el.className = "forestchat-custom-popup";
   el.style.cssText = `
     position: absolute;
     z-index: 1000;
-    left: ${posX}px;
-    top: ${posY}px;
-    transform: translate(${transformX}, ${transformY});
+    left: ${popupPos.left}px;
+    top: ${popupPos.top}px;
     background: ${bgColor};
     border: 1px solid ${borderColor};
     border-radius: 8px;
@@ -147,6 +105,7 @@ function showCustomPopup(
     font-size: 13px;
     color: ${textColor};
     pointer-events: auto;
+    cursor: default;
   `;
 
   map.getContainer().appendChild(el);
@@ -191,8 +150,8 @@ function showCustomPopup(
 
   el.innerHTML = `
     <div style="position:relative">
-      <button class="popup-close" style="position:absolute;top:1px;right:1px;border:none;background:transparent;font-size:18px;cursor:pointer;color:${closeBtnColor};line-height:1;width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:4px">×</button>
-      <h3 style="font-weight:600;font-size:15px;margin:0 0 8px 0;padding-bottom:4px;border-bottom:1px solid ${borderColor};color:${textColor}">Stand ${standId}</h3>
+      <button class="popup-close" style="position:absolute;top:1px;right:1px;border:none;background:transparent;font-size:18px;cursor:pointer;color:${closeBtnColor};line-height:1;width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:4px;z-index:1">×</button>
+      <h3 class="popup-drag-handle" style="font-weight:600;font-size:15px;margin:0 0 8px 0;padding:4px 20px 4px 0;border-bottom:1px solid ${borderColor};color:${textColor};cursor:grab;user-select:none">Stand ${standId}</h3>
 
       <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:${sectionTitleColor};text-transform:uppercase;letter-spacing:0.5px">Stand details</h4>
       <div style="margin:0 0 8px 0">
@@ -230,27 +189,46 @@ function showCustomPopup(
       closeBtn.style.backgroundColor = "transparent";
     };
   }
- }
 
-/** Compute the screen-space bounding box of a GeoJSON polygon geometry. */
-function getPolygonScreenBounds(
-  map: maplibregl.Map,
-  geom: GeoJSON.Polygon | GeoJSON.MultiPolygon
-): { left: number; top: number; right: number; bottom: number } {
-  const coords =
-    geom.type === "Polygon"
-      ? geom.coordinates[0]
-      : geom.coordinates.flatMap((ring) => ring[0]);
-  let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
-  for (const [lng, lat] of coords as [number, number][]) {
-    const pt = map.project([lng, lat]);
-    if (pt.x < left) left = pt.x;
-    if (pt.y < top) top = pt.y;
-    if (pt.x > right) right = pt.x;
-    if (pt.y > bottom) bottom = pt.y;
+  // ── Drag-to-reposition ──
+  const dragHandle = el.querySelector(".popup-drag-handle") as HTMLElement | null;
+  if (dragHandle) {
+    let dragging = false;
+    let startX = 0, startY = 0, startLeft = 0, startTop = 0;
+
+    const onDown = (e: MouseEvent) => {
+      if ((e.target as HTMLElement)?.closest(".popup-close")) return;
+      dragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      startLeft = el.offsetLeft;
+      startTop = el.offsetTop;
+      dragHandle.style.cursor = "grabbing";
+      e.preventDefault();
+    };
+
+    const onMove = (e: MouseEvent) => {
+      if (!dragging) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      el.style.left = (startLeft + dx) + "px";
+      el.style.top = (startTop + dy) + "px";
+    };
+
+    const onUp = () => {
+      if (!dragging) return;
+      dragging = false;
+      dragHandle.style.cursor = "grab";
+      // Persist position
+      popupPos.left = el.offsetLeft;
+      popupPos.top = el.offsetTop;
+    };
+
+    dragHandle.addEventListener("mousedown", onDown);
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
   }
-  return { left, top, right, bottom };
-}
+ }
 
 /**
  * Remove the custom popup overlay.
@@ -390,14 +368,8 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
         selectStand(standId);
         setHighlightedStands([standId]);
 
-        // Show popup at click coordinates immediately (no zoom)
-        const containerRect = map.getContainer().getBoundingClientRect();
-        const clickedFeatures = map.queryRenderedFeatures(e.point, { layers: ["stand-fills"] });
-        const clickedGeom = clickedFeatures[0]?.geometry;
-        const polyBounds = clickedGeom
-          ? getPolygonScreenBounds(map, clickedGeom as unknown as GeoJSON.Polygon | GeoJSON.MultiPolygon)
-          : { left: map.project(lngLat).x, top: map.project(lngLat).y, right: map.project(lngLat).x, bottom: map.project(lngLat).y };
-        showCustomPopup(map, popupRef, props, polyBounds, containerRect, isDark);
+        // Show popup at persisted position
+        showCustomPopup(map, popupRef, props, isDark);
       } else {
         // Clicked on background — close popup and deselect
         hideCustomPopup(popupRef);
@@ -549,15 +521,11 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
       map.fitBounds(bounds, { padding: 80, maxZoom: 16, duration: 800 });
 
       // Show popup AFTER the zoom animation completes (moveend)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const featGeom = feature.geometry as any;
       const props = feature.properties as Record<string, unknown>;
 
       const onMoveEnd = () => {
         if (useForestStore.getState().selectedStandId !== selectedStandId) return;
-        const containerRect = map.getContainer().getBoundingClientRect();
-        const polyBounds = getPolygonScreenBounds(map, featGeom);
-        showCustomPopup(map, popupRef, props, polyBounds, containerRect, isDark);
+        showCustomPopup(map, popupRef, props, isDark);
       };
       // Use once() so it auto-removes after firing
       map.once("moveend", onMoveEnd);
