@@ -135,7 +135,7 @@ const toolHandlers: Record<string, ToolHandler> = {
 
   // Phase 4b: Visualization tools
   create_chart: async (args, ctx) => {
-    const { chart_id, title, type, query_config, data, x_key, y_key, name_key, color_key, stand_dimension, y_key2, waterfall_base } = args;
+    const { chart_id, title, type, query_config, data, x_key, y_key, name_key, color_key, y_key2, waterfall_base } = args;
 
     if (!chart_id || typeof chart_id !== "string") {
       return { success: false, result: "", error: "chart_id is required" };
@@ -209,7 +209,6 @@ const toolHandlers: Record<string, ToolHandler> = {
           yKey2: resolvedYKey2,
           nameKey: effectiveNameKey,
           colorKey: (color_key as string) ?? null,
-          standDimension: (stand_dimension as string) ?? null,
           waterfall_base: (waterfall_base as number) ?? null,
         };
 
@@ -226,7 +225,6 @@ const toolHandlers: Record<string, ToolHandler> = {
           y_key2: chartTab.yKey2,
           name_key: chartTab.nameKey,
           color_key: chartTab.colorKey,
-          stand_dimension: chartTab.standDimension,
           waterfall_base: chartTab.waterfall_base,
         }, { onConflict: "forest_id, chart_id" });
 
@@ -260,7 +258,6 @@ const toolHandlers: Record<string, ToolHandler> = {
       yKey2: (y_key2 as string) ?? null,
       nameKey: (name_key as string) ?? null,
       colorKey: (color_key as string) ?? null,
-      standDimension: (stand_dimension as string) ?? null,
       waterfall_base: (waterfall_base as number) ?? null,
     };
 
@@ -277,7 +274,6 @@ const toolHandlers: Record<string, ToolHandler> = {
         y_key2: chartTab.yKey2,
         name_key: chartTab.nameKey,
         color_key: chartTab.colorKey,
-        stand_dimension: chartTab.standDimension,
         waterfall_base: chartTab.waterfall_base,
       }, { onConflict: "forest_id, chart_id" });
     } catch (err) {

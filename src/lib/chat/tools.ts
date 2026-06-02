@@ -248,8 +248,6 @@ For radar: x_key is the attribute dimension, y_key is the value.
 For composed: line+bar combo. y_key for bars, y_key2 for line.
 For waterfall: x_key=step labels, y_key=values (positive=gain, negative=loss).
 
-If chart categories map to stands, set stand_dimension to the key containing stand_id values — enables click-to-highlight-on-map.
-
 QUERY_CONFIG format:
 - source: "operations" | "compartments" | "compartment_species" | "plan_metadata"
 - aggregate: array of { group_by: "column_name" }
@@ -274,8 +272,7 @@ For joined fields in aggregate, prefix with "comp." (e.g. "comp.main_species"). 
             y_key2: { type: "string", description: "Secondary Y-axis key (composed charts)" },
             name_key: { type: "string", description: "Slice label key (pie/donut)" },
             color_key: { type: "string", description: "Color grouping key" },
-            stand_dimension: { type: "string", description: "Key mapping to stand_id for cross-panel interaction" },
-            waterfall_base: { type: "number", description: "Starting base value for waterfall charts (e.g., current total volume in m³). The first bar shows this value, subsequent bars build on top of it." },
+            waterfall_base: { type: "number", description: "Starting base value for waterfall charts" },
           },
           required: ["chart_id", "title", "type", "y_key"],
         },

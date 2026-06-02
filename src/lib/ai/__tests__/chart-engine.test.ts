@@ -55,8 +55,8 @@ describe("single-source pipeline with mock", () => {
 
     const result = await recomputeChartData(supabase, "forest-1", config);
     expect(result.data).toEqual([
-      { year: 2026, removal: 500 },
-      { year: 2027, removal: 300 },
+      { year: 2026, removal: 500, _stand_ids: [] },
+      { year: 2027, removal: 300, _stand_ids: [] },
     ]);
   });
 });

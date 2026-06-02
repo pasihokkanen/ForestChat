@@ -22,7 +22,6 @@ function mapTabToRow(forestId: string, tab: ChartTab) {
     y_key2: tab.yKey2,
     name_key: tab.nameKey,
     color_key: tab.colorKey,
-    stand_dimension: tab.standDimension,
     ...(tab.query_config ? { query_config: tab.query_config } : {}),
     ...(tab.computed_at ? { computed_at: tab.computed_at } : {}),
     ...(tab.waterfall_base != null ? { waterfall_base: tab.waterfall_base } : {}),

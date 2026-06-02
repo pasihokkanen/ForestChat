@@ -26,7 +26,6 @@ const makeTab = (overrides: Partial<ChartTab> = {}): ChartTab => ({
   yKey2: null,
   nameKey: null,
   colorKey: null,
-  standDimension: null,
   ...overrides,
 });
 

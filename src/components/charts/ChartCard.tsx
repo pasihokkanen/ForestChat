@@ -235,23 +235,20 @@ export default function ChartCard({ tab }: ChartCardProps) {
   const setSelectedYear = useForestStore((s) => s.setSelectedYear);
   const setHighlightedStands = useForestStore((s) => s.setHighlightedStands);
 
-  // Handle click on chart element
+  // Handle click on chart element — uses _stand_ids for cross-highlighting
   const handleChartClick = (data: Record<string, unknown> | undefined) => {
     if (!data) return;
 
-    // If chart has stand_dimension, clicking highlights that stand
-    if (tab.standDimension) {
-      const standId = data[tab.standDimension] as string;
-      if (standId) {
-        // Toggle: clicking same stand deselects
-        setHighlightedStands(
-          highlightedStandIds.includes(standId) ? [] : [standId]
-        );
-        return;
-      }
+    // If data has _stand_ids, use them for multi-selection (works for ALL chart types)
+    const standIds = data["_stand_ids"] as string[] | undefined;
+    if (standIds && standIds.length > 0) {
+      // Toggle: if all are already selected, deselect; otherwise select all
+      const allSelected = standIds.every((id) => highlightedStandIds.includes(id));
+      setHighlightedStands(allSelected ? [] : standIds);
+      return;
     }
 
-    // If x_key is "year" or similar, clicking filters by that value
+    // Fallback: if x_key is "year" or similar, clicking filters by that value
     if (effectiveXKey && data[effectiveXKey] !== undefined) {
       const year = Number(data[effectiveXKey]);
       if (!isNaN(year) && year >= 2000 && year <= 2100) {
@@ -297,12 +294,13 @@ export default function ChartCard({ tab }: ChartCardProps) {
     return filtered;
   }, [translatedData, tab.type, tab.nameKey]);
 
-  // Determine if a data point corresponds to a highlighted stand
+  // Determine if a data point contains any of the highlighted stands.
+  // Uses _stand_ids injected by the chart engine during aggregation.
   const isDataPointHighlighted = (entry: Record<string, unknown>): boolean => {
-    if (!tab.standDimension || highlightedStandIds.length === 0) return true;
-    const entryStandId = entry[tab.standDimension];
-    if (entryStandId == null) return true;
-    return highlightedStandIds.includes(String(entryStandId));
+    if (highlightedStandIds.length === 0) return true;
+    const standIds = entry["_stand_ids"] as string[] | undefined;
+    if (!standIds || standIds.length === 0) return true; // no stand info → show all
+    return standIds.some((id) => highlightedStandIds.includes(id));
   };
 
   // Choose fill based on active state
@@ -362,6 +360,8 @@ export default function ChartCard({ tab }: ChartCardProps) {
 
         const colorValues = new Set<string>();
         const pivotMap = new Map<string, Record<string, unknown>>();
+        // Collect _stand_ids per pivot key for cross-highlighting
+        const standIdSets = new Map<string, Set<string>>();
         const hasDual = !!(tab.yKey2); // income (yKey) + costs (yKey2)
 
         for (const row of tab.data) {
@@ -373,8 +373,12 @@ export default function ChartCard({ tab }: ChartCardProps) {
             const entry: Record<string, unknown> = {};
             if (effectiveXKey) entry[effectiveXKey] = row[effectiveXKey];
             pivotMap.set(xVal, entry);
+            standIdSets.set(xVal, new Set());
           }
           const entry = pivotMap.get(xVal)!;
+          // Collect stand_ids from this row
+          const sids = row["_stand_ids"] as string[] | undefined;
+          if (sids) for (const sid of sids) standIdSets.get(xVal)!.add(sid);
 
           if (hasDual) {
             // Dual-stack: income above zero, costs below zero
@@ -391,7 +395,11 @@ export default function ChartCard({ tab }: ChartCardProps) {
         const sorted = Array.from(colorValues).sort((a, b) => a.localeCompare(b));
 
         // Filter out zero-only categories (e.g., Clearcut has no cost, Mounding has no income)
-        const pivotedArr = Array.from(pivotMap.values());
+        const pivotedArr = Array.from(pivotMap.values()).map((entry, i) => {
+          const xKey = Array.from(pivotMap.keys())[i];
+          entry["_stand_ids"] = Array.from(standIdSets.get(xKey) ?? []);
+          return entry;
+        });
         const skipIncome = new Set<string>();
         const skipCost = new Set<string>();
         if (hasDual) {
@@ -453,7 +461,14 @@ export default function ChartCard({ tab }: ChartCardProps) {
                         stackId="income"
                         fill={CHART_COLORS[i % CHART_COLORS.length]}
                         name={`${cat}`}
-                      />
+                      >
+                        {pivoted.map((entry, j) => (
+                          <Cell
+                            key={`inc-${j}`}
+                            fillOpacity={isDataPointHighlighted(entry) ? 1 : 0.3}
+                          />
+                        ))}
+                      </Bar>
                     );
                   }
                   if (!skipCost.has(cat)) {
@@ -464,7 +479,14 @@ export default function ChartCard({ tab }: ChartCardProps) {
                         stackId="cost"
                         fill={COST_COLORS[i % COST_COLORS.length]}
                         name={`${cat}`}
-                      />
+                      >
+                        {pivoted.map((entry, j) => (
+                          <Cell
+                            key={`cost-${j}`}
+                            fillOpacity={isDataPointHighlighted(entry) ? 1 : 0.3}
+                          />
+                        ))}
+                      </Bar>
                     );
                   }
                   return bars;
@@ -475,7 +497,14 @@ export default function ChartCard({ tab }: ChartCardProps) {
                     dataKey={key}
                     stackId="a"
                     fill={CHART_COLORS[i % CHART_COLORS.length]}
-                  />
+                  >
+                    {pivoted.map((entry, j) => (
+                      <Cell
+                        key={`stk-${j}`}
+                        fillOpacity={isDataPointHighlighted(entry) ? 1 : 0.3}
+                      />
+                    ))}
+                  </Bar>
                 ))}
           </BarChart>
         </ResponsiveContainer>
@@ -618,6 +647,11 @@ export default function ChartCard({ tab }: ChartCardProps) {
               stroke="#2196F3"
               strokeWidth={2}
               activeDot={{ r: 8 }}
+              dot={(props: Record<string, unknown>) => {
+                const { cx, cy, payload } = props as { cx: number; cy: number; payload: Record<string, unknown> };
+                const highlighted = isDataPointHighlighted(payload);
+                return <circle cx={cx} cy={cy} r={4} fill={highlighted ? "#2196F3" : "#e5e5e5"} fillOpacity={highlighted ? 1 : 0.3} />;
+              }}
             />
             {tab.yKey2 && (
               <Line
@@ -626,6 +660,11 @@ export default function ChartCard({ tab }: ChartCardProps) {
                 stroke="#FF9800"
                 strokeWidth={2}
                 activeDot={{ r: 6 }}
+                dot={(props: Record<string, unknown>) => {
+                  const { cx, cy, payload } = props as { cx: number; cy: number; payload: Record<string, unknown> };
+                  const highlighted = isDataPointHighlighted(payload);
+                  return <circle cx={cx} cy={cy} r={4} fill={highlighted ? "#FF9800" : "#e5e5e5"} fillOpacity={highlighted ? 1 : 0.3} />;
+                }}
               />
             )}
           </LineChart>
@@ -658,6 +697,11 @@ export default function ChartCard({ tab }: ChartCardProps) {
               stroke="#4CAF50"
               fill="#4CAF50"
               fillOpacity={0.3}
+              dot={(props: Record<string, unknown>) => {
+                const { cx, cy, payload } = props as { cx: number; cy: number; payload: Record<string, unknown> };
+                const highlighted = isDataPointHighlighted(payload);
+                return <circle cx={cx} cy={cy} r={4} fill={highlighted ? "#4CAF50" : "#e5e5e5"} fillOpacity={highlighted ? 0.8 : 0.3} />;
+              }}
             />
           </AreaChart>
         </ResponsiveContainer>
@@ -748,12 +792,24 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <YAxis {...yAxisProps(tab.yKey, tab.yKey2)} />
             <Tooltip content={<EuroTooltip />} />
             <Legend />
-            <Bar dataKey={tab.yKey} fill="#4CAF50" radius={[4, 4, 0, 0]} />
+            <Bar dataKey={tab.yKey} fill="#4CAF50" radius={[4, 4, 0, 0]}>
+              {translatedData.map((entry, i) => (
+                <Cell
+                  key={`comp-${i}`}
+                  fillOpacity={isDataPointHighlighted(entry) ? 1 : 0.3}
+                />
+              ))}
+            </Bar>
             <Line
               type="monotone"
               dataKey={tab.yKey2 ?? tab.yKey}
               stroke="#2196F3"
               strokeWidth={2}
+              dot={(props: Record<string, unknown>) => {
+                const { cx, cy, payload } = props as { cx: number; cy: number; payload: Record<string, unknown> };
+                const highlighted = isDataPointHighlighted(payload);
+                return <circle cx={cx} cy={cy} r={4} fill={highlighted ? "#2196F3" : "#e5e5e5"} fillOpacity={highlighted ? 1 : 0.3} />;
+              }}
             />
           </ComposedChart>
         </ResponsiveContainer>
@@ -787,7 +843,14 @@ export default function ChartCard({ tab }: ChartCardProps) {
               stackId="wf"
               shape={<WaterfallBar />}
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
-            />
+            >
+              {wfData.map((entry, i) => (
+                <Cell
+                  key={`wf-${i}`}
+                  fillOpacity={isDataPointHighlighted(entry) ? 1 : 0.6}
+                />
+              ))}
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
       );

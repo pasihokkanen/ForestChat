@@ -411,6 +411,20 @@ function buildSelect(config: ChartQueryConfig): string {
   const rawFields = new Set<string>();       // bare columns (no join prefix)
   const joinFields = new Map<string, Set<string>>();  // table → columns
 
+  // Always include stand_id for cross-highlighting (_stand_ids injection).
+  // On compartments/compartment_species it's a direct column;
+  // on operations it comes through the compartments join (implicit if none given).
+  if (config.source === "compartments" || config.source === "compartment_species") {
+    rawFields.add("stand_id");
+  } else if (config.join?.table === "compartments") {
+    if (!joinFields.has("compartments")) joinFields.set("compartments", new Set());
+    joinFields.get("compartments")!.add("stand_id");
+  } else if (config.source === "operations") {
+    // No explicit join — add a default one to get stand_id
+    if (!joinFields.has("compartments")) joinFields.set("compartments", new Set());
+    joinFields.get("compartments")!.add("stand_id");
+  }
+
   const addField = (col: string) => {
     const res = resolveJoinField(col);
     if (res.table) {
@@ -638,6 +652,12 @@ function aggregateRows(
     for (const v of config.values) {
       result[v.as] = (aggregateFn(v.fn, rows, v.field)) * (v.multiply ?? 1);
     }
+    const standIds = new Set<string>();
+    for (const row of rows) {
+      const sid = row["stand_id"];
+      if (sid != null && sid !== "") standIds.add(String(sid));
+    }
+    result["_stand_ids"] = Array.from(standIds);
     return [result];
   }
 
@@ -665,6 +685,13 @@ function aggregateRows(
     for (const v of config.values) {
       aggregated[v.as] = (aggregateFn(v.fn, group.rows, v.field)) * (v.multiply ?? 1);
     }
+    // Collect unique stand_ids for cross-highlighting (ChartCard ↔ map/list)
+    const standIds = new Set<string>();
+    for (const row of group.rows) {
+      const sid = row["stand_id"];
+      if (sid != null && sid !== "") standIds.add(String(sid));
+    }
+    aggregated["_stand_ids"] = Array.from(standIds);
     result.push(aggregated);
   });
 
@@ -723,7 +750,7 @@ function fillYearGaps(
     const result = [...rows];
     for (let y = minYear; y <= maxYear; y++) {
       if (existingYears.has(y)) continue;
-      const zeroRow: Record<string, unknown> = { year: y };
+      const zeroRow: Record<string, unknown> = { year: y, _stand_ids: [] };
       for (const v of config.values) {
         zeroRow[v.as] = 0;
       }
@@ -780,7 +807,7 @@ function fillYearGaps(
       const key = [String(y), ...combo].join("|");
       if (existingKeys.has(key)) continue;
 
-      const zeroRow: Record<string, unknown> = { year: y };
+      const zeroRow: Record<string, unknown> = { year: y, _stand_ids: [] };
       for (let i = 1; i < config.aggregate.length; i++) {
         zeroRow[config.aggregate[i].group_by] = combo[i - 1];
       }
@@ -902,39 +929,48 @@ function mergeResults(
   const mergedMap = new Map<string, Record<string, unknown>>();
 
   for (const key of Array.from(allKeys)) {
-    let merged: Record<string, unknown> = { [mergeOn]: isNaN(Number(key)) ? key : Number(key) };
-    let allPresent = true;
+  let merged: Record<string, unknown> = { [mergeOn]: isNaN(Number(key)) ? key : Number(key) };
+  let allPresent = true;
+  // Collect _stand_ids from all sub-results
+  const mergedStandIds = new Set<string>();
 
-    for (let i = 0; i < subResults.length; i++) {
-      const subCfg = subConfigs[i];
-      const rows = subResults[i];
+  for (let i = 0; i < subResults.length; i++) {
+    const subCfg = subConfigs[i];
+    const rows = subResults[i];
 
-      if (subCfg.broadcast && rows.length === 1) {
-        // Broadcast: copy all fields from the single row to every merge key
-        Object.assign(merged, rows[0]);
-        // Remove merge_on from broadcast row so it doesn't overwrite
-        delete merged[mergeOn];
-        merged[mergeOn] = isNaN(Number(key)) ? key : Number(key);
+    if (subCfg.broadcast && rows.length === 1) {
+      // Broadcast: copy all fields from the single row to every merge key
+      Object.assign(merged, rows[0]);
+      // Collect _stand_ids from broadcast row
+      const sids = rows[0]["_stand_ids"] as string[] | undefined;
+      if (sids) for (const sid of sids) mergedStandIds.add(sid);
+      // Remove merge_on from broadcast row so it doesn't overwrite
+      delete merged[mergeOn];
+      merged[mergeOn] = isNaN(Number(key)) ? key : Number(key);
+    } else {
+      const match = rows.find((r) => String(r[mergeOn]) === key);
+      if (match) {
+        // Copy value columns only (not the merge key, already set)
+        for (const v of subCfg.values) {
+          merged[v.as] = match[v.as] ?? 0;
+        }
+        // Collect _stand_ids from matched row
+        const sids = match["_stand_ids"] as string[] | undefined;
+        if (sids) for (const sid of sids) mergedStandIds.add(sid);
       } else {
-        const match = rows.find((r) => String(r[mergeOn]) === key);
-        if (match) {
-          // Copy value columns only (not the merge key, already set)
-          for (const v of subCfg.values) {
-            merged[v.as] = match[v.as] ?? 0;
-          }
-        } else {
-          allPresent = false;
-          // Zero-fill missing values
-          for (const v of subCfg.values) {
-            merged[v.as] = 0;
-          }
+        allPresent = false;
+        // Zero-fill missing values
+        for (const v of subCfg.values) {
+          merged[v.as] = 0;
         }
       }
     }
+  }
 
-    if (strategy === "inner" && !allPresent) continue;
+  if (strategy === "inner" && !allPresent) continue;
 
-    mergedMap.set(key, merged);
+  merged["_stand_ids"] = Array.from(mergedStandIds);
+  mergedMap.set(key, merged);
   }
 
   return Array.from(mergedMap.values());
@@ -963,7 +999,7 @@ function fillMergeGaps(
   const result = [...rows];
   for (let y = minYear; y <= maxYear; y++) {
     if (existingYears.has(y)) continue;
-    const zeroRow: Record<string, unknown> = { [mergeOn]: y };
+    const zeroRow: Record<string, unknown> = { [mergeOn]: y, _stand_ids: [] };
     for (const col of valueColumns) {
       zeroRow[col] = 0;
     }

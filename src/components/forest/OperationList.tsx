@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useForestStore } from "@/lib/store";
 import { displayOperationType } from "@/lib/ai/config";
 import type maplibregl from "maplibre-gl";
@@ -57,6 +57,7 @@ const opPersist = {
   speciesFilter: [] as string[],
   globalFilter: "",
   lastClickedStandId: null as string | null,
+  scrollTop: 0,
 };
 
 export default function OperationList({ map }: OperationListProps) {
@@ -140,6 +141,15 @@ export default function OperationList({ map }: OperationListProps) {
       if (Array.isArray(f.species)) setSpeciesFilter(new Set(f.species as string[]));
     }
   }, [aiOperationFilters]);
+
+  // Scroll-position persistence across tab switches
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el && opPersist.scrollTop > 0) {
+      el.scrollTop = opPersist.scrollTop;
+    }
+  }, []);
 
   const handleSort = (key: string) => {
     if (sortKey === key) {
@@ -475,7 +485,11 @@ export default function OperationList({ map }: OperationListProps) {
       </div>
 
       {/* Table */}
-      <div className="flex-1 overflow-auto min-h-0">
+      <div
+        className="flex-1 overflow-auto min-h-0"
+        ref={scrollRef}
+        onScroll={(e) => { opPersist.scrollTop = (e.target as HTMLDivElement).scrollTop; }}
+      >
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-gray-100 dark:bg-gray-800 z-10">
             <tr>

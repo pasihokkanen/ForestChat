@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useForestStore } from "@/lib/store";
 import type { Compartment, CompartmentSpecies, Operation } from "@/types/database";
 import { displayOperationType } from "@/lib/ai/config";
@@ -72,6 +72,7 @@ const standPersist = {
   volumeMax: null as number | null,
   globalFilter: "",
   lastClickedStandId: null as string | null,
+  scrollTop: 0,
 };
 
 export default function StandList({ map }: StandListProps) {
@@ -172,6 +173,15 @@ export default function StandList({ map }: StandListProps) {
       setExpandedStands(new Set());
     }
   }, [aiStandFilters]);
+
+  // Scroll-position persistence across tab switches
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el && standPersist.scrollTop > 0) {
+      el.scrollTop = standPersist.scrollTop;
+    }
+  }, []);
 
   const toggleExpand = (standId: string) => {
     setExpandedStands((prev) => {
@@ -530,7 +540,11 @@ export default function StandList({ map }: StandListProps) {
       </div>
 
       {/* Table */}
-      <div className="flex-1 overflow-auto min-h-0">
+      <div
+        className="flex-1 overflow-auto min-h-0"
+        ref={scrollRef}
+        onScroll={(e) => { standPersist.scrollTop = (e.target as HTMLDivElement).scrollTop; }}
+      >
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-gray-100 dark:bg-gray-800 z-10">
             <tr>
