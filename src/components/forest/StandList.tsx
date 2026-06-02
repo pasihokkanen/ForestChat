@@ -122,11 +122,7 @@ export default function StandList({ map }: StandListProps) {
       ? current.filter((id) => id !== standId)
       : [standId];
     setHighlightedStands(newIds);
-    if (newIds.length > 0) {
-      selectStand(newIds[0]);
-    } else {
-      selectStand(null);
-    }
+    // Don't call selectStand — highlight only, no popup
   };
 
   const handleShowOnMap = (standId: string) => {

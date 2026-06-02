@@ -100,7 +100,7 @@ export default function OperationList({ map }: OperationListProps) {
 
   const handleOperationRowClick = (standId: string, operationId: string) => {
     setHighlightedStands([standId]);
-    selectStand(standId);
+    // Don't call selectStand — highlight only, no popup
     setHighlightedOperations([operationId]);
   };
 

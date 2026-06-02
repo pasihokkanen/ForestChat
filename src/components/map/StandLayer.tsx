@@ -56,12 +56,15 @@ function shouldUseAgeColoring(
   return maxPct <= 0.7;
 }
 
-/** Show a custom popup overlay for a forest stand. Uses store data for species and operations. */
+/** Show a custom popup overlay for a forest stand. Uses store data for species and operations.
+ *  @param polyBounds — the stand polygon's bounding box in screen coordinates {left, top, right, bottom}
+ *  @param containerBounds — the map container's bounding rect for clipping */
 function showCustomPopup(
    map: maplibregl.Map,
    popupRef: React.MutableRefObject<HTMLElement | null>,
    props: Record<string, unknown>,
-   lngLat: [number, number],
+   polyBounds: { left: number; top: number; right: number; bottom: number },
+   containerBounds: DOMRect,
    isDark: boolean,
  ) {
   // Remove any existing custom popup
@@ -82,114 +85,172 @@ function showCustomPopup(
   const sectionTitleColor = isDark ? "#9ca3af" : "#6b7280";
   const labelColor = isDark ? "#d1d5db" : "#111";
 
-  // Create overlay container
+  // ── Smart placement: pick the side with the most available space ──
+  const POPUP_WIDTH = 280;
+  const POPUP_HEIGHT = 300; // approximate, will be sized by content
+  const GAP = 12; // px gap between polygon edge and popup
+
+  // Available space in each direction (within container bounds)
+  const spaceTop = polyBounds.top - containerBounds.top;
+  const spaceBottom = containerBounds.bottom - polyBounds.bottom;
+  const spaceLeft = polyBounds.left - containerBounds.left;
+  const spaceRight = containerBounds.right - polyBounds.right;
+
+  // Prefer bottom or right if there's enough room, otherwise top or left
+  let posX: number;
+  let posY: number;
+  let transformX: string;
+  let transformY: string;
+
+  // Horizontal: prefer center-aligned over polygon, clamped to container
+  const polyCenterX = (polyBounds.left + polyBounds.right) / 2 - containerBounds.left;
+  // Clamp center so popup doesn't go outside container
+  const minX = POPUP_WIDTH / 2 + 8;
+  const maxX = containerBounds.width - POPUP_WIDTH / 2 - 8;
+  posX = Math.max(minX, Math.min(maxX, polyCenterX));
+  transformX = "-50%";
+
+  // Vertical: pick best side
+  if (spaceBottom >= POPUP_HEIGHT + GAP) {
+    // Place below polygon
+    posY = polyBounds.bottom - containerBounds.top + GAP;
+    transformY = "0";
+  } else if (spaceTop >= POPUP_HEIGHT + GAP) {
+    // Place above polygon
+    posY = polyBounds.top - containerBounds.top - GAP;
+    transformY = "-100%";
+  } else if (spaceBottom >= spaceTop) {
+    // Both tight — below if it has more room
+    posY = Math.min(polyBounds.bottom - containerBounds.top + GAP, containerBounds.height - POPUP_HEIGHT - 4);
+    transformY = "0";
+  } else {
+    posY = Math.max(polyBounds.top - containerBounds.top - GAP, 4);
+    transformY = "-100%";
+  }
+
+  // Create overlay container — append to map container so it stays inside
   const el = document.createElement("div");
   el.className = "forestchat-custom-popup";
   el.style.cssText = `
     position: absolute;
     z-index: 1000;
+    left: ${posX}px;
+    top: ${posY}px;
+    transform: translate(${transformX}, ${transformY});
     background: ${bgColor};
+    border: 1px solid ${borderColor};
     border-radius: 8px;
     box-shadow: 0 4px 16px rgba(0,0,0,0.2);
     padding: 12px;
-    min-width: 260px;
+    min-width: ${POPUP_WIDTH}px;
     max-width: 340px;
     font-size: 13px;
     color: ${textColor};
     pointer-events: auto;
-    transform: translate(-50%, -100%);
-    margin-top: -10px;
   `;
 
-   // Position and append to DOM
-   const point = map.project(lngLat);
-   // Append to document.body with fixed positioning to avoid MapLibre container stacking issues
-   const containerRect = map.getContainer().getBoundingClientRect();
-   el.style.position = "fixed";
-   el.style.left = (containerRect.left + point.x) + "px";
-   el.style.top = (containerRect.top + point.y) + "px";
-   document.body.appendChild(el);
-   popupRef.current = el;
+  map.getContainer().appendChild(el);
+  popupRef.current = el;
 
-   // Build popup HTML — read fresh data from store each time
-   const devClass = (props.development_class as string) ?? "—";
-   const siteType = (props.site_type as string) ?? "—";
-   const area = (props.area_ha as number) != null ? (props.area_ha as number).toFixed(1) : "—";
-   const age = (props.age_years as number) != null ? `${props.age_years as number} yr` : "—";
-   const volume = (props.volume_m3 as number) != null ? (props.volume_m3 as number).toFixed(0) : "—";
-   const basalArea = (props.basal_area as number) != null ? (props.basal_area as number).toFixed(1) : "—";
-   const avgDiam = (props.avg_diameter as number) != null ? (props.avg_diameter as number).toFixed(1) : "—";
-   const avgHt = (props.avg_height as number) != null ? (props.avg_height as number).toFixed(1) : "—";
+  // Build popup HTML — read fresh data from store each time
+  const devClass = (props.development_class as string) ?? "—";
+  const siteType = (props.site_type as string) ?? "—";
+  const area = (props.area_ha as number) != null ? (props.area_ha as number).toFixed(1) : "—";
+  const age = (props.age_years as number) != null ? `${props.age_years as number} yr` : "—";
+  const volume = (props.volume_m3 as number) != null ? (props.volume_m3 as number).toFixed(0) : "—";
+  const basalArea = (props.basal_area as number) != null ? (props.basal_area as number).toFixed(1) : "—";
+  const avgDiam = (props.avg_diameter as number) != null ? (props.avg_diameter as number).toFixed(1) : "—";
+  const avgHt = (props.avg_height as number) != null ? (props.avg_height as number).toFixed(1) : "—";
 
-   // Look up species breakdown from store
-   const state = useForestStore.getState();
-   const thisSpecies = state.compartmentSpecies.filter((s) => s.stand_id === standId);
-   const speciesRows = thisSpecies
-     .map((s) => `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5">
-       <span>${s.species}</span>
-       <span style="color:${mutedColor};text-align:right">${s.volume_m3.toFixed(0)} m³ / ${s.area_ha.toFixed(1)} ha</span>
-     </div>`)
-     .join("");
+  // Look up species breakdown from store
+  const state = useForestStore.getState();
+  const thisSpecies = state.compartmentSpecies.filter((s) => s.stand_id === standId);
+  const speciesRows = thisSpecies
+    .map((s) => `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5">
+      <span>${s.species}</span>
+      <span style="color:${mutedColor};text-align:right">${s.volume_m3.toFixed(0)} m³ / ${s.area_ha.toFixed(1)} ha</span>
+    </div>`)
+    .join("");
 
-   // Look up operations for this stand from store
-   const compartmentId = props.id as string;
-   const thisOps = state.operations.filter((op) => op.compartment_id === compartmentId);
-   const opsRows = thisOps
-     .map((op) => {
-       const valueStr = op.income_eur != null && op.income_eur > 0
-         ? `+${op.income_eur.toFixed(0)}€`
-         : op.cost_eur != null && op.cost_eur > 0
-           ? `−${op.cost_eur.toFixed(0)}€`
-           : "";
-       return `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5">
-         <span>${op.type} ${op.year}</span>
-         <span style="color:${mutedColor};text-align:right">${valueStr}</span>
-       </div>`;
-     })
-     .join("");
+  // Look up operations for this stand from store
+  const compartmentId = props.id as string;
+  const thisOps = state.operations.filter((op) => op.compartment_id === compartmentId);
+  const opsRows = thisOps
+    .map((op) => {
+      const valueStr = op.income_eur != null && op.income_eur > 0
+        ? `+${op.income_eur.toFixed(0)}€`
+        : op.cost_eur != null && op.cost_eur > 0
+          ? `−${op.cost_eur.toFixed(0)}€`
+          : "";
+      return `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5">
+        <span>${op.type} ${op.year}</span>
+        <span style="color:${mutedColor};text-align:right">${valueStr}</span>
+      </div>`;
+    })
+    .join("");
 
-   el.innerHTML = `
-     <div style="position:relative">
-       <button class="popup-close" style="position:absolute;top:1px;right:1px;border:none;background:transparent;font-size:18px;cursor:pointer;color:${closeBtnColor};line-height:1;width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:4px">×</button>
-       <h3 style="font-weight:600;font-size:15px;margin:0 0 8px 0;padding-bottom:4px;border-bottom:1px solid ${borderColor};color:${textColor}">Stand ${standId}</h3>
+  el.innerHTML = `
+    <div style="position:relative">
+      <button class="popup-close" style="position:absolute;top:1px;right:1px;border:none;background:transparent;font-size:18px;cursor:pointer;color:${closeBtnColor};line-height:1;width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:4px">×</button>
+      <h3 style="font-weight:600;font-size:15px;margin:0 0 8px 0;padding-bottom:4px;border-bottom:1px solid ${borderColor};color:${textColor}">Stand ${standId}</h3>
 
-       <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:${sectionTitleColor};text-transform:uppercase;letter-spacing:0.5px">Stand details</h4>
-       <div style="margin:0 0 8px 0">
-         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Dev. class</span><span style="color:${mutedColor};text-align:right">${devClass}</span></div>
-         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Site type</span><span style="color:${mutedColor};text-align:right">${siteType}</span></div>
-         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Area (ha)</span><span style="color:${mutedColor};text-align:right">${area}</span></div>
-         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Age</span><span style="color:${mutedColor};text-align:right">${age}</span></div>
-         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Volume (m³)</span><span style="color:${mutedColor};text-align:right">${volume}</span></div>
-         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Basal area</span><span style="color:${mutedColor};text-align:right">${basalArea}</span></div>
-         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Avg diam.</span><span style="color:${mutedColor};text-align:right">${avgDiam} cm</span></div>
-         <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Avg height</span><span style="color:${mutedColor};text-align:right">${avgHt} m</span></div>
-       </div>
+      <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:${sectionTitleColor};text-transform:uppercase;letter-spacing:0.5px">Stand details</h4>
+      <div style="margin:0 0 8px 0">
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Dev. class</span><span style="color:${mutedColor};text-align:right">${devClass}</span></div>
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Site type</span><span style="color:${mutedColor};text-align:right">${siteType}</span></div>
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Area (ha)</span><span style="color:${mutedColor};text-align:right">${area}</span></div>
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Age</span><span style="color:${mutedColor};text-align:right">${age}</span></div>
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Volume (m³)</span><span style="color:${mutedColor};text-align:right">${volume}</span></div>
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Basal area</span><span style="color:${mutedColor};text-align:right">${basalArea}</span></div>
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Avg diam.</span><span style="color:${mutedColor};text-align:right">${avgDiam} cm</span></div>
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Avg height</span><span style="color:${mutedColor};text-align:right">${avgHt} m</span></div>
+      </div>
 
-       ${speciesRows ? `
-       <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:${sectionTitleColor};text-transform:uppercase;letter-spacing:0.5px">Species</h4>
-       <div style="margin:0 0 8px 0">${speciesRows}</div>` : ""}
+      ${speciesRows ? `
+      <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:${sectionTitleColor};text-transform:uppercase;letter-spacing:0.5px">Species</h4>
+      <div style="margin:0 0 8px 0">${speciesRows}</div>` : ""}
 
-       ${opsRows ? `
-       <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:${sectionTitleColor};text-transform:uppercase;letter-spacing:0.5px">Operations</h4>
-       <div>${opsRows}</div>` : ""}
-     </div>
-   `;
+      ${opsRows ? `
+      <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:${sectionTitleColor};text-transform:uppercase;letter-spacing:0.5px">Operations</h4>
+      <div>${opsRows}</div>` : ""}
+    </div>
+  `;
 
-   // Wire up close button
-   const closeBtn = el.querySelector(".popup-close") as HTMLElement | null;
-   if (closeBtn) {
-     closeBtn.onclick = (e) => {
-       e.stopPropagation();
-       hideCustomPopup(popupRef);
-     };
-     closeBtn.onmouseenter = () => {
-       closeBtn.style.backgroundColor = closeBtnHoverBg;
-     };
-     closeBtn.onmouseleave = () => {
-       closeBtn.style.backgroundColor = "transparent";
-     };
-   }
+  // Wire up close button
+  const closeBtn = el.querySelector(".popup-close") as HTMLElement | null;
+  if (closeBtn) {
+    closeBtn.onclick = (e) => {
+      e.stopPropagation();
+      hideCustomPopup(popupRef);
+    };
+    closeBtn.onmouseenter = () => {
+      closeBtn.style.backgroundColor = closeBtnHoverBg;
+    };
+    closeBtn.onmouseleave = () => {
+      closeBtn.style.backgroundColor = "transparent";
+    };
+  }
  }
+
+/** Compute the screen-space bounding box of a GeoJSON polygon geometry. */
+function getPolygonScreenBounds(
+  map: maplibregl.Map,
+  geom: GeoJSON.Polygon | GeoJSON.MultiPolygon
+): { left: number; top: number; right: number; bottom: number } {
+  const coords =
+    geom.type === "Polygon"
+      ? geom.coordinates[0]
+      : geom.coordinates.flatMap((ring) => ring[0]);
+  let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+  for (const [lng, lat] of coords as [number, number][]) {
+    const pt = map.project([lng, lat]);
+    if (pt.x < left) left = pt.x;
+    if (pt.y < top) top = pt.y;
+    if (pt.x > right) right = pt.x;
+    if (pt.y > bottom) bottom = pt.y;
+  }
+  return { left, top, right, bottom };
+}
 
 /**
  * Remove the custom popup overlay.
@@ -319,7 +380,13 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
         setHighlightedStands([standId]);
 
         // Show popup at click coordinates immediately (no zoom)
-        showCustomPopup(map, popupRef, props, lngLat, isDark);
+        const containerRect = map.getContainer().getBoundingClientRect();
+        const clickedFeatures = map.queryRenderedFeatures(e.point, { layers: ["stand-fills"] });
+        const clickedGeom = clickedFeatures[0]?.geometry;
+        const polyBounds = clickedGeom
+          ? getPolygonScreenBounds(map, clickedGeom as unknown as GeoJSON.Polygon | GeoJSON.MultiPolygon)
+          : { left: map.project(lngLat).x, top: map.project(lngLat).y, right: map.project(lngLat).x, bottom: map.project(lngLat).y };
+        showCustomPopup(map, popupRef, props, polyBounds, containerRect, isDark);
       } else {
         // Clicked on background — close popup and deselect
         hideCustomPopup(popupRef);
@@ -468,13 +535,15 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
       map.fitBounds(bounds, { padding: 80, maxZoom: 16, duration: 800 });
 
       // Show popup AFTER the zoom animation completes (moveend)
-      const center = bounds.getCenter();
-      const lngLat: [number, number] = [center.lng, center.lat];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const featGeom = feature.geometry as any;
       const props = feature.properties as Record<string, unknown>;
 
       const onMoveEnd = () => {
         if (useForestStore.getState().selectedStandId !== selectedStandId) return;
-        showCustomPopup(map, popupRef, props, lngLat, isDark);
+        const containerRect = map.getContainer().getBoundingClientRect();
+        const polyBounds = getPolygonScreenBounds(map, featGeom);
+        showCustomPopup(map, popupRef, props, polyBounds, containerRect, isDark);
       };
       // Use once() so it auto-removes after firing
       map.once("moveend", onMoveEnd);
