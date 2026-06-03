@@ -10,6 +10,7 @@
 
 **Version:** 2.2
 **Date:** 2026-06-02
+**Status:** ✅ Implemented 2026-06-03
 
 **Changelog v2.2 (architectural review):**
 - Split T2 into T2a (tree table, 2h) and T2b (filter bar, 1.5h) — honest tracking of filter bar complexity

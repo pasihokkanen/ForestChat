@@ -672,11 +672,14 @@ Used only if MML/WFS path fails (e.g., property ID not found, WFS down).
 - **T10** — Summary dashboard (3h)
 - **T11** — Stand table + timeline (3h)
 
-### Phase 5: PWA & Polish (2 tasks, ~8h)
-- **T12** — PWA + offline (4h)
-- **T13** — Final testing (4h)
+### Phase 7: PWA & Polish (2 tasks, ~19h)
+- **T12** — PWA + offline (icons, Dexie sync, install prompt)
+- **T13** — Final polish (landing page, auth flow, AI tools efficiency, multi-language, UX)
 
-**Total: 13 tasks, ~60h**
+> 📋 **Detailed subplan:** `docs/plans/phase-7-pwa-polish.md` (June 2026)
+> Phases 4–6 expanded beyond the original scope (chart engine, cross-source, CSV import, stand/operation lists). Original Phase 5 became CSV import, Phase 6 became stand/operation lists. Remaining work consolidated into Phase 7.
+
+**Total: 13 tasks, ~65h**
 
 ---
 

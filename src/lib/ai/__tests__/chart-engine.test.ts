@@ -84,6 +84,53 @@ describe("growth_m3_total computed field", () => {
   });
 });
 
+describe("removal_m3 computed field (Phase 4b)", () => {
+  it("computes removal_m3 = volume_m3 × removal_pct / 100 per row, then aggregates", async () => {
+    const supabase = makeMockSupabase({
+      operations: [
+        { year: 2026, volume_m3: 200, removal_pct: 50 },  // → 100 m³
+        { year: 2027, volume_m3: 150, removal_pct: 100 }, // → 150 m³
+        { year: 2027, volume_m3: 200, removal_pct: 25 },  // → 50 m³
+      ],
+    });
+
+    const config: ChartQueryConfig = {
+      source: "operations",
+      aggregate: [{ group_by: "year" }],
+      values: [{ field: "removal_m3", as: "volume", fn: "sum" }],
+    };
+
+    const result = await recomputeChartData(supabase, "forest-1", config);
+
+    // 2026: 100 m³, 2027: 150 + 50 = 200 m³
+    expect(result.data).toHaveLength(2);
+    expect(result.data[0]).toMatchObject({ year: 2026, volume: 100 });
+    expect(result.data[1]).toMatchObject({ year: 2027, volume: 200 });
+  });
+
+  it("handles null values in source columns gracefully", async () => {
+    const supabase = makeMockSupabase({
+      operations: [
+        { volume_m3: null, removal_pct: 50 },
+        { volume_m3: 200, removal_pct: null },
+        { volume_m3: 200, removal_pct: 50 },
+      ],
+    });
+
+    const config: ChartQueryConfig = {
+      source: "operations",
+      aggregate: [],
+      values: [{ field: "removal_m3", as: "volume", fn: "sum" }],
+    };
+
+    const result = await recomputeChartData(supabase, "forest-1", config);
+
+    // null × 50 → 0, 200 × null → 0, 200 × 50 → 100
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0].volume).toBeCloseTo(100);
+  });
+});
+
 // ─── Cross-source merge ──────────────────────────────────────────────
 
 describe("cross-source merge", () => {

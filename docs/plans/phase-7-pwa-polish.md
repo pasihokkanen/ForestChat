@@ -1,0 +1,505 @@
+# Phase 7: PWA & Polish
+
+**Status:** Planned
+**Date:** 2026-06-03
+**Author:** Systems Architect (via Hermes Agent)
+**Depends on:** Phases 0–4, 4b, 4c, 5, 6 (all complete)
+
+---
+
+## 0. Gap Analysis: Architecture Plan vs Reality
+
+The original architecture plan (v3.0) listed Phase 5 as:
+
+| Task | Original Plan | Current State |
+|------|--------------|---------------|
+| T12 PWA + offline (4h) | PWA manifest, service worker, Dexie sync | ⚠️ Partial: SW exists (`sw.js`), manifest route exists, Dexie schema defined — but no icons, no offline sync, no install prompt |
+| T13 Final testing (4h) | Playwright E2E, polish | Not started |
+
+**What the subplans changed:**
+- Phase 4 became far broader: 3-panel layout, 11 chart types, chart engine, cross-source queries
+- Phase 5 became CSV import (different task, same number)
+- Phase 6 became stand/operation lists with cross-component highlighting
+- The original architecture's standalone routes were folded into the 3-panel + tabbed layout
+- Dexie offline cache was never wired to Supabase sync hooks
+
+---
+
+## 1. PWA & Offline (Track A)
+
+### A1. PWA Icons & Manifest
+
+**Files:** Create `public/icons/icon-192x192.png`, `public/icons/icon-512x512.png`
+
+- Generate a simple forest-themed SVG icon and rasterize at both sizes
+- The manifest already references these paths — just create the files
+- Add `apple-touch-icon` and `favicon.ico` if missing
+- Verify manifest loads at `/manifest.webmanifest`
+- App name in manifest: "MetsäChat" (short_name: "MetsäChat")
+
+### A2. Offline-First Data (Dexie + Sync)
+
+**The architecture already defines Dexie for offline.** Wire it up:
+
+**Files to modify:** `src/lib/hooks/use-compartments.ts`, `use-operations.ts`, `use-forest.ts`
+
+Pattern: hook fetches from Supabase, writes to Dexie, then read component reads from state. On next load, if Supabase is unreachable, fall back to Dexie.
+
+```typescript
+// Simplified sync pattern in each hook:
+const { data, loading, error } = useSupabaseQuery(...)
+useEffect(() => {
+  if (data) db.compartments.bulkPut(data.map(toDexie))
+}, [data])
+```
+
+**Out of scope for v1:** Full service-worker caching strategy, GPS geolocation, offline map tiles. The Dexie layer is a cache-first safety net — enough to re-render the last-known state when offline.
+
+### A3. Install Prompt
+
+**Create:** `src/components/pwa/InstallPrompt.tsx`
+
+Use the `beforeinstallprompt` event to show a subtle banner at the bottom of the screen when the PWA is installable. Hide after dismissed. Show only on supported browsers (Chrome, Edge).
+
+---
+
+## 2. Landing Page & Auth Flow (Track B)
+
+### B1. Landing Page Redesign
+
+**File:** `src/app/page.tsx`
+
+Current issues:
+- Only one CTA ("Get Started" → register), no login link
+- No visual personality — just text on gradient
+
+**Changes:**
+1. Add a **"Log in"** button next to "Get Started" (links to `/auth/login`)
+2. Add a feature summary section: 🗺️ Map, 🤖 AI Chat, 📊 Charts, 🌲 Stands
+3. Add a subtle hero visual (SVG forest silhouette or tree icon)
+4. Show "Already have an account?" text under the buttons
+5. Page title: "MetsäChat" (Finnish name) with English subtitle
+
+### B2. Auth Page Cross-Linking
+
+**Files:** `src/app/auth/register/page.tsx`, `src/app/auth/login/LoginForm.tsx`
+
+- Register page: add "Already have an account? **Log in**" link at the bottom
+- Login page: add "Don't have an account? **Sign up**" link at the bottom
+- Both pages: add a "← Back" link to the landing page
+
+### B3. Dark Mode Toggle
+
+**Create:** `src/components/auth/ThemeToggle.tsx`
+
+- Add a sun/moon icon button in the app header (next to UserMenu)
+- Toggles `dark` class on `<html>` via localStorage persistence
+- Respects `prefers-color-scheme` on first visit
+- Also add to the landing page header
+
+---
+
+## 3. AI Tools Efficiency (Track C)
+
+### C1. Multi-Stand Selection
+
+**File:** `src/lib/chat/tools.ts` (tool definition), `src/lib/chat/tool-executor.ts` (handler), `src/lib/chat/sse.ts` (event type)
+
+**Current:** `select_stand` takes a single `stand_id: string`
+**Change:** Accept `stand_ids: string | string[]` — single stand still works, array selects multiple
+
+```typescript
+{
+  name: "select_stand",
+  parameters: {
+    properties: {
+      stand_ids: {
+        oneOf: [
+          { type: "string" },
+          { type: "array", items: { type: "string" } }
+        ],
+        description: "Stand ID or array of stand IDs, e.g. '7' or ['5','12','89.1']"
+      },
+    },
+    required: ["stand_ids"],
+  },
+}
+```
+
+**Also update `sse.ts`:** Change `stand_id?: string` → `stand_ids?: string[]` for the `select_stand` event data.
+
+### C2. Batch Add Operations
+
+**File:** `src/lib/chat/tools.ts`, `src/lib/ai/edit-tools.ts`
+
+**Current:** `add_operation` takes one `{stand_id, year, type, removal_pct}`
+**Change:** Accept `operations: Array<{stand_id, year, type, removal_pct}>` alongside the single-operation signature. Backward compatible.
+
+### C3. Smarter Remove Operation
+
+**File:** `src/lib/chat/tools.ts`, `src/lib/ai/edit-tools.ts`
+
+**Current:** `remove_operation` takes `{stand_id, year}`
+**Change:** `year` optional (remove all for stand), accept `stand_ids: string[]`, optional `type` filter.
+
+### C4. `query_operations` Response Efficiency
+
+**File:** `src/lib/ai/query-tools.ts`
+
+When >20 rows, return summary only ("Found 45 operations across 2028-2035"). Full results go to UI via `show_in_ui` SSE. Add `format: "summary" | "full"` parameter.
+
+### C5. `search_stands` Response Efficiency
+
+**File:** `src/lib/ai/query-tools.ts`
+
+Same summary pattern as C4. Above 20 results → summary only.
+
+### C6. System Prompt Compression
+
+**File:** `src/lib/chat/system-prompt.ts`
+
+Reduce ~500 lines of system prompt by ~30%. Trim redundant tool descriptions, remove inline examples. Also: inject the user's language preference so the AI responds in that language.
+
+---
+
+## 4. UX Polish (Track D)
+
+### D1. Chat Input Enhancements
+
+**File:** `src/components/chat/ChatInput.tsx`
+
+- Add Ctrl+Enter / Cmd+Enter keyboard shortcut to send
+- Add rotating placeholder suggestions: "Show me stands ready for harvest", "Create a yearly income chart", etc.
+- Add a small "New chat" button (resets session via `/new`)
+
+### D2. Loading & Empty States
+
+**Files:** various
+
+- ForestView: skeleton while compartments load
+- ChartCard: "No data" state when `cleanData` returns empty
+- ChatPanel: "Send a message to start planning" when no messages
+
+### D3. Dashboard Polish
+
+**File:** `src/app/(app)/dashboard/page.tsx`
+
+- Add "Getting Started" card when user has no forests
+- Show forest count, total area, total volume in header stats
+
+### D4. Error Boundaries
+
+**Create:** `src/components/shared/ErrorBoundary.tsx`
+
+Wrap the main app. Currently unhandled render errors white-screen.
+
+---
+
+## 5. Multi-Language Support (Track E) 🆕
+
+**Support two languages:** English (en) and Finnish (fi).
+
+**Principle:** System values (DB columns, API parameters, tool args) never change. All translation happens in the UI layer via lookup maps. The AI responds in the selected language.
+
+### E1. Language Infrastructure
+
+**Create:** `src/lib/i18n.ts` — Central translation module
+
+```typescript
+export type Language = "en" | "fi";
+
+// ── Zustand slice ──
+export interface I18nSlice {
+  language: Language;
+  setLanguage: (lang: Language) => void;
+}
+// Persist to localStorage. On change, trigger full page reload.
+```
+
+**Create:** `src/lib/store/i18n-slice.ts`
+**Modify:** `src/lib/store/index.ts` — add `I18nSlice`
+
+**Modify:** `src/app/layout.tsx` — read language from store, set `lang` attribute on `<html>`
+
+**Create:** `src/components/shared/LanguageToggle.tsx` — 🇬🇧/🇫🇮 toggle button in the app header. Click → setLanguage → page reload.
+
+### E2. System Value → Display Value Mappings
+
+**File:** `src/lib/i18n.ts` — All display mappings for both languages
+
+These replace the current ad-hoc `capitalize()`, `formatDisplayDevClass()`, and `displayOperationType()` scattered across components. One shared module, one API.
+
+#### Operation Types
+
+| System value | English | Finnish |
+|-------------|---------|---------|
+| `clear_cut` | Clearcut | Avohakkuu |
+| `thinning` | Thinning | Harvennus |
+| `first_thinning` | First Thinning | Ensiharvennus |
+| `selection_cutting` | Selection Cutting | Poimintahakkuu |
+| `tending` | Tending | Taimikonhoito |
+| `early_tending` | Early Tending | Taimikon varhaishoito |
+| `pre_clearance` | Pre-clearance | Ennakkoraivaus |
+| `site_prep` | Mounding | Laikkumätästys |
+| `ditch_mounding` | Ditch Mounding | Ojitusmätästys |
+| `scalping` | Scalping | Laikutus |
+| `spruce_planting` | Spruce Planting | Kuusen istutus |
+| `pine_planting` | Pine Planting | Männyn istutus |
+| `planting` | Planting | Istutus |
+
+#### Development Classes
+
+| System value | English | Finnish |
+|-------------|---------|---------|
+| `regeneration_ready` | Regeneration Ready | Uudistuskypsä |
+| `mature_thinning` | Mature Thinning | Varttunut kasvatusmetsikkö |
+| `young_thinning` | Young Thinning | Nuori kasvatusmetsikkö |
+| `open_area` | Open Area | Aukea |
+| `seed_tree` | Seed Tree | Siemenpuusto |
+| `seedling_large` | Large Seedling | Taimikko yli 1,3 m |
+| `seedling_small` | Small Seedling | Taimikko alle 1,3 m |
+| `seedling` | Seedling | Taimikko |
+| `shelterwood` | Shelterwood | Suojuspuusto |
+| `uneven_aged` | Uneven-Aged | Eri-ikäisrakenteinen |
+
+#### Site Types
+
+| System value | English | Finnish |
+|-------------|---------|---------|
+| `herb-rich` | Herb-Rich | Lehto |
+| `herb-rich heath` | Herb-Rich Heath | Lehtomainen kangas |
+| `mesic` | Mesic | Tuore kangas |
+| `sub-xeric` | Sub-Xeric | Kuivahko kangas |
+| `xeric` | Xeric | Kuiva kangas |
+| `barren` | Barren | Karukkokangas |
+
+#### Species
+
+| System value | English | Finnish |
+|-------------|---------|---------|
+| `pine` | Pine | Mänty |
+| `spruce` | Spruce | Kuusi |
+| `silver_birch` | Silver Birch | Rauduskoivu |
+| `downy_birch` | Downy Birch | Hieskoivu |
+| `birch` | Birch | Koivu |
+| `larch` | Larch | Lehtikuusi |
+| `grey_alder` | Grey Alder | Harmaaleppä |
+| `aspen` | Aspen | Haapa |
+| `rowan` | Rowan | Pihlaja |
+| `broadleaf` | Broadleaf | Lehtipuu |
+
+#### Drainage Status
+
+| System value | English | Finnish |
+|-------------|---------|---------|
+| `drained` | Drained | Ojitettu |
+| `undrained` | Undrained | Ojittamaton |
+| `peatland_forest` | Peatland Forest | Turvekangas |
+| `natural_state` | Natural State | Luonnontilainen |
+
+**API:**
+
+```typescript
+// src/lib/i18n.ts
+export function displayOp(sysValue: string, lang: Language): string
+export function displayDevClass(sysValue: string, lang: Language): string
+export function displaySiteType(sysValue: string, lang: Language): string
+export function displaySpecies(sysValue: string, lang: Language): string
+export function displayDrainage(sysValue: string, lang: Language): string
+
+// Fallback: if no mapping exists, return sysValue as-is (for unknown values)
+```
+
+### E3. Places That Need Translation (System Value Leaks)
+
+All of these currently show raw system values and must use the E2 lookup functions:
+
+| Location | File | Raw values shown |
+|----------|------|-----------------|
+| **Map popup** | `StandLayer.tsx` lines 115,116,122,129,145 | `development_class`, `site_type`, species names, `op.type` |
+| **StandPopup** | `StandPopup.tsx` lines 45,48 | `development_class`, `site_type` |
+| **StandList table** | `StandList.tsx` lines 375,395,415,590,594,618,637 | Species, dev_class, site_type, operation type |
+| **StandList filters** | `StandList.tsx` DEV_CLASS_OPTIONS, SITE_TYPE_OPTIONS, SPECIES_OPTIONS | Dropdown options show system values |
+| **OperationList table** | `OperationList.tsx` lines 402,422,467,473,525,527,544 | Operation type, species, dev_class |
+| **OperationList filters** | `OperationList.tsx` OP_TYPE_OPTIONS, SPECIES_OPTIONS | Dropdown options show system values |
+| **StandLegend** | `StandLegend.tsx` | Dev class labels in legend |
+| **ChartCard** | `ChartCard.tsx` line 279 | Already uses `displayOperationType` — needs language-aware version |
+| **Chart tooltips** | Via Recharts | Operation type labels in legends/tooltips |
+
+**Pattern:** Each component imports `useForestStore` to get the language, then calls `displayOp(value, lang)`, `displayDevClass(value, lang)`, etc. Filter dropdowns show display values but filter by system values (add `data-system-value` attribute or lookup map).
+
+### E4. AI Language Injection
+
+**File:** `src/lib/chat/system-prompt.ts` → `buildSystemPrompt()` accepts `language: Language` parameter
+
+Add a line to the system prompt based on language:
+- `en`: `Respond in English.`
+- `fi`: `Vastaa suomeksi. Kaikki työkalukutsut ja parametrit pysyvät englanniksi (järjestelmän sisäinen kieli), mutta käyttäjälle näytettävä teksti on suomeksi.`
+
+**File:** `src/app/api/chat/route.ts` — read language from request header or query param, pass to `buildSystemPrompt()`
+
+The AI tools and parameters stay in English (system language). The AI response text adapts.
+
+### E5. App Name
+
+- **Finnish:** MetsäChat
+- **English:** ForestChat
+- The `<title>` tag, manifest, and landing page hero use the name matching the selected language
+- URL/routes stay `/` and `/dashboard` (no i18n routing)
+- The `<meta>` description shows in the selected language
+
+### E6. Chat Commands — Example Prompts
+
+**File:** `src/components/chat/CommandsMenu.tsx`
+
+The commands menu grows from 2 hardcoded commands to a grouped list of example prompts + the existing `/new` and `/model` commands. The tip texts for `/new` and `/model` adapt to the selected language.
+
+**English prompts:**
+
+```
+📋 Chat Commands
+
+  /new    Start a new conversation
+  /model  Change AI model  (Current: deepseek-v4-pro)
+
+── Plan Editing ──
+  Generate a 20-year forest management plan
+  Move stand 7 clearcut to 2030
+  Remove all operations from stand 12
+  Show me all clearcuts from 2030-2035
+  Add thinning to all mature pine stands
+
+── Chart Creation ──
+  Create a yearly income bar chart
+  Show species distribution as a pie chart
+  Chart yearly harvest volume as stacked bars
+  Show cumulative growth and removal
+
+── Miscellaneous ──
+  Check harvest sustainability
+  Validate the current plan
+  Show stand 7 on the map
+  Summarize the plan
+```
+
+**Finnish prompts:**
+
+```
+📋 Komennot
+
+  /new    Aloita uusi keskustelu
+  /model  Vaihda tekoälymalli  (Nykyinen: deepseek-v4-pro)
+
+── Suunnitelman muokkaus ──
+  Laadi 20 vuoden metsäsuunnitelma
+  Siirrä kuvion 7 avohakkuu vuoteen 2030
+  Poista kaikki toimenpiteet kuviosta 12
+  Näytä kaikki avohakkuut vuosilta 2030-2035
+  Lisää harvennus kaikkiin varttuneisiin mäntykohteisiin
+
+── Kaavioiden luonti ──
+  Luo vuosittaiset tulot pylväskaaviona
+  Näytä puulajijakauma piirakkakaaviona
+  Vuosittaiset hakkuumäärät pinottuna pylväskaaviona
+  Näytä kumulatiivinen kasvu ja poistuma
+
+── Muut ──
+  Tarkista hakkuiden kestävyys
+  Tarkista suunnitelma
+  Näytä kuvio 7 kartalla
+  Yhteenveto suunnitelmasta
+```
+
+**Implementation:**
+- The prompts are defined in `src/lib/i18n.ts` alongside other translations
+- Each prompt is a clickable button that runs `onInsertCommand(text)`
+- Clicking a prompt inserts it into the chat input (does NOT auto-send)
+- `/new` calls `onInsertCommand("/new ")` — user still needs to type a message after
+- `/model` calls `onInsertCommand("/model ")` — user types model name after
+
+---
+
+## 6. Task Breakdown (Updated)
+
+```
+Track A: PWA & Offline
+  A1 (1h)    PWA icons + manifest verification
+  A2 (2h)    Wire Dexie sync into data hooks
+  A3 (0.5h)  Install prompt component
+
+Track B: Landing & Auth
+  B1 (1h)    Landing page redesign (login button, features, hero)
+  B2 (0.5h)  Auth page cross-linking
+  B3 (0.5h)  Dark mode toggle
+
+Track C: AI Tools
+  C1 (1h)    Multi-stand selection (select_stand → stand_ids[])
+  C2 (1.5h)  Batch add_operation (operations[])
+  C3 (1h)    Smarter remove_operation (year-optional, multi-stand, type filter)
+  C4 (0.5h)  query_operations response efficiency (summary mode)
+  C5 (0.5h)  search_stands response efficiency (summary mode)
+  C6 (1h)    System prompt compression + language injection
+
+Track D: UX Polish
+  D1 (1h)    Chat input enhancements (shortcuts, suggestions, new chat)
+  D2 (1h)    Loading & empty states
+  D3 (0.5h)  Dashboard polish
+  D4 (0.5h)  Error boundary
+
+Track E: Multi-Language  🆕
+  E1 (1h)    Language infrastructure (i18n slice, store, toggle)
+  E2 (1.5h)  Display value mappings + i18n.ts module
+  E3 (2h)    Fix ALL system value leaks across 8+ components
+  E4 (0.5h)  AI language injection (system prompt + route)
+  E5 (0.5h)  App name + metadata i18n
+  E6 (1h)    Chat commands — example prompts (EN + FI)
+```
+
+**Total: ~19h** (up from ~13h due to Track E)
+
+---
+
+## 7. Dependency Graph
+
+```
+A1, A2 ── independent
+A3 ── depends on A1
+
+B1, B2, B3 ── independent
+
+C1-C5 ── independent (different tools/params)
+C6 ── after E4 (needs language parameter awareness)
+
+D1-D4 ── independent
+
+E1 ── independent (store + toggle)
+E2 ── independent (pure data)
+E3 ── depends on E1 + E2 (needs store + mappings)
+E4 ── depends on E1 (needs language from store/request)
+E5 ── depends on E1 (needs language)
+E6 ── depends on E2 (needs translated prompt texts)
+```
+
+---
+
+## 8. Implementation Order
+
+```
+Wave 1 (parallel, ~4h):   A1, A2, B1, B2, B3, D1, D4, E1, E2
+Wave 2 (parallel, ~5h):   A3, C1, C2, C3, C4, C5, D2, D3, E4, E5
+Wave 3 (sequential, ~3h): E3 (fix all system value leaks — must come after E1+E2)
+Wave 4 (cleanup, ~2h):    C6, E6 (system prompt + commands — after everything)
+```
+
+---
+
+## 9. Out of Scope
+
+- GPS geolocation ("Which stand am I in?")
+- Offline map tiles
+- Playwright E2E tests
+- Plan sharing UI
+- User settings page
+- i18n URL routing (`/fi/dashboard` etc.) — language is a client-side toggle only
+- Translating the AI's tool parameter values (they stay in English — system language)
+- Excel/CSV export
