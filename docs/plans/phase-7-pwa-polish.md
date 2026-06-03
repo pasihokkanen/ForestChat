@@ -154,11 +154,126 @@ When >20 rows, return summary only ("Found 45 operations across 2028-2035"). Ful
 
 Same summary pattern as C4. Above 20 results → summary only.
 
-### C6. System Prompt Compression
+### C6. System Prompt Compression + Chart Editing Tools
 
 **File:** `src/lib/chat/system-prompt.ts`
 
-Reduce ~500 lines of system prompt by ~30%. Trim redundant tool descriptions, remove inline examples. Also: inject the user's language preference so the AI responds in that language.
+**⚠️ The chart templates (lines 84–156, ~70 lines) must NOT be removed.** They are copy-paste patterns the AI relies on to compose `query_config` reliably. Without them, hallucination rate on nested JSON structures spikes. The `detectChartIntent` fallback in `route.ts` only activates when the AI produces zero output — it doesn't fix malformed configs.
+
+**Safe to trim (prose only, not templates):**
+
+| Section | Current lines | After | Saving |
+|---------|--------------|-------|--------|
+| `COMPUTED FIELDS` description | 12 | 4 (field:formula only, drop multiplier explanation) | 8 |
+| `SOURCE SCHEMAS` | 25 | 8 (compact one-liners per table) | 17 |
+| `CONVENTIONS` | 5 | Merge into CHART RULES | 5 |
+| `ROW-LEVEL OPERATORS` | 7 | 2 | 5 |
+| `OPERATION TYPE GROUPINGS` | 3 | 1 | 2 |
+| `tools.ts` create_chart description | 60+ | 30 (remove duplicate template examples, keep schema) | 30 |
+| **Total** | **~110 lines over both files** | **~43 lines** | **~67 lines (~25%)** |
+
+All 16 copy-paste templates stay intact. The AI still gets exact patterns for every chart type.
+
+**Also:** Inject language parameter so the AI responds in the selected language (see E4).
+
+### C7. Chart Editing Tools
+
+**Problem:** When the AI creates a chart with wrong settings, the user must repeat the full request. There's no way to fix a chart in-place.
+
+**Files:** `src/lib/chat/tools.ts`, `src/lib/chat/tool-executor.ts`
+
+**New tool: `update_chart`** — change rendering properties only (no data recompute)
+```typescript
+{
+  name: "update_chart",
+  description: "Modify an existing chart's appearance. Use when the user asks to change chart type (bar→pie), axis keys, title, or colors. Does NOT recompute data — fast. To change the underlying data query, use recreate_chart instead.",
+  parameters: {
+    chart_id: { type: "string", required: true },  // which chart to update
+    title: { type: "string" },
+    type: { type: "string", enum: ["bar","pie","line","area","stacked_bar","scatter","radar","donut","horizontal_bar","composed","waterfall"] },
+    x_key: { type: "string" },
+    y_key: { type: "string" },
+    y_key2: { type: "string" },
+    name_key: { type: "string" },
+    color_key: { type: "string" },
+  }
+}
+```
+Handler: fetch chart_tab from DB, merge the provided fields, upsert, emit `create_chart` SSE (same event — the client upserts tabs by id).
+
+**New tool: `recreate_chart`** — recompute an existing chart with a new/modified query_config
+```typescript
+{
+  name: "recreate_chart",
+  description: "Recompute an existing chart with a new or modified query_config. Use when the user asks to change the underlying data (e.g., 'add costs to the income chart', 'show only thinnings'). The new query_config replaces the old one and data is recomputed.",
+  parameters: {
+    chart_id: { type: "string", required: true },
+    query_config: { type: "object", required: true },  // the new config
+    title: { type: "string" },
+    type: { type: "string" },
+    x_key: { type: "string" },
+    y_key: { type: "string" },
+    // ... same rendering params as create_chart
+  }
+}
+```
+Handler: validate new query_config, recompute via chart engine, update chart_tabs row, emit `create_chart` SSE.
+
+### C8. List Charts Tool
+
+**Problem:** The AI has no way to inspect existing charts. It can't know chart_ids, current types, or query_configs from earlier conversation turns. This blocks tools like `update_chart`, `recreate_chart`, and `remove_chart` when the user references a chart by name rather than explicit id.
+
+**File:** `src/lib/chat/tools.ts`, `src/lib/chat/tool-executor.ts`
+
+**New tool: `list_charts`**
+```typescript
+{
+  name: "list_charts",
+  description: `List all chart tabs currently in the visualization panel. Returns chart_id, title, type, and key rendering properties for each chart. Also returns the query_config (if any) — the declarative data source definition. Use this BEFORE calling update_chart, recreate_chart, or remove_chart when the user refers to a chart by its title or description rather than an explicit chart_id.
+
+The data field (computed cache of chart values) is NOT returned — it's too large. If you need to inspect chart data values, look at the query_config instead.`,
+  parameters: {
+    type: "object",
+    properties: {},
+  },
+}
+```
+
+**Handler:**
+```typescript
+list_charts: async (_args, ctx) => {
+  const { data } = await ctx.supabase
+    .from("chart_tabs")
+    .select("chart_id, title, type, x_key, y_key, y_key2, name_key, color_key, query_config")
+    .eq("forest_id", ctx.forestId)
+    .order("created_at", { ascending: true });
+
+  if (!data || data.length === 0) {
+    return { success: true, result: "No charts found." };
+  }
+
+  // Format: compact summary per chart, with query_config inline for AI to use
+  const lines = data.map(c =>
+    `- ${c.chart_id}: "${c.title}" (${c.type})` +
+    (c.x_key ? ` x=${c.x_key}` : "") +
+    (c.y_key ? ` y=${c.y_key}` : "") +
+    (c.y_key2 ? ` y2=${c.y_key2}` : "") +
+    (c.name_key ? ` name=${c.name_key}` : "") +
+    (c.color_key ? ` color=${c.color_key}` : "") +
+    (c.query_config ? `\n    query_config: ${JSON.stringify(c.query_config)}` : "")
+  );
+
+  return {
+    success: true,
+    result: `${data.length} chart(s):\n${lines.join("\n")}`,
+  };
+},
+```
+
+**Enables these flows:**
+- User: "Change the species chart to a donut" → AI: `list_charts` → finds `chart-species-area` → `update_chart(chart_id: "chart-species-area", type: "donut")`
+- User: "Add costs to the yearly income chart" → AI: `list_charts` → sees query_config with `income_eur` → `recreate_chart(chart_id: "chart-yearly-income", query_config: {..., values: [..., {field:"cost_eur", as:"cost", fn:"sum", multiply:-1}]})`
+- User: "Remove all charts except income" → AI: `list_charts` → `remove_chart` for each non-income chart
 
 ---
 
@@ -438,7 +553,9 @@ Track C: AI Tools
   C3 (1h)    Smarter remove_operation (year-optional, multi-stand, type filter)
   C4 (0.5h)  query_operations response efficiency (summary mode)
   C5 (0.5h)  search_stands response efficiency (summary mode)
-  C6 (1h)    System prompt compression + language injection
+  C6 (1h)    System prompt compression (~25%, templates preserved)
+  C7 (1.5h)  Chart editing tools (update_chart + recreate_chart)
+  C8 (0.5h)  List charts tool (list_charts)
 
 Track D: UX Polish
   D1 (1h)    Chat input enhancements (shortcuts, suggestions, new chat)
@@ -455,7 +572,7 @@ Track E: Multi-Language  🆕
   E6 (1h)    Chat commands — example prompts (EN + FI)
 ```
 
-**Total: ~19h** (up from ~13h due to Track E)
+**Total: ~22h** (up from ~19h due to C7, C8)
 
 ---
 
@@ -469,6 +586,8 @@ B1, B2, B3 ── independent
 
 C1-C5 ── independent (different tools/params)
 C6 ── after E4 (needs language parameter awareness)
+C7 ── independent (new tools, no shared state)
+C8 ── independent (pure query tool)
 
 D1-D4 ── independent
 
@@ -485,7 +604,7 @@ E6 ── depends on E2 (needs translated prompt texts)
 ## 8. Implementation Order
 
 ```
-Wave 1 (parallel, ~4h):   A1, A2, B1, B2, B3, D1, D4, E1, E2
+Wave 1 (parallel, ~5h):   A1, A2, B1, B2, B3, D1, D4, E1, E2, C7, C8
 Wave 2 (parallel, ~5h):   A3, C1, C2, C3, C4, C5, D2, D3, E4, E5
 Wave 3 (sequential, ~3h): E3 (fix all system value leaks — must come after E1+E2)
 Wave 4 (cleanup, ~2h):    C6, E6 (system prompt + commands — after everything)
