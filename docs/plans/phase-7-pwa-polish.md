@@ -665,12 +665,30 @@ E6 ── depends on E2 (needs translated prompt texts)
 
 ## 8. Implementation Order
 
+**Strategy:** Do visible polish first → test on mobile → then AI tools → then PWA infrastructure last.
+
 ```
-Wave 1 (parallel, ~6h):   A1, A2, B1, B2, B3, D1, D4, E1, E2, C7, C8
-Wave 2 (parallel, ~5h):   A3, C1, C2, C3, C4, C5, D2, D3, E4, E5, C9
-Wave 3 (sequential, ~3h): E3 (fix all system value leaks — must come after E1+E2)
-Wave 4 (cleanup, ~2h):    C6, E6 (system prompt + commands — after everything)
+Wave 1 — Polish & Language (visible, testable on mobile, ~8h):
+  E1, E2, B1, B2, B3, D1, D2, D3, D4
+  (independent — all pure UI, no backend changes)
+
+Wave 2 — Multi-Language Wiring (~4h):
+  E3, E4, E5, E6
+  (E3 needs E1+E2; E4 needs E1; E5 needs E1; E6 needs E2)
+
+Wave 3 — AI Tools (~7h):
+  C1, C2, C3, C4, C5, C7, C8, C9
+  (mostly independent; C9 after C7+C8 for tests)
+
+Wave 4 — System Prompt Cleanup (~1h):
+  C6 (needs E4 — language-aware buildSystemPrompt)
+
+Wave 5 — PWA Infrastructure (~3.5h):
+  A1, A2, A3
+  (A3 after A1; A2 independent)
 ```
+
+**Deploy/test after each wave on mobile.** PWA (Track A) is last because it's invisible infrastructure — service worker caching and offline sync have no visual impact. The polished UI and multi-language support are what make the app feel complete on a phone.
 
 ---
 
