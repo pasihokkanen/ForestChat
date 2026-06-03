@@ -106,7 +106,7 @@ Current issues:
 **File:** `src/lib/chat/tools.ts` (tool definition), `src/lib/chat/tool-executor.ts` (handler), `src/lib/chat/sse.ts` (event type), `src/lib/chat/sse-client.ts` (callback type), `src/components/chat/ChatPanel.tsx` (handler)
 
 **Current:** `select_stand` takes a single `stand_id: string`
-**Change:** Accept `stand_ids: string | string[]` — single stand still works, array selects multiple
+**Change:** Accept `stand_ids: string[]` — handler also normalizes a single string (some models may send a scalar). Always emit as array.
 
 ```typescript
 {
@@ -114,17 +114,17 @@ Current issues:
   parameters: {
     properties: {
       stand_ids: {
-        oneOf: [
-          { type: "string" },
-          { type: "array", items: { type: "string" } }
-        ],
-        description: "Stand ID or array of stand IDs, e.g. '7' or ['5','12','89.1']"
+        type: "array",
+        items: { type: "string" },
+        description: "Array of stand IDs, e.g. ['5','12','89.1']. A single stand like ['7'] also works."
       },
     },
     required: ["stand_ids"],
   },
 }
 ```
+
+Handler normalizes: if the model sends a plain string (some OpenRouter models don't respect `type: "array"` strictly), wrap it: `const ids = Array.isArray(args.stand_ids) ? args.stand_ids : [String(args.stand_ids)]`. Emit SSE with `{ stand_ids: ids }`.
 
 **SSE event change:** `sse.ts` — `stand_id?: string` → `stand_ids?: string[]` (keep `stand_id` as deprecated alias for backward compat).
 
@@ -343,7 +343,29 @@ export interface I18nSlice {
 **Create:** `src/lib/store/i18n-slice.ts`
 **Modify:** `src/lib/store/index.ts` — add `I18nSlice`
 
-**Modify:** `src/app/layout.tsx` — read language from store, set `lang` attribute on `<html>`
+**Create:** `src/components/shared/LanguageRoot.tsx` — `"use client"` wrapper component that reads the language from Zustand (initialized from localStorage) and sets `document.documentElement.lang`. Included in `RootLayout`:
+
+```tsx
+// src/components/shared/LanguageRoot.tsx
+"use client";
+import { useEffect } from "react";
+import { useForestStore } from "@/lib/store";
+
+export default function LanguageRoot({ children }: { children: React.ReactNode }) {
+  const language = useForestStore(s => s.language);
+  useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
+  return <>{children}</>;
+}
+```
+
+```tsx
+// src/app/layout.tsx
+import LanguageRoot from "@/components/shared/LanguageRoot";
+// ...
+<body><LanguageRoot>{children}</LanguageRoot></body>
+```
 
 **Create:** `src/components/shared/LanguageToggle.tsx` — 🇬🇧/🇫🇮 toggle button in the app header. Click → setLanguage → page reload.
 
@@ -450,7 +472,17 @@ All of these currently show raw English system values and must use the E2 lookup
 | **ChartCard** | `ChartCard.tsx` line 279 | Already uses `displayOperationType` — needs language-aware version |
 | **Chart tooltips** | Via Recharts | Operation type labels in legends/tooltips |
 
-**Pattern:** Each component imports `useForestStore` to get the language, then calls `displayOp(value, lang)`, `displayDevClass(value, lang)`, etc. Filter dropdowns show display values but filter by system values (add `data-system-value` attribute or reverse lookup map).
+**Pattern:** Each component imports `useForestStore` to get the language, then calls `displayOp(value, lang)`, `displayDevClass(value, lang)`, etc.
+
+**Filter dropdowns** (StandList, OperationList) need special handling: options show display values but the filter logic uses system values. Use `data-system-value` attributes:
+
+```tsx
+<option value={sysValue} data-system-value={sysValue}>
+  {displayDevClass(sysValue, language)}
+</option>
+```
+
+On change, read `event.target.selectedOptions[0].dataset.systemValue` to get the system value for filtering. The `<select>` `value` also uses system values — the display text is purely visual.
 
 ### E4. AI Language Injection
 
