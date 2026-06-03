@@ -22,6 +22,7 @@ The original architecture plan (v3.0) listed Phase 5 as:
 - Phase 6 became stand/operation lists with cross-component highlighting
 - The original architecture's standalone routes were folded into the 3-panel + tabbed layout
 - Dexie offline cache was never wired to Supabase sync hooks
+- `standDimension` (old chart→map linking) was replaced by `_stand_ids` injection in Phase 6 — fully removed from codebase
 
 ---
 
@@ -35,7 +36,7 @@ The original architecture plan (v3.0) listed Phase 5 as:
 - The manifest already references these paths — just create the files
 - Add `apple-touch-icon` and `favicon.ico` if missing
 - Verify manifest loads at `/manifest.webmanifest`
-- App name in manifest: "MetsäChat" (short_name: "MetsäChat")
+- Manifest `short_name`: "ForestChat" (English — system language). Manifest is static at build time; the `<title>` tag and landing page hero adapt to the selected UI language at runtime (see E5)
 
 ### A2. Offline-First Data (Dexie + Sync)
 
@@ -78,7 +79,6 @@ Current issues:
 2. Add a feature summary section: 🗺️ Map, 🤖 AI Chat, 📊 Charts, 🌲 Stands
 3. Add a subtle hero visual (SVG forest silhouette or tree icon)
 4. Show "Already have an account?" text under the buttons
-5. Page title: "MetsäChat" (Finnish name) with English subtitle
 
 ### B2. Auth Page Cross-Linking
 
@@ -103,7 +103,7 @@ Current issues:
 
 ### C1. Multi-Stand Selection
 
-**File:** `src/lib/chat/tools.ts` (tool definition), `src/lib/chat/tool-executor.ts` (handler), `src/lib/chat/sse.ts` (event type)
+**File:** `src/lib/chat/tools.ts` (tool definition), `src/lib/chat/tool-executor.ts` (handler), `src/lib/chat/sse.ts` (event type), `src/lib/chat/sse-client.ts` (callback type), `src/components/chat/ChatPanel.tsx` (handler)
 
 **Current:** `select_stand` takes a single `stand_id: string`
 **Change:** Accept `stand_ids: string | string[]` — single stand still works, array selects multiple
@@ -126,7 +126,11 @@ Current issues:
 }
 ```
 
-**Also update `sse.ts`:** Change `stand_id?: string` → `stand_ids?: string[]` for the `select_stand` event data.
+**SSE event change:** `sse.ts` — `stand_id?: string` → `stand_ids?: string[]` (keep `stand_id` as deprecated alias for backward compat).
+
+**Client callback change:** `sse-client.ts` `SseCallbacks.onSelectStand` signature changes from `(standId: string) => void` to `(standIds: string[]) => void`. `ChatPanel.tsx` handler normalizes single string to array and calls `setHighlightedStands(standIds)`.
+
+**Zoom behavior:** When multiple stands are selected, StandLayer's existing `useEffect` already handles `highlightedStandIds.length > 1` → `fitBounds` to all highlighted stands. No additional map changes needed.
 
 ### C2. Batch Add Operations
 
@@ -154,7 +158,7 @@ When >20 rows, return summary only ("Found 45 operations across 2028-2035"). Ful
 
 Same summary pattern as C4. Above 20 results → summary only.
 
-### C6. System Prompt Compression + Chart Editing Tools
+### C6. System Prompt Compression
 
 **File:** `src/lib/chat/system-prompt.ts`
 
@@ -188,7 +192,7 @@ All 16 copy-paste templates stay intact. The AI still gets exact patterns for ev
   name: "update_chart",
   description: "Modify an existing chart's appearance. Use when the user asks to change chart type (bar→pie), axis keys, title, or colors. Does NOT recompute data — fast. To change the underlying data query, use recreate_chart instead.",
   parameters: {
-    chart_id: { type: "string", required: true },  // which chart to update
+    chart_id: { type: "string", required: true },
     title: { type: "string" },
     type: { type: "string", enum: ["bar","pie","line","area","stacked_bar","scatter","radar","donut","horizontal_bar","composed","waterfall"] },
     x_key: { type: "string" },
@@ -196,10 +200,13 @@ All 16 copy-paste templates stay intact. The AI still gets exact patterns for ev
     y_key2: { type: "string" },
     name_key: { type: "string" },
     color_key: { type: "string" },
+    waterfall_base: { type: "number" },
   }
 }
 ```
 Handler: fetch chart_tab from DB, merge the provided fields, upsert, emit `create_chart` SSE (same event — the client upserts tabs by id).
+
+**Note:** `standDimension` is NOT included — it was replaced by `_stand_ids` injection in Phase 6 and is no longer in the codebase or `ChartTab` interface. All charts automatically support cross-highlighting via `_stand_ids`.
 
 **New tool: `recreate_chart`** — recompute an existing chart with a new/modified query_config
 ```typescript
@@ -208,12 +215,15 @@ Handler: fetch chart_tab from DB, merge the provided fields, upsert, emit `creat
   description: "Recompute an existing chart with a new or modified query_config. Use when the user asks to change the underlying data (e.g., 'add costs to the income chart', 'show only thinnings'). The new query_config replaces the old one and data is recomputed.",
   parameters: {
     chart_id: { type: "string", required: true },
-    query_config: { type: "object", required: true },  // the new config
+    query_config: { type: "object", required: true },
     title: { type: "string" },
-    type: { type: "string" },
+    type: { type: "string", enum: ["bar","pie","line","area","stacked_bar","scatter","radar","donut","horizontal_bar","composed","waterfall"] },
     x_key: { type: "string" },
     y_key: { type: "string" },
-    // ... same rendering params as create_chart
+    y_key2: { type: "string" },
+    name_key: { type: "string" },
+    color_key: { type: "string" },
+    waterfall_base: { type: "number" },
   }
 }
 ```
@@ -252,7 +262,6 @@ list_charts: async (_args, ctx) => {
     return { success: true, result: "No charts found." };
   }
 
-  // Format: compact summary per chart, with query_config inline for AI to use
   const lines = data.map(c =>
     `- ${c.chart_id}: "${c.title}" (${c.type})` +
     (c.x_key ? ` x=${c.x_key}` : "") +
@@ -285,15 +294,15 @@ list_charts: async (_args, ctx) => {
 
 - Add Ctrl+Enter / Cmd+Enter keyboard shortcut to send
 - Add rotating placeholder suggestions: "Show me stands ready for harvest", "Create a yearly income chart", etc.
-- Add a small "New chat" button (resets session via `/new`)
+- The existing `/new` slash command (accessible from the `📋` commands menu) is the only way to start a new conversation — no dedicated "New chat" button to keep the interface clean
 
 ### D2. Loading & Empty States
 
 **Files:** various
 
-- ForestView: skeleton while compartments load
-- ChartCard: "No data" state when `cleanData` returns empty
-- ChatPanel: "Send a message to start planning" when no messages
+- ForestView: skeleton while compartments load (instead of blank map)
+- ChartCard: "No data" state when `cleanData` returns empty (instead of blank area)
+- The ChatPanel already has a welcome message on first load — no additional placeholder needed
 
 ### D3. Dashboard Polish
 
@@ -312,9 +321,9 @@ Wrap the main app. Currently unhandled render errors white-screen.
 
 ## 5. Multi-Language Support (Track E) 🆕
 
-**Support two languages:** English (en) and Finnish (fi).
+**Support two UI languages:** English (en) and Finnish (fi).
 
-**Principle:** System values (DB columns, API parameters, tool args) never change. All translation happens in the UI layer via lookup maps. The AI responds in the selected language.
+**Principle:** System values (DB columns, API parameters, tool args) are always in English. English is the system language and coding language. All translation happens in the UI layer via lookup maps. The AI responds in the selected UI language.
 
 ### E1. Language Infrastructure
 
@@ -328,7 +337,7 @@ export interface I18nSlice {
   language: Language;
   setLanguage: (lang: Language) => void;
 }
-// Persist to localStorage. On change, trigger full page reload.
+// Persist to localStorage. On change, trigger full page reload (F5).
 ```
 
 **Create:** `src/lib/store/i18n-slice.ts`
@@ -346,7 +355,7 @@ These replace the current ad-hoc `capitalize()`, `formatDisplayDevClass()`, and 
 
 #### Operation Types
 
-| System value | English | Finnish |
+| System value (English) | English display | Finnish display |
 |-------------|---------|---------|
 | `clear_cut` | Clearcut | Avohakkuu |
 | `thinning` | Thinning | Harvennus |
@@ -364,7 +373,7 @@ These replace the current ad-hoc `capitalize()`, `formatDisplayDevClass()`, and 
 
 #### Development Classes
 
-| System value | English | Finnish |
+| System value | English display | Finnish display |
 |-------------|---------|---------|
 | `regeneration_ready` | Regeneration Ready | Uudistuskypsä |
 | `mature_thinning` | Mature Thinning | Varttunut kasvatusmetsikkö |
@@ -379,7 +388,7 @@ These replace the current ad-hoc `capitalize()`, `formatDisplayDevClass()`, and 
 
 #### Site Types
 
-| System value | English | Finnish |
+| System value | English display | Finnish display |
 |-------------|---------|---------|
 | `herb-rich` | Herb-Rich | Lehto |
 | `herb-rich heath` | Herb-Rich Heath | Lehtomainen kangas |
@@ -390,7 +399,7 @@ These replace the current ad-hoc `capitalize()`, `formatDisplayDevClass()`, and 
 
 #### Species
 
-| System value | English | Finnish |
+| System value | English display | Finnish display |
 |-------------|---------|---------|
 | `pine` | Pine | Mänty |
 | `spruce` | Spruce | Kuusi |
@@ -405,7 +414,7 @@ These replace the current ad-hoc `capitalize()`, `formatDisplayDevClass()`, and 
 
 #### Drainage Status
 
-| System value | English | Finnish |
+| System value | English display | Finnish display |
 |-------------|---------|---------|
 | `drained` | Drained | Ojitettu |
 | `undrained` | Undrained | Ojittamaton |
@@ -427,21 +436,21 @@ export function displayDrainage(sysValue: string, lang: Language): string
 
 ### E3. Places That Need Translation (System Value Leaks)
 
-All of these currently show raw system values and must use the E2 lookup functions:
+All of these currently show raw English system values and must use the E2 lookup functions:
 
 | Location | File | Raw values shown |
 |----------|------|-----------------|
 | **Map popup** | `StandLayer.tsx` lines 115,116,122,129,145 | `development_class`, `site_type`, species names, `op.type` |
 | **StandPopup** | `StandPopup.tsx` lines 45,48 | `development_class`, `site_type` |
-| **StandList table** | `StandList.tsx` lines 375,395,415,590,594,618,637 | Species, dev_class, site_type, operation type |
+| **StandList table** | `StandList.tsx` lines 375,395,415,590,594,618,637 | species, dev_class, site_type, operation type |
 | **StandList filters** | `StandList.tsx` DEV_CLASS_OPTIONS, SITE_TYPE_OPTIONS, SPECIES_OPTIONS | Dropdown options show system values |
-| **OperationList table** | `OperationList.tsx` lines 402,422,467,473,525,527,544 | Operation type, species, dev_class |
+| **OperationList table** | `OperationList.tsx` lines 402,422,467,473,525,527,544 | operation type, species, dev_class |
 | **OperationList filters** | `OperationList.tsx` OP_TYPE_OPTIONS, SPECIES_OPTIONS | Dropdown options show system values |
 | **StandLegend** | `StandLegend.tsx` | Dev class labels in legend |
 | **ChartCard** | `ChartCard.tsx` line 279 | Already uses `displayOperationType` — needs language-aware version |
 | **Chart tooltips** | Via Recharts | Operation type labels in legends/tooltips |
 
-**Pattern:** Each component imports `useForestStore` to get the language, then calls `displayOp(value, lang)`, `displayDevClass(value, lang)`, etc. Filter dropdowns show display values but filter by system values (add `data-system-value` attribute or lookup map).
+**Pattern:** Each component imports `useForestStore` to get the language, then calls `displayOp(value, lang)`, `displayDevClass(value, lang)`, etc. Filter dropdowns show display values but filter by system values (add `data-system-value` attribute or reverse lookup map).
 
 ### E4. AI Language Injection
 
@@ -451,23 +460,42 @@ Add a line to the system prompt based on language:
 - `en`: `Respond in English.`
 - `fi`: `Vastaa suomeksi. Kaikki työkalukutsut ja parametrit pysyvät englanniksi (järjestelmän sisäinen kieli), mutta käyttäjälle näytettävä teksti on suomeksi.`
 
-**File:** `src/app/api/chat/route.ts` — read language from request header or query param, pass to `buildSystemPrompt()`
+**Concrete language pass mechanism:** The chat API request body adds a `language` field:
+```typescript
+// sse-client.ts streamChat signature:
+async function streamChat(
+  message: string,
+  forestId: string,
+  sessionId: string | null,
+  language: Language,      // NEW parameter
+  callbacks: SseCallbacks
+): Promise<void>
 
-The AI tools and parameters stay in English (system language). The AI response text adapts.
+// ChatPanel.tsx reads language from Zustand and passes it:
+const language = useForestStore(s => s.language);
+await streamChat(message, forestId, sessionId, language, callbacks);
+
+// route.ts reads it from the request body:
+const { message, forest_id, session_id, language } = await request.json();
+const systemPrompt = buildSystemPrompt(forest, compartments, language ?? "en");
+```
+
+The AI tools and parameters stay in English (system language). Only the AI response text adapts.
 
 ### E5. App Name
 
-- **Finnish:** MetsäChat
-- **English:** ForestChat
-- The `<title>` tag, manifest, and landing page hero use the name matching the selected language
+- **System name / manifest / code:** "ForestChat" (English — system and coding language)
+- **UI display when language=fi:** "MetsäChat" in `<title>`, landing page hero, and header
+- **UI display when language=en:** "ForestChat" in `<title>`, landing page hero, and header
 - URL/routes stay `/` and `/dashboard` (no i18n routing)
-- The `<meta>` description shows in the selected language
+- The manifest `short_name` is "ForestChat" (static, English)
+- The `<meta>` description shows in the selected UI language
 
 ### E6. Chat Commands — Example Prompts
 
 **File:** `src/components/chat/CommandsMenu.tsx`
 
-The commands menu grows from 2 hardcoded commands to a grouped list of example prompts + the existing `/new` and `/model` commands. The tip texts for `/new` and `/model` adapt to the selected language.
+The commands menu grows from 2 hardcoded commands to a grouped list of example prompts + the existing `/new` and `/model` commands. The tip texts for `/new` and `/model` adapt to the selected UI language.
 
 **English prompts:**
 
@@ -534,7 +562,7 @@ The commands menu grows from 2 hardcoded commands to a grouped list of example p
 
 ---
 
-## 6. Task Breakdown (Updated)
+## 6. Task Breakdown
 
 ```
 Track A: PWA & Offline
@@ -556,23 +584,24 @@ Track C: AI Tools
   C6 (1h)    System prompt compression (~25%, templates preserved)
   C7 (1.5h)  Chart editing tools (update_chart + recreate_chart)
   C8 (0.5h)  List charts tool (list_charts)
+  C9 (0.5h)  Tests for C7 + C8 (chart-tools.test.ts)
 
 Track D: UX Polish
-  D1 (1h)    Chat input enhancements (shortcuts, suggestions, new chat)
-  D2 (1h)    Loading & empty states
+  D1 (0.5h)  Chat input enhancements (shortcuts, rotating placeholder)
+  D2 (0.5h)  Loading & empty states (skeleton, ChartCard no-data)
   D3 (0.5h)  Dashboard polish
   D4 (0.5h)  Error boundary
 
-Track E: Multi-Language  🆕
+Track E: Multi-Language
   E1 (1h)    Language infrastructure (i18n slice, store, toggle)
   E2 (1.5h)  Display value mappings + i18n.ts module
   E3 (2h)    Fix ALL system value leaks across 8+ components
-  E4 (0.5h)  AI language injection (system prompt + route)
+  E4 (1h)    AI language injection (system prompt + request body + ChatPanel pass)
   E5 (0.5h)  App name + metadata i18n
   E6 (1h)    Chat commands — example prompts (EN + FI)
 ```
 
-**Total: ~22h** (up from ~19h due to C7, C8)
+**Total: ~22.5h**
 
 ---
 
@@ -585,16 +614,17 @@ A3 ── depends on A1
 B1, B2, B3 ── independent
 
 C1-C5 ── independent (different tools/params)
-C6 ── after E4 (needs language parameter awareness)
+C6 ── after E4 (needs language parameter in buildSystemPrompt)
 C7 ── independent (new tools, no shared state)
 C8 ── independent (pure query tool)
+C9 ── after C7, C8 (tests for new tools)
 
 D1-D4 ── independent
 
 E1 ── independent (store + toggle)
 E2 ── independent (pure data)
 E3 ── depends on E1 + E2 (needs store + mappings)
-E4 ── depends on E1 (needs language from store/request)
+E4 ── depends on E1 (needs language from store; modifies ChatPanel + sse-client)
 E5 ── depends on E1 (needs language)
 E6 ── depends on E2 (needs translated prompt texts)
 ```
@@ -604,8 +634,8 @@ E6 ── depends on E2 (needs translated prompt texts)
 ## 8. Implementation Order
 
 ```
-Wave 1 (parallel, ~5h):   A1, A2, B1, B2, B3, D1, D4, E1, E2, C7, C8
-Wave 2 (parallel, ~5h):   A3, C1, C2, C3, C4, C5, D2, D3, E4, E5
+Wave 1 (parallel, ~6h):   A1, A2, B1, B2, B3, D1, D4, E1, E2, C7, C8
+Wave 2 (parallel, ~5h):   A3, C1, C2, C3, C4, C5, D2, D3, E4, E5, C9
 Wave 3 (sequential, ~3h): E3 (fix all system value leaks — must come after E1+E2)
 Wave 4 (cleanup, ~2h):    C6, E6 (system prompt + commands — after everything)
 ```
@@ -622,3 +652,4 @@ Wave 4 (cleanup, ~2h):    C6, E6 (system prompt + commands — after everything)
 - i18n URL routing (`/fi/dashboard` etc.) — language is a client-side toggle only
 - Translating the AI's tool parameter values (they stay in English — system language)
 - Excel/CSV export
+- `standDimension` field (already removed from codebase in Phase 6; `_stand_ids` replaced it)

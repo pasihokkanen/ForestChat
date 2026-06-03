@@ -679,7 +679,7 @@ Used only if MML/WFS path fails (e.g., property ID not found, WFS down).
 > 📋 **Detailed subplan:** `docs/plans/phase-7-pwa-polish.md` (June 2026)
 > Phases 4–6 expanded beyond the original scope (chart engine, cross-source, CSV import, stand/operation lists). Original Phase 5 became CSV import, Phase 6 became stand/operation lists. Remaining work consolidated into Phase 7.
 
-**Total: 13 tasks, ~65h**
+**Total: 13 tasks, ~67.5h**
 
 ---
 
