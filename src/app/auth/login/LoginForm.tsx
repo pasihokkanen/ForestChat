@@ -37,6 +37,12 @@ export default function LoginForm() {
 
   return (
     <div className="rounded-xl bg-white dark:bg-gray-900 p-8 shadow-sm border border-gray-200 dark:border-gray-700">
+      <Link
+        href="/"
+        className="inline-flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors mb-4"
+      >
+        ← Back
+      </Link>
       <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Sign in</h1>
       <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">to continue to ForestChat</p>
 

@@ -1,32 +1,28 @@
 @import "maplibre-gl/dist/maplibre-gl.css";
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --color-border: #e5e7eb;
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-    color-scheme: dark;
-  }
+.dark {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  --color-border: #374151;
+  color-scheme: dark;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --color-border: #e5e7eb;
+  --color-border: var(--color-border);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-border: #374151;
-  }
 }
 
 body {
@@ -50,14 +46,10 @@ body {
   color: #111;
 }
 
-@media (prefers-color-scheme: dark) {
-  .maplibregl-ctrl-zoom-to-property .maplibregl-ctrl-icon {
-    /* Keep dark icon on white button bg, matching MapLibre's
-       hardcoded-SVG approach (fill: #333) which doesn't change
-       in dark mode either */
-    color: #333 !important;
-  }
-  .maplibregl-ctrl-zoom-to-property:hover .maplibregl-ctrl-icon {
-    color: #111;
-  }
+/* MapLibre zoom-to-property control — keep icon dark on white button */
+.dark .maplibregl-ctrl-zoom-to-property .maplibregl-ctrl-icon {
+  color: #333 !important;
+}
+.dark .maplibregl-ctrl-zoom-to-property:hover .maplibregl-ctrl-icon {
+  color: #111;
 }

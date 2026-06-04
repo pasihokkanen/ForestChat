@@ -8,38 +8,54 @@ const DARK_STYLE = "/styles/dark.json";
 
 export interface MapViewProps {
   onMapReady?: (map: maplibregl.Map) => void;
-  /** Fired after each style change (initial load + runtime dark/light toggle). */
   onStyleChange?: (params: { isDark: boolean; styleVersion: number }) => void;
 }
 
 export default function MapView({ onMapReady, onStyleChange }: MapViewProps) {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const map = useRef<maplibregl.Map | null>(null);
-  // null = unknown (OS preference not read yet); bool = known
   const [isDark, setIsDark] = useState<boolean | null>(null);
   const styleVersion = useRef(0);
-  const initialStyleSent = useRef(false);
+  const mapCreated = useRef(false);
+  const roRef = useRef<ResizeObserver | null>(null);
 
-  // Store callbacks in refs to avoid infinite re-render loops
-  // when parent passes inline arrow functions as props.
   const onMapReadyRef = useRef(onMapReady);
   onMapReadyRef.current = onMapReady;
   const onStyleChangeRef = useRef(onStyleChange);
   onStyleChangeRef.current = onStyleChange;
 
-  // 1) Detect OS dark mode on mount & listen for runtime changes
+  // Detect dark mode from localStorage / OS / .dark class.
   useEffect(() => {
+    const KEY = "forestchat-theme";
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    setIsDark(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setIsDark(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
+
+    const resolve = () => {
+      const s = localStorage.getItem(KEY);
+      if (s === "dark") return true;
+      if (s === "light") return false;
+      return mq.matches;
+    };
+
+    setIsDark(resolve());
+
+    const onOs = (e: MediaQueryListEvent) => {
+      if (!localStorage.getItem(KEY)) setIsDark(e.matches);
+    };
+    mq.addEventListener("change", onOs);
+
+    const obs = new MutationObserver(() => setIsDark(resolve()));
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+
+    return () => {
+      mq.removeEventListener("change", onOs);
+      obs.disconnect();
+    };
   }, []);
 
-  // 2) Create the map ONLY after we know the theme (prevents flash of wrong style)
+  // Create the map once isDark is known. No cleanup — handled by unmount effect below.
   useEffect(() => {
-    if (!mapContainer.current || map.current) return;
-    if (isDark === null) return; // still waiting for OS preference
+    if (!mapContainer.current || mapCreated.current || isDark === null) return;
+    mapCreated.current = true;
 
     const m = new maplibregl.Map({
       container: mapContainer.current,
@@ -51,16 +67,6 @@ export default function MapView({ onMapReady, onStyleChange }: MapViewProps) {
 
     map.current = m;
 
-    // Fire initial onStyleChange after the style loads
-    m.once("style.load", () => {
-      styleVersion.current += 1;
-      onStyleChangeRef.current?.({
-        isDark: isDark as boolean,
-        styleVersion: styleVersion.current,
-      });
-    });
-
-    // Controls
     m.addControl(new maplibregl.NavigationControl(), "top-right");
     m.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
     m.addControl(new maplibregl.GeolocateControl({}), "top-right");
@@ -68,48 +74,54 @@ export default function MapView({ onMapReady, onStyleChange }: MapViewProps) {
 
     onMapReadyRef.current?.(m);
 
-    // Resize observer
-    const resizeObserver = new ResizeObserver(() => {
-      m.resize();
+    m.once("style.load", () => {
+      styleVersion.current = 1;
+      onStyleChangeRef.current?.({ isDark: isDark as boolean, styleVersion: 1 });
     });
-    resizeObserver.observe(mapContainer.current);
 
-    return () => {
-      resizeObserver.disconnect();
-      m.remove();
-      map.current = null;
-    };
-    // Only depend on isDark — callbacks use refs
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    roRef.current = new ResizeObserver(() => m.resize());
+    roRef.current.observe(mapContainer.current);
   }, [isDark]);
 
-  // 3) Handle runtime theme switches only (NOT the initial render)
+  // Cleanup on unmount only (not on re-renders).
+  useEffect(() => {
+    return () => {
+      roRef.current?.disconnect();
+      map.current?.remove();
+      map.current = null;
+    };
+  }, []);
+
+  // On subsequent isDark changes (theme toggle), swap style via setStyle().
   useEffect(() => {
     const m = map.current;
-    if (!m) return;
-    if (!initialStyleSent.current) {
-      // Initial style was handled by Effect 2 — skip first run
-      initialStyleSent.current = true;
-      return;
-    }
+    if (!m || isDark === null || !mapCreated.current) return;
+    if (styleVersion.current === 0) return; // initial creation handles first style
 
-    m.setStyle(isDark ? DARK_STYLE : LIGHT_STYLE);
-    m.once("style.load", () => {
+    const target = isDark ? DARK_STYLE : LIGHT_STYLE;
+    let done = false;
+
+    const notify = () => {
+      if (done) return;
+      done = true;
       styleVersion.current += 1;
-      onStyleChangeRef.current?.({
-        isDark: isDark as boolean,
-        styleVersion: styleVersion.current,
-      });
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      onStyleChangeRef.current?.({ isDark, styleVersion: styleVersion.current });
+    };
+
+    m.setStyle(target);
+    m.once("style.load", notify);
+
+    const tid = setTimeout(() => {
+      if (m.isStyleLoaded()) notify();
+    }, 800);
+
+    return () => {
+      clearTimeout(tid);
+      done = true;
+    };
   }, [isDark]);
 
   return (
-    <div
-      ref={mapContainer}
-      role="region"
-      aria-label="Map"
-      className="w-full h-full"
-    />
+    <div ref={mapContainer} role="region" aria-label="Map" className="w-full h-full" />
   );
 }

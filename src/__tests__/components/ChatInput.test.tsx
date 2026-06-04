@@ -12,7 +12,7 @@ describe("ChatInput", () => {
 
   it("renders textarea and send button", () => {
     render(<ChatInput onSend={mockOnSend} disabled={false} />);
-    expect(screen.getByPlaceholderText("Ask about your forest plan...")).toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
     expect(screen.getByLabelText("Send message")).toBeInTheDocument();
   });
 
@@ -20,7 +20,7 @@ describe("ChatInput", () => {
     const user = userEvent.setup();
     render(<ChatInput onSend={mockOnSend} disabled={false} />);
 
-    const textarea = screen.getByPlaceholderText("Ask about your forest plan...");
+    const textarea = screen.getByRole("textbox");
     await user.type(textarea, "Hello");
     await user.keyboard("{Enter}");
 
@@ -39,7 +39,7 @@ describe("ChatInput", () => {
     const user = userEvent.setup();
     render(<ChatInput onSend={mockOnSend} disabled={false} />);
 
-    const textarea = screen.getByPlaceholderText("Ask about your forest plan...");
+    const textarea = screen.getByRole("textbox");
     await user.type(textarea, "line1");
     await user.keyboard("{Shift>}{Enter}{/Shift}");
     await user.type(textarea, "line2");
@@ -62,7 +62,7 @@ describe("ChatInput", () => {
     const user = userEvent.setup();
     render(<ChatInput onSend={mockOnSend} disabled={false} />);
 
-    const textarea = screen.getByPlaceholderText("Ask about your forest plan...");
+    const textarea = screen.getByRole("textbox");
     await user.type(textarea, "test");
 
     expect(screen.getByLabelText("Send message")).toBeEnabled();
@@ -72,7 +72,7 @@ describe("ChatInput", () => {
     const user = userEvent.setup();
     render(<ChatInput onSend={mockOnSend} disabled={false} />);
 
-    const textarea = screen.getByPlaceholderText("Ask about your forest plan...");
+    const textarea = screen.getByRole("textbox");
     await user.type(textarea, "Clear me");
     await user.keyboard("{Enter}");
 
@@ -81,11 +81,11 @@ describe("ChatInput", () => {
 
   it("disables textarea when disabled prop is true", () => {
     render(<ChatInput onSend={mockOnSend} disabled={true} />);
-    expect(screen.getByPlaceholderText("Ask about your forest plan...")).toBeDisabled();
+    expect(screen.getByRole("textbox")).toBeDisabled();
   });
 
   it("has data-chat-input attribute on textarea", () => {
     render(<ChatInput onSend={mockOnSend} disabled={false} />);
-    expect(screen.getByPlaceholderText("Ask about your forest plan...")).toHaveAttribute("data-chat-input");
+    expect(screen.getByRole("textbox")).toHaveAttribute("data-chat-input");
   });
 });

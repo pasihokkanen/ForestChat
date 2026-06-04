@@ -1,14 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useMemo } from "react";
 import maplibregl from "maplibre-gl";
 import type { CompartmentFeatureCollection } from "@/types/database";
 import { fitBoundsToFeatures } from "@/lib/map/geojson";
-import { DEVELOPMENT_CLASS_COLORS } from "@/lib/map/styles";
 import { useForestStore } from "@/lib/store";
 
 // Age-based color palette (warm=young → cool=old)
-const AGE_COLORS = [
+export const AGE_COLORS = [
   "#ffffb2", // 0-10: pale yellow
   "#fecc5c", // 11-20
   "#fd8d3c", // 21-40
@@ -18,6 +17,21 @@ const AGE_COLORS = [
   "#1a0a3e", // 101+: deep purple
 ];
 
+/** Compute age bracket boundaries from the compartment features. */
+export function computeAgeBrackets(
+  features: CompartmentFeatureCollection["features"]
+): { min: number; max: number; bracketSize: number } {
+  const ages: number[] = [];
+  for (const f of features) {
+    const age = f.properties?.age_years as number | undefined;
+    if (age != null && age > 0) ages.push(age);
+  }
+  const min = ages.length > 0 ? Math.min(...ages) : 0;
+  const max = ages.length > 0 ? Math.max(...ages) : 100;
+  const bracketSize = Math.max(10, Math.floor((max - min) / (AGE_COLORS.length - 1)));
+  return { min, max, bracketSize };
+}
+
 export interface StandLayerProps {
   map: maplibregl.Map | null;
   compartments: CompartmentFeatureCollection;
@@ -25,35 +39,6 @@ export interface StandLayerProps {
   styleVersion?: number;
   /** Whether the map is in dark mode (for popup theming). */
   isDark?: boolean;
-}
-
-/**
- * Determine if age-based coloring should be used.
- * Rules: max age gap > 10 years, no dominant bracket > 70%.
- */
-function shouldUseAgeColoring(
-  features: CompartmentFeatureCollection["features"],
-): boolean {
-  const ages: number[] = [];
-  for (const f of features) {
-    const age = f.properties?.age_years as number | undefined;
-    if (age != null && age > 0) ages.push(age);
-  }
-  if (ages.length < 3) return false;
-
-  const min = Math.min(...ages);
-  const max = Math.max(...ages);
-  if (max - min <= 10) return false;
-
-  // Check no single bracket > 70%
-  const bracketSize = Math.max(10, Math.floor((max - min) / 6));
-  const brackets = new Map<number, number>();
-  for (const a of ages) {
-    const key = Math.floor(a / bracketSize);
-    brackets.set(key, (brackets.get(key) ?? 0) + 1);
-  }
-  const maxPct = Math.max(...brackets.values()) / ages.length;
-  return maxPct <= 0.7;
 }
 
 // ── Persisted popup position — remembered across open/close, default top-left ──
@@ -247,8 +232,13 @@ function hideCustomPopup(popupRef: React.MutableRefObject<HTMLElement | null>) {
 export default function StandLayer({ map, compartments, styleVersion = 0, isDark = false }: StandLayerProps) {
   const popupRef = useRef<HTMLElement | null>(null);
   const hasZoomed = useRef(false);
-  const clickedStandRef = useRef<string | null>(null); // non-null = selection came from map click
-  const useAgeColor = shouldUseAgeColoring(compartments.features);
+  const clickedStandRef = useRef<string | null>(null);
+
+  // Compute age brackets once per compartment change
+  const ageBrackets = useMemo(
+    () => computeAgeBrackets(compartments.features),
+    [compartments.features]
+  );
 
   // Zustand state for cross-panel interaction
   const selectedStandId = useForestStore((s) => s.selectedStandId);
@@ -294,87 +284,97 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightedStandIds, map, activeMainTab]);
 
-  // Build MapLibre match expression for fill-color
+  // Build MapLibre step expression for age-based fill-color.
   const buildMatchExpression = useCallback((): maplibregl.Expression => {
-    if (useAgeColor) {
-      // Age-based coloring with MapLibre "step" expression (ranges)
-      const ages: number[] = [];
-      for (const f of compartments.features) {
-        const age = f.properties?.age_years as number | undefined;
-        if (age != null && age > 0) ages.push(age);
-      }
-      const min = Math.min(...ages);
-      const max = Math.max(...ages);
-      const bracketSize = Math.max(10, Math.floor((max - min) / (AGE_COLORS.length - 1)));
+    const { min, bracketSize } = ageBrackets;
 
-      // Build step expression: [step, [get, "age_years"], color0, step1, color1, ...]
-      const steps: unknown[] = ["step", ["to-number", ["get", "age_years"]]];
-      steps.push(AGE_COLORS[0]); // default / youngest
+    // Build step expression: [step, ["to-number", ["get", "age_years"]], youngest_color, step1, color1, ...]
+    const steps: unknown[] = ["step", ["to-number", ["get", "age_years"]]];
+    steps.push(AGE_COLORS[0]); // default / youngest
 
-      for (let i = 1; i < AGE_COLORS.length; i++) {
-        steps.push(min + bracketSize * i);
-        steps.push(AGE_COLORS[i]);
-      }
-      return steps as unknown as maplibregl.Expression;
+    for (let i = 1; i < AGE_COLORS.length; i++) {
+      steps.push(min + bracketSize * i);
+      steps.push(AGE_COLORS[i]);
     }
+    return steps as unknown as maplibregl.Expression;
+  }, [ageBrackets]);
 
-    // Development class coloring — handle both FI and EN names
-    const pairs: unknown[] = ["match", ["get", "development_class"]];
-
-    // English values (new imports)
-    for (const [en, color] of Object.entries(DEVELOPMENT_CLASS_COLORS)) {
-      if (en === "default") continue;
-      pairs.push(en);
-      pairs.push(color);
-    }
-
-    // Finnish values (legacy data or unmapped)
-    pairs.push("Taimikko");
-    pairs.push(DEVELOPMENT_CLASS_COLORS.seedling);
-    pairs.push("Taimikko alle 1,3 m");
-    pairs.push(DEVELOPMENT_CLASS_COLORS.seedling_small);
-    pairs.push("Taimikko yli 1,3 m");
-    pairs.push(DEVELOPMENT_CLASS_COLORS.seedling_large);
-    pairs.push("Nuori kasvatusmetsikkö");
-    pairs.push(DEVELOPMENT_CLASS_COLORS.young_thinning);
-    pairs.push("Varttunut kasvatusmetsikkö");
-    pairs.push(DEVELOPMENT_CLASS_COLORS.mature_thinning);
-    pairs.push("Uudistuskypsä");
-    pairs.push(DEVELOPMENT_CLASS_COLORS.regeneration_ready);
-    pairs.push("Eri-ikäisrakenteinen");
-    pairs.push(DEVELOPMENT_CLASS_COLORS.uneven_aged);
-    pairs.push("Suojuspuusto");
-    pairs.push(DEVELOPMENT_CLASS_COLORS.shelterwood);
-    pairs.push("Siemenpuumetsikkö");
-    pairs.push(DEVELOPMENT_CLASS_COLORS.seed_tree);
-
-    pairs.push("#CCCCCC"); // default fallback
-    return pairs as unknown as maplibregl.Expression;
-  }, [compartments.features, useAgeColor]);
-
+  // Register source + layers. Reacts directly to map style lifecycle
+  // (every style.load) instead of depending on parent's styleVersion prop.
+  // This avoids the async notification gap between MapView → ForestView → StandLayer.
   useEffect(() => {
     if (!map) return;
 
     const SOURCE_ID = "stands";
     const LAYER_ID = "stands-fill";
 
-    // Handler functions defined once per mount
-    const setPointer = () => {
-      map.getCanvas().style.cursor = "pointer";
+    // Rebuild layers on every style load (initial + setStyle)
+    const onStyleLoad = () => {
+      try {
+        for (const id of ["stands-highlight", "stands-highlight-fill", LAYER_ID]) {
+          if (map.getLayer(id)) map.removeLayer(id);
+        }
+        if (map.getSource(SOURCE_ID)) map.removeSource(SOURCE_ID);
+
+        map.addSource(SOURCE_ID, { type: "geojson", data: compartments });
+
+        map.addLayer({
+          id: LAYER_ID,
+          type: "fill",
+          source: SOURCE_ID,
+          paint: {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            "fill-color": buildMatchExpression() as any,
+            "fill-opacity": 0.6,
+            "fill-outline-color": "#333",
+          },
+        });
+
+        map.addLayer({
+          id: "stands-highlight-fill",
+          type: "fill",
+          source: SOURCE_ID,
+          filter: ["==", ["get", "stand_id"], ""],
+          paint: { "fill-color": "#FFD700", "fill-opacity": 0.3 },
+        });
+
+        map.addLayer({
+          id: "stands-highlight",
+          type: "line",
+          source: SOURCE_ID,
+          filter: ["==", ["get", "stand_id"], ""],
+          paint: { "line-color": "#FFD700", "line-width": 4, "line-opacity": 0.9 },
+        });
+      } catch { /* transitional — next style.load will retry */ }
     };
-    const resetCursor = () => {
-      map.getCanvas().style.cursor = "";
+
+    // If style is already loaded, register immediately. Otherwise wait.
+    if (map.isStyleLoaded()) {
+      onStyleLoad();
+    }
+    map.on("style.load", onStyleLoad);
+
+    return () => {
+      map.off("style.load", onStyleLoad);
     };
+  }, [map, compartments, buildMatchExpression]);
+
+  // Mouse & click handlers — registered on the layer, re-wired when the
+  // effect above rebuilds the layer (triggered by compartments / buildMatchExpression change).
+  // Needs styleVersion dep to re-wire after style switches.
+  useEffect(() => {
+    if (!map) return;
+
+    const LAYER_ID = "stands-fill";
+
+    const setPointer = () => { map.getCanvas().style.cursor = "pointer"; };
+    const resetCursor = () => { map.getCanvas().style.cursor = ""; };
 
     const handleMapClick = (e: maplibregl.MapMouseEvent) => {
-      // Query features at click point — works reliably for both stands and background
       if (!map.getLayer(LAYER_ID)) return;
-      const features = map.queryRenderedFeatures(e.point, {
-        layers: [LAYER_ID],
-      });
+      const features = map.queryRenderedFeatures(e.point, { layers: [LAYER_ID] });
 
       if (features.length > 0) {
-        // Clicked on a stand
         const feature = features[0];
         const props = feature.properties as Record<string, unknown>;
         const standId = props.stand_id as string;
@@ -382,46 +382,34 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
         const current = useForestStore.getState().highlightedStandIds;
 
         if (ctrlKey) {
-          // Ctrl+click: additive selection — toggle stand
           if (current.includes(standId)) {
-            // Remove from selection
             const newIds = current.filter((id) => id !== standId);
             setHighlightedStands(newIds);
             if (newIds.length === 1) {
-              // Exactly one left — show popup for it
               selectStand(newIds[0]);
             } else {
               selectStand(null);
               hideCustomPopup(popupRef);
             }
           } else {
-            // Add to selection — hide popup (multiple stands)
             setHighlightedStands([...current, standId]);
             selectStand(null);
             hideCustomPopup(popupRef);
           }
         } else {
-          // No modifier: single selection (replace)
           if (current.length === 1 && current[0] === standId) {
-            // Click same stand → deselect
             setHighlightedStands([]);
             selectStand(null);
             hideCustomPopup(popupRef);
             clickedStandRef.current = null;
             return;
           }
-
-          // Track that this selection came from a map click (prevents zoom)
           clickedStandRef.current = standId;
-
           selectStand(standId);
           setHighlightedStands([standId]);
-
-          // Show popup at persisted position
           showCustomPopup(map, popupRef, props, isDark);
         }
       } else {
-        // Clicked on background — close popup and deselect
         hideCustomPopup(popupRef);
         selectStand(null);
         setHighlightedStands([]);
@@ -429,60 +417,6 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
       }
     };
 
-    const addStandLayer = () => {
-      // Only add source/layer once
-      if (map.getSource(SOURCE_ID)) return;
-
-      map.addSource(SOURCE_ID, {
-        type: "geojson",
-        data: compartments,
-      });
-
-      map.addLayer({
-        id: LAYER_ID,
-        type: "fill",
-        source: SOURCE_ID,
-        paint: {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          "fill-color": buildMatchExpression() as any,
-          "fill-opacity": 0.6,
-          "fill-outline-color": "#333",
-        },
-      });
-
-      // Highlight layers — gold outline and overlay on selected/highlighted stands
-      map.addLayer({
-        id: "stands-highlight-fill",
-        type: "fill",
-        source: SOURCE_ID,
-        filter: ["==", ["get", "stand_id"], ""], // empty initially
-        paint: {
-          "fill-color": "#FFD700",
-          "fill-opacity": 0.3,
-        },
-      });
-
-      map.addLayer({
-        id: "stands-highlight",
-        type: "line",
-        source: SOURCE_ID,
-        filter: ["==", ["get", "stand_id"], ""], // empty initially
-        paint: {
-          "line-color": "#FFD700",
-          "line-width": 4,
-          "line-opacity": 0.9,
-        },
-      });
-    };
-
-    // Wait for style to load before adding source/layer
-    if (map.isStyleLoaded()) {
-      addStandLayer();
-    } else {
-      map.once("style.load", addStandLayer);
-    }
-
-    // Event handlers
     map.on("mouseenter", LAYER_ID, setPointer);
     map.on("mouseleave", LAYER_ID, resetCursor);
     map.on("click", handleMapClick);
@@ -493,7 +427,7 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
       map.off("click", handleMapClick);
       hideCustomPopup(popupRef);
     };
-  }, [map, compartments, buildMatchExpression, styleVersion]);
+  }, [map, isDark, styleVersion]);
 
   // Update source data when compartments change
   useEffect(() => {

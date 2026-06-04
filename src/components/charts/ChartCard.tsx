@@ -313,6 +313,20 @@ export default function ChartCard({ tab }: ChartCardProps) {
     return baseColor ?? CHART_COLORS[index % CHART_COLORS.length];
   };
 
+  // No data state — show a centered message
+  if (!tab.data || tab.data.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-full min-h-[200px]">
+        <div className="text-center">
+          <p className="text-gray-400 dark:text-gray-500 text-sm font-medium">No data</p>
+          <p className="text-gray-400 dark:text-gray-500 text-xs mt-1">
+            Run a query to populate this chart
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   switch (tab.type) {
     case "bar":
       return (
