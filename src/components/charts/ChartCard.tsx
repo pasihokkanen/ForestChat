@@ -145,7 +145,10 @@ function EuroTooltip({ active, payload, label }: Record<string, unknown>) {
 }
 
 const EURO_AXIS_LABEL = { value: "€", position: "insideTopLeft" as const, offset: -4, style: { fontSize: 11, fill: "#6b7280" } };
-const YEAR_AXIS_LABEL = { value: "Year", position: "insideBottomRight" as const, offset: -6, style: { fontSize: 11, fill: "#6b7280" } };
+function getYearAxisLabel(lang: string) {
+  const value = lang === "fi" ? "Vuosi" : "Year";
+  return { value, position: "insideBottomRight" as const, offset: -6, style: { fontSize: 11, fill: "#6b7280" } };
+}
 
 // Shared YAxis props: formats numbers with thousand separators and shows unit label.
 // Usage: <YAxis {...yAxisProps(tab.yKey)} />
@@ -235,6 +238,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
   const setSelectedYear = useForestStore((s) => s.setSelectedYear);
   const setHighlightedStands = useForestStore((s) => s.setHighlightedStands);
   const language = useForestStore((s) => s.language) ?? "en";
+  const yearAxisLabel = getYearAxisLabel(language);
 
   // Handle click on chart element — uses _stand_ids for cross-highlighting.
   // Toggle semantics prevent selection loops: clicking a bar whose stands
@@ -337,7 +341,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <XAxis
               dataKey={effectiveXKey ?? undefined}
               tick={{ fontSize: 12 }}
-              label={isYearKey(effectiveXKey) ? YEAR_AXIS_LABEL : undefined}
+              label={isYearKey(effectiveXKey) ? yearAxisLabel : undefined}
             />
             <YAxis {...yAxisProps(tab.yKey)} />
             <Tooltip content={<EuroTooltip />} />
@@ -449,7 +453,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <XAxis
               dataKey={effectiveXKey ?? undefined}
               tick={{ fontSize: 12 }}
-              label={isYearKey(effectiveXKey) ? YEAR_AXIS_LABEL : undefined}
+              label={isYearKey(effectiveXKey) ? yearAxisLabel : undefined}
             />
             <YAxis {...yAxisProps(tab.yKey, tab.yKey2)} />
             <Tooltip content={<EuroTooltip />} />
@@ -635,7 +639,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <XAxis
               dataKey={effectiveXKey ?? undefined}
               tick={{ fontSize: 12 }}
-              label={isYearKey(effectiveXKey) ? YEAR_AXIS_LABEL : undefined}
+              label={isYearKey(effectiveXKey) ? yearAxisLabel : undefined}
             />
             <YAxis {...yAxisProps(tab.yKey)} />
             <Tooltip content={<EuroTooltip />} />
@@ -685,7 +689,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <XAxis
               dataKey={effectiveXKey ?? undefined}
               tick={{ fontSize: 12 }}
-              label={isYearKey(effectiveXKey) ? YEAR_AXIS_LABEL : undefined}
+              label={isYearKey(effectiveXKey) ? yearAxisLabel : undefined}
             />
             <YAxis {...yAxisProps(tab.yKey)} />
             <Tooltip content={<EuroTooltip />} />
@@ -723,7 +727,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
               name={effectiveXKey ?? "x"}
               tick={{ fontSize: 12 }}
               tickFormatter={(v: number) => isNumericKey(effectiveXKey) ? formatNumber(v) : String(v)}
-              label={getAxisLabel(effectiveXKey) ?? (isYearKey(effectiveXKey) ? YEAR_AXIS_LABEL : undefined)}
+              label={getAxisLabel(effectiveXKey) ?? (isYearKey(effectiveXKey) ? yearAxisLabel : undefined)}
             />
             <YAxis
               dataKey={tab.yKey}
@@ -777,7 +781,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <XAxis
               dataKey={effectiveXKey ?? undefined}
               tick={{ fontSize: 12 }}
-              label={isYearKey(effectiveXKey) ? YEAR_AXIS_LABEL : undefined}
+              label={isYearKey(effectiveXKey) ? yearAxisLabel : undefined}
             />
             <YAxis {...yAxisProps(tab.yKey, tab.yKey2)} />
             <Tooltip content={<EuroTooltip />} />
@@ -816,7 +820,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <XAxis
               dataKey={effectiveXKey ?? undefined}
               tick={{ fontSize: 12 }}
-              label={isYearKey(effectiveXKey) ? YEAR_AXIS_LABEL : undefined}
+              label={isYearKey(effectiveXKey) ? yearAxisLabel : undefined}
             />
             <YAxis {...yAxisProps(tab.yKey)} />
             <Tooltip content={<EuroTooltip />} />
