@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useForestStore } from "@/lib/store";
 import type { Compartment, CompartmentSpecies, Operation } from "@/types/database";
-import { displayOperationType } from "@/lib/ai/config";
+import { displayDevClass, displaySiteType, displaySpecies, displayOp, standListLabels } from "@/lib/i18n";
 import type maplibregl from "maplibre-gl";
 
 type StandRowType = "stand" | "species" | "operation" | "empty";
@@ -29,28 +29,23 @@ const SPECIES_OPTIONS = [
   "pine", "spruce", "silver_birch", "downy_birch", "larch", "grey_alder",
 ] as const;
 
-const STAND_COLUMNS = [
-  { key: "stand_id", label: "Stand" },
-  { key: "main_species", label: "Species" },
-  { key: "area_ha", label: "Area (ha)" },
-  { key: "volume_m3", label: "Volume (m³)" },
-  { key: "age_years", label: "Age" },
-  { key: "development_class", label: "Dev. Class" },
-  { key: "site_type", label: "Site Type" },
-  { key: "growth_m3_per_ha", label: "Growth (m³/ha/y)" },
+// Column keys — labels come from i18n
+const STAND_COLUMN_KEYS = [
+  "colStand", "colSpecies", "colArea", "colVolume",
+  "colAge", "colDevClass", "colSiteType", "colGrowth",
 ] as const;
 
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
+const COL_KEY_TO_DATA: Record<string, keyof Compartment> = {
+  colStand: "stand_id",
+  colSpecies: "main_species",
+  colArea: "area_ha",
+  colVolume: "volume_m3",
+  colAge: "age_years",
+  colDevClass: "development_class",
+  colSiteType: "site_type",
+  colGrowth: "growth_m3_per_ha",
+};
 
-function formatDisplayDevClass(dc: string): string {
-  return dc
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-/** Natural sort: "2" < "10", "a2" < "a10". Falls back to localeCompare for non-numeric strings. */
 const naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 function naturalCompare(a: unknown, b: unknown): number {
   return naturalCollator.compare(String(a ?? ""), String(b ?? ""));
@@ -58,7 +53,7 @@ function naturalCompare(a: unknown, b: unknown): number {
 
 // ── Module-level state so filter/sort/expand survive tab switches ──
 const standPersist = {
-  sortKey: "stand_id" as string | null,
+  sortKey: "colStand" as string | null,
   sortDir: "asc" as "asc" | "desc",
   expandedStands: [] as string[],
   speciesFilter: [] as string[],
@@ -85,6 +80,8 @@ export default function StandList({ map }: StandListProps) {
   const setActiveMainTab = useForestStore((s) => s.setActiveMainTab);
   const setPendingStandSelection = useForestStore((s) => s.setPendingStandSelection);
   const aiStandFilters = useForestStore((s) => s.aiStandFilters);
+  const language = useForestStore((s) => s.language) ?? "en";
+  const L = standListLabels(language);
 
   // ── State backed by module-level standPersist to survive tab switches ──
   const [expandedStands, setExpandedStandsRaw] = useState<Set<string>>(
@@ -109,7 +106,6 @@ export default function StandList({ map }: StandListProps) {
     });
   };
 
-  // Filter state — backed by standPersist
   const [speciesFilter, setSpeciesFilterRaw] = useState<Set<string>>(
     () => new Set(standPersist.speciesFilter)
   );
@@ -169,12 +165,10 @@ export default function StandList({ map }: StandListProps) {
       if (typeof f.area_max === "number") setAreaMax(f.area_max);
       if (typeof f.volume_min === "number") setVolumeMin(f.volume_min);
       if (typeof f.volume_max === "number") setVolumeMax(f.volume_max);
-      // Collapse all — filter is a new context
       setExpandedStands(new Set());
     }
   }, [aiStandFilters]);
 
-  // Scroll-position persistence across tab switches
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = scrollRef.current;
@@ -186,11 +180,8 @@ export default function StandList({ map }: StandListProps) {
   const toggleExpand = (standId: string) => {
     setExpandedStands((prev) => {
       const next = new Set(prev);
-      if (next.has(standId)) {
-        next.delete(standId);
-      } else {
-        next.add(standId);
-      }
+      if (next.has(standId)) next.delete(standId);
+      else next.add(standId);
       return next;
     });
   };
@@ -211,8 +202,6 @@ export default function StandList({ map }: StandListProps) {
     let newIds: string[];
 
     if (shiftKey && standPersist.lastClickedStandId) {
-      // Shift+click: range select between last clicked stand and current
-      // Use the displayed order (filtered + sorted stands)
       const orderedIds = displayRows
         .filter((r): r is StandDisplayRow & { rowType: "stand" } => r.rowType === "stand")
         .map((r) => r.data.stand_id);
@@ -226,20 +215,17 @@ export default function StandList({ map }: StandListProps) {
         newIds = [standId];
       }
     } else if (ctrlKey) {
-      // Ctrl+click: toggle
       if (current.includes(standId)) {
         newIds = current.filter((id) => id !== standId);
       } else {
         newIds = [...current, standId];
       }
     } else {
-      // No modifier: replace selection
       newIds = [standId];
     }
 
     standPersist.lastClickedStandId = standId;
     setHighlightedStands(newIds);
-    // Popup visibility is handled by StandLayer's popup-sync useEffect
   };
 
   const handleShowOnMap = (standId: string) => {
@@ -282,7 +268,6 @@ export default function StandList({ map }: StandListProps) {
   const displayRows = useMemo(() => {
     let filtered = [...compartments];
 
-    // Apply filters
     if (speciesFilter.size > 0) {
       filtered = filtered.filter((c) => speciesFilter.has(c.main_species ?? ""));
     }
@@ -309,11 +294,11 @@ export default function StandList({ map }: StandListProps) {
       );
     }
 
-    // Sort
     if (sortKey) {
+      const dataKey = COL_KEY_TO_DATA[sortKey] ?? sortKey;
       filtered.sort((a, b) => {
-        const aVal = (a as unknown as Record<string, unknown>)[sortKey] ?? 0;
-        const bVal = (b as unknown as Record<string, unknown>)[sortKey] ?? 0;
+        const aVal = (a as unknown as Record<string, unknown>)[dataKey] ?? 0;
+        const bVal = (b as unknown as Record<string, unknown>)[dataKey] ?? 0;
         const cmp = typeof aVal === "number" && typeof bVal === "number"
           ? aVal - bVal
           : naturalCompare(aVal, bVal);
@@ -321,7 +306,6 @@ export default function StandList({ map }: StandListProps) {
       });
     }
 
-    // Build display rows
     const rows: StandDisplayRow[] = [];
     for (const comp of filtered) {
       const species = compartmentSpecies.filter((s) => s.stand_id === comp.stand_id);
@@ -348,7 +332,7 @@ export default function StandList({ map }: StandListProps) {
   if (compartments.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-gray-400 text-sm">
-        No stands loaded.
+        {L.emptyNoStands}
       </div>
     );
   }
@@ -361,7 +345,7 @@ export default function StandList({ map }: StandListProps) {
           {/* Species multi-select */}
           <div className="relative group">
             <button className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
-              Species {speciesFilter.size > 0 ? `(${speciesFilter.size})` : "▼"}
+              {L.filterSpecies}{speciesFilter.size > 0 ? ` (${speciesFilter.size})` : " ▼"}
             </button>
             <div className="absolute top-full left-0 mt-1 z-10 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg p-1 hidden group-hover:block min-w-[160px]">
               {SPECIES_OPTIONS.map((s) => (
@@ -372,7 +356,7 @@ export default function StandList({ map }: StandListProps) {
                     onChange={() => toggleFilter(setSpeciesFilter, s)}
                     className="h-3 w-3"
                   />
-                  {capitalize(s.replace(/_/g, " "))}
+                  {displaySpecies(s, language)}
                 </label>
               ))}
             </div>
@@ -381,7 +365,7 @@ export default function StandList({ map }: StandListProps) {
           {/* Dev class multi-select */}
           <div className="relative group">
             <button className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
-              Dev. Class {devClassFilter.size > 0 ? `(${devClassFilter.size})` : "▼"}
+              {L.filterDevClass}{devClassFilter.size > 0 ? ` (${devClassFilter.size})` : " ▼"}
             </button>
             <div className="absolute top-full left-0 mt-1 z-10 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg p-1 hidden group-hover:block min-w-[200px]">
               {DEV_CLASS_OPTIONS.map((dc) => (
@@ -392,7 +376,7 @@ export default function StandList({ map }: StandListProps) {
                     onChange={() => toggleFilter(setDevClassFilter, dc)}
                     className="h-3 w-3"
                   />
-                  {formatDisplayDevClass(dc)}
+                  {displayDevClass(dc, language)}
                 </label>
               ))}
             </div>
@@ -401,7 +385,7 @@ export default function StandList({ map }: StandListProps) {
           {/* Site type multi-select */}
           <div className="relative group">
             <button className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
-              Site {siteTypeFilter.size > 0 ? `(${siteTypeFilter.size})` : "▼"}
+              {L.filterSite}{siteTypeFilter.size > 0 ? ` (${siteTypeFilter.size})` : " ▼"}
             </button>
             <div className="absolute top-full left-0 mt-1 z-10 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg p-1 hidden group-hover:block min-w-[180px]">
               {SITE_TYPE_OPTIONS.map((st) => (
@@ -412,7 +396,7 @@ export default function StandList({ map }: StandListProps) {
                     onChange={() => toggleFilter(setSiteTypeFilter, st)}
                     className="h-3 w-3"
                   />
-                  {st.split(" ").map(capitalize).join(" ")}
+                  {displaySiteType(st, language)}
                 </label>
               ))}
             </div>
@@ -421,7 +405,7 @@ export default function StandList({ map }: StandListProps) {
           {/* Age range */}
           <input
             type="number"
-            placeholder="Age ≥"
+            placeholder={L.placeholderAgeMin}
             value={ageMin ?? ""}
             onChange={(e) => setAgeMin(e.target.value ? Number(e.target.value) : null)}
             className="w-16 px-1.5 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800"
@@ -429,7 +413,7 @@ export default function StandList({ map }: StandListProps) {
           <span className="text-xs text-gray-400">–</span>
           <input
             type="number"
-            placeholder="Age ≤"
+            placeholder={L.placeholderAgeMax}
             value={ageMax ?? ""}
             onChange={(e) => setAgeMax(e.target.value ? Number(e.target.value) : null)}
             className="w-16 px-1.5 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800"
@@ -438,7 +422,7 @@ export default function StandList({ map }: StandListProps) {
           {/* Area range */}
           <input
             type="number"
-            placeholder="Area ≥"
+            placeholder={L.placeholderAreaMin}
             value={areaMin ?? ""}
             onChange={(e) => setAreaMin(e.target.value ? Number(e.target.value) : null)}
             className="w-16 px-1.5 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800"
@@ -447,7 +431,7 @@ export default function StandList({ map }: StandListProps) {
           <span className="text-xs text-gray-400">–</span>
           <input
             type="number"
-            placeholder="Area ≤"
+            placeholder={L.placeholderAreaMax}
             value={areaMax ?? ""}
             onChange={(e) => setAreaMax(e.target.value ? Number(e.target.value) : null)}
             className="w-16 px-1.5 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800"
@@ -457,7 +441,7 @@ export default function StandList({ map }: StandListProps) {
           {/* Volume range */}
           <input
             type="number"
-            placeholder="Vol ≥"
+            placeholder={L.placeholderVolMin}
             value={volumeMin ?? ""}
             onChange={(e) => setVolumeMin(e.target.value ? Number(e.target.value) : null)}
             className="w-16 px-1.5 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800"
@@ -465,7 +449,7 @@ export default function StandList({ map }: StandListProps) {
           <span className="text-xs text-gray-400">–</span>
           <input
             type="number"
-            placeholder="Vol ≤"
+            placeholder={L.placeholderVolMax}
             value={volumeMax ?? ""}
             onChange={(e) => setVolumeMax(e.target.value ? Number(e.target.value) : null)}
             className="w-16 px-1.5 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800"
@@ -474,7 +458,7 @@ export default function StandList({ map }: StandListProps) {
           {/* Global search */}
           <input
             type="text"
-            placeholder="🔍 Search..."
+            placeholder={L.placeholderSearch}
             value={globalFilter}
             onChange={(e) => setGlobalFilter(e.target.value)}
             className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 w-32"
@@ -485,7 +469,7 @@ export default function StandList({ map }: StandListProps) {
               onClick={clearAllFilters}
               className="px-2 py-1 text-xs text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
             >
-              Clear all
+              {L.clearAll}
             </button>
           )}
         </div>
@@ -495,43 +479,43 @@ export default function StandList({ map }: StandListProps) {
           <div className="flex flex-wrap gap-1">
             {Array.from(speciesFilter).map((s) => (
               <span key={`sp-${s}`} className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded">
-                Species: {capitalize(s)}
+                {L.chipSpecies}: {displaySpecies(s, language)}
                 <button onClick={() => toggleFilter(setSpeciesFilter, s)} className="ml-0.5 hover:text-red-500">✕</button>
               </span>
             ))}
             {Array.from(devClassFilter).map((dc) => (
               <span key={`dc-${dc}`} className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded">
-                {formatDisplayDevClass(dc)}
+                {displayDevClass(dc, language)}
                 <button onClick={() => toggleFilter(setDevClassFilter, dc)} className="ml-0.5 hover:text-red-500">✕</button>
               </span>
             ))}
             {Array.from(siteTypeFilter).map((st) => (
               <span key={`st-${st}`} className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 rounded">
-                Site: {st}
+                {L.chipSite}: {displaySiteType(st, language)}
                 <button onClick={() => toggleFilter(setSiteTypeFilter, st)} className="ml-0.5 hover:text-red-500">✕</button>
               </span>
             ))}
             {ageMin != null && (
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300 rounded">
-                Age: ≥{ageMin}
+                {L.chipAge}: ≥{ageMin}
                 <button onClick={() => setAgeMin(null)} className="ml-0.5 hover:text-red-500">✕</button>
               </span>
             )}
             {ageMax != null && (
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300 rounded">
-                Age: ≤{ageMax}
+                {L.chipAge}: ≤{ageMax}
                 <button onClick={() => setAgeMax(null)} className="ml-0.5 hover:text-red-500">✕</button>
               </span>
             )}
             {areaMin != null && (
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 rounded">
-                Area: ≥{areaMin} ha
+                {L.chipArea}: ≥{areaMin} ha
                 <button onClick={() => setAreaMin(null)} className="ml-0.5 hover:text-red-500">✕</button>
               </span>
             )}
             {areaMax != null && (
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 rounded">
-                Area: ≤{areaMax} ha
+                {L.chipArea}: ≤{areaMax} ha
                 <button onClick={() => setAreaMax(null)} className="ml-0.5 hover:text-red-500">✕</button>
               </span>
             )}
@@ -549,21 +533,21 @@ export default function StandList({ map }: StandListProps) {
           <thead className="sticky top-0 bg-gray-100 dark:bg-gray-800 z-10">
             <tr>
               <th className="w-8 px-1 py-1.5 text-left"></th>
-              {STAND_COLUMNS.map((col) => (
+              {STAND_COLUMN_KEYS.map((colKey) => (
                 <th
-                  key={col.key}
+                  key={colKey}
                   className="px-2 py-1.5 text-left text-xs font-medium text-gray-600 dark:text-gray-400 cursor-pointer hover:text-gray-900 dark:hover:text-gray-200 select-none"
-                  onClick={() => handleSort(col.key)}
+                  onClick={() => handleSort(colKey)}
                 >
-                  {col.label}
-                  {sortKey === col.key && (sortDir === "asc" ? " ▲" : " ▼")}
+                  {(L as unknown as Record<string, string>)[colKey]}
+                  {sortKey === colKey && (sortDir === "asc" ? " ▲" : " ▼")}
                 </th>
               ))}
               <th className="w-16 px-1 py-1.5 text-right"></th>
             </tr>
           </thead>
           <tbody>
-            {displayRows.map((row, idx) => {
+            {displayRows.map((row) => {
               if (row.rowType === "stand") {
                 const isExpanded = expandedStands.has(row.data.stand_id);
                 const isHighlighted = highlightedStandIds.includes(row.data.stand_id);
@@ -577,31 +561,25 @@ export default function StandList({ map }: StandListProps) {
                   >
                     <td className="px-1 py-1 text-center text-gray-400">
                       <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleExpand(row.data.stand_id);
-                        }}
+                        onClick={(e) => { e.stopPropagation(); toggleExpand(row.data.stand_id); }}
                         className="hover:text-gray-700 dark:hover:text-gray-200"
                       >
                         {isExpanded ? "▼" : "▶"}
                       </button>
                     </td>
                     <td className="px-2 py-1 font-mono text-xs">{row.data.stand_id}</td>
-                    <td className="px-2 py-1">{capitalize(row.data.main_species ?? "")}</td>
+                    <td className="px-2 py-1">{displaySpecies(row.data.main_species ?? "", language) || "—"}</td>
                     <td className="px-2 py-1 text-right">{(row.data.area_ha ?? 0).toFixed(1)}</td>
                     <td className="px-2 py-1 text-right">{Math.round(row.data.volume_m3 ?? 0).toLocaleString()}</td>
                     <td className="px-2 py-1 text-right">{row.data.age_years ?? ""}</td>
-                    <td className="px-2 py-1 text-xs">{formatDisplayDevClass(row.data.development_class ?? "")}</td>
-                    <td className="px-2 py-1 text-xs">{row.data.site_type ?? ""}</td>
+                    <td className="px-2 py-1 text-xs">{displayDevClass(row.data.development_class ?? "", language) || "—"}</td>
+                    <td className="px-2 py-1 text-xs">{displaySiteType(row.data.site_type ?? "", language) || "—"}</td>
                     <td className="px-2 py-1 text-right">{(row.data.growth_m3_per_ha ?? 0).toFixed(1)}</td>
                     <td className="px-1 py-1 text-right">
                       <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleShowOnMap(row.data.stand_id);
-                        }}
+                        onClick={(e) => { e.stopPropagation(); handleShowOnMap(row.data.stand_id); }}
                         className="text-xs text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-                        title="Show on map"
+                        title={L.showOnMap}
                       >
                         📍
                       </button>
@@ -615,12 +593,12 @@ export default function StandList({ map }: StandListProps) {
                   <tr key={`sp-${row.data.id}`} className="border-b border-gray-50 dark:border-gray-800/50 bg-gray-50/50 dark:bg-gray-800/20 text-xs">
                     <td className="px-1 py-1"></td>
                     <td className="px-2 py-1 pl-8 text-gray-500" colSpan={2}>
-                      ↳ {capitalize(row.data.species)}
+                      ↳ {displaySpecies(row.data.species, language)}
                     </td>
                     <td className="px-2 py-1 text-right text-gray-500">{(row.data.area_ha ?? 0).toFixed(1)}</td>
                     <td className="px-2 py-1 text-right text-gray-500">{Math.round(row.data.volume_m3 ?? 0).toLocaleString()}</td>
                     <td className="px-2 py-1 text-gray-500" colSpan={2}>
-                      Log: {row.data.log_pct != null ? `${row.data.log_pct}%` : "—"}
+                      {L.logPct}: {row.data.log_pct != null ? `${row.data.log_pct}%` : "—"}
                     </td>
                     <td className="px-2 py-1"></td>
                     <td className="px-2 py-1"></td>
@@ -634,7 +612,7 @@ export default function StandList({ map }: StandListProps) {
                   <tr key={`op-${row.data.id}`} className="border-b border-gray-50 dark:border-gray-800/50 bg-gray-50/50 dark:bg-gray-800/20 text-xs">
                     <td className="px-1 py-1"></td>
                     <td className="px-2 py-1 pl-8 text-gray-500" colSpan={2}>
-                      ↳ {displayOperationType(row.data.type)} ({row.data.year})
+                      ↳ {displayOp(row.data.type, language)} ({row.data.year})
                     </td>
                     <td className="px-2 py-1"></td>
                     <td className="px-2 py-1 text-right text-gray-500">
@@ -662,7 +640,7 @@ export default function StandList({ map }: StandListProps) {
                   <tr key={`empty-${row.parentStandId}`} className="border-b border-gray-50 dark:border-gray-800/50 bg-gray-50/50 dark:bg-gray-800/20 text-xs">
                     <td className="px-1 py-1"></td>
                     <td className="px-2 py-1 pl-8 text-gray-400 italic" colSpan={9}>
-                      No species or operations
+                      {L.expandedEmpty}
                     </td>
                   </tr>
                 );
@@ -674,15 +652,15 @@ export default function StandList({ map }: StandListProps) {
         </table>
         {displayRows.length === 0 && hasActiveFilters && (
           <div className="flex items-center justify-center h-32 text-gray-400 text-sm">
-            No stands match the current filters.
+            {L.emptyNoMatch}
           </div>
         )}
       </div>
 
       {/* Footer */}
       <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 px-3 py-1.5 text-xs text-gray-500 bg-gray-50 dark:bg-gray-800/50">
-        {displayRows.filter((r) => r.rowType === "stand").length} stands
-        {hasActiveFilters ? ` (filtered from ${compartments.length})` : ` / ${compartments.length} total`}
+        {displayRows.filter((r) => r.rowType === "stand").length} {L.footerStands}
+        {hasActiveFilters ? ` ${L.footerFilteredFrom} ${compartments.length})` : ` / ${compartments.length} ${L.footerTotal}`}
       </div>
     </div>
   );

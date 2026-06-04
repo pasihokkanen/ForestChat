@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChatMessage as ChatMessageType } from "@/types/database";
 import ChatMessage from "./ChatMessage";
 import ToolCallCard from "./ToolCallCard";
+import { useForestStore } from "@/lib/store";
+import { chatEmptyTitle, chatEmptyTip } from "@/lib/i18n";
 
 interface ChatMessagesProps {
   messages: ChatMessageType[];
@@ -25,6 +27,9 @@ export default function ChatMessages({
   error,
 }: ChatMessagesProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const language = useForestStore((s) => s.language) ?? "en";
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   // Auto-scroll to bottom when new content or streaming content arrives
   useEffect(() => {
@@ -48,9 +53,9 @@ export default function ChatMessages({
           >
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
-          <p className="text-sm">Ask about your forest plan</p>
+          <p className="text-sm">{mounted ? chatEmptyTitle(language) : "Ask about your forest plan"}</p>
           <p className="text-xs mt-1">
-            Try: &quot;Generate a plan&quot; or &quot;Show me stand 7&quot;
+            {mounted ? chatEmptyTip(language) : 'Try: "Generate a plan" or "Show me stand 7"'}
           </p>
         </div>
       )}
@@ -67,6 +72,7 @@ export default function ChatMessages({
           name={toolCallStatus.name}
           status={toolCallStatus.status}
           result={toolCallStatus.result}
+          language={language}
         />
       )}
 

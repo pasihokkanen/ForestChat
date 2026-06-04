@@ -1,7 +1,9 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { AGE_COLORS, computeAgeBrackets } from "@/components/map/StandLayer";
 import type { CompartmentFeatureCollection } from "@/types/database";
+import { useForestStore } from "@/lib/store";
 
 interface StandLegendProps {
   compartments: CompartmentFeatureCollection;
@@ -13,6 +15,9 @@ interface StandLegendProps {
  */
 export default function StandLegend({ compartments }: StandLegendProps) {
   const { min, max, bracketSize } = computeAgeBrackets(compartments.features);
+  const language = useForestStore((s) => s.language) ?? "en";
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   const brackets: { label: string; color: string }[] = [];
   for (let i = 0; i < AGE_COLORS.length; i++) {
@@ -21,14 +26,14 @@ export default function StandLegend({ compartments }: StandLegendProps) {
       ? min + bracketSize * (i + 1) - 1
       : max;
     brackets.push({
-      label: `${lo}–${hi} y`,
+      label: mounted ? (language === "fi" ? `${lo}–${hi} v` : `${lo}–${hi} y`) : `${lo}–${hi} y`,
       color: AGE_COLORS[i],
     });
   }
 
   return (
     <div className="absolute bottom-14 left-3 z-10 bg-white/90 dark:bg-gray-900/90 backdrop-blur rounded-lg shadow-lg p-3 text-xs text-gray-900 dark:text-gray-100 max-w-[160px]">
-      <h4 className="font-semibold text-sm mb-2">Stand age</h4>
+      <h4 className="font-semibold text-sm mb-2">{mounted ? (language === "fi" ? "Puuston ikä" : "Stand age") : "Stand age"}</h4>
       <ul className="space-y-1">
         {brackets.map((b, i) => (
           <li key={i} className="flex items-center gap-2">

@@ -5,6 +5,7 @@ import maplibregl from "maplibre-gl";
 import type { CompartmentFeatureCollection } from "@/types/database";
 import { fitBoundsToFeatures } from "@/lib/map/geojson";
 import { useForestStore } from "@/lib/store";
+import { displayDevClass, displaySiteType, displaySpecies, displayOp, popupLabels } from "@/lib/i18n";
 
 // Age-based color palette (warm=young → cool=old)
 export const AGE_COLORS = [
@@ -96,9 +97,13 @@ function showCustomPopup(
   map.getContainer().appendChild(el);
   popupRef.current = el;
 
+  // Look up species breakdown from store
+  const state = useForestStore.getState();
+  const lang = state.language ?? "en";
+
   // Build popup HTML — read fresh data from store each time
-  const devClass = (props.development_class as string) ?? "—";
-  const siteType = (props.site_type as string) ?? "—";
+  const devClass = (displayDevClass(props.development_class as string, lang)) ?? "—";
+  const siteType = (displaySiteType(props.site_type as string, lang)) ?? "—";
   const area = (props.area_ha as number) != null ? (props.area_ha as number).toFixed(1) : "—";
   const age = (props.age_years as number) != null ? `${props.age_years as number} yr` : "—";
   const volume = (props.volume_m3 as number) != null ? (props.volume_m3 as number).toFixed(0) : "—";
@@ -107,11 +112,10 @@ function showCustomPopup(
   const avgHt = (props.avg_height as number) != null ? (props.avg_height as number).toFixed(1) : "—";
 
   // Look up species breakdown from store
-  const state = useForestStore.getState();
   const thisSpecies = state.compartmentSpecies.filter((s) => s.stand_id === standId);
   const speciesRows = thisSpecies
     .map((s) => `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5">
-      <span>${s.species}</span>
+      <span>${displaySpecies(s.species, lang)}</span>
       <span style="color:${mutedColor};text-align:right">${s.volume_m3.toFixed(0)} m³ / ${s.area_ha.toFixed(1)} ha</span>
     </div>`)
     .join("");
@@ -127,35 +131,37 @@ function showCustomPopup(
           ? `−${op.cost_eur.toFixed(0)}€`
           : "";
       return `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5">
-        <span>${op.type} ${op.year}</span>
+        <span>${displayOp(op.type, lang)} ${op.year}</span>
         <span style="color:${mutedColor};text-align:right">${valueStr}</span>
       </div>`;
     })
     .join("");
 
+  const pl = popupLabels(lang);
+
   el.innerHTML = `
     <div style="position:relative">
       <button class="popup-close" style="position:absolute;top:1px;right:1px;border:none;background:transparent;font-size:18px;cursor:pointer;color:${closeBtnColor};line-height:1;width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:4px;z-index:1">×</button>
-      <h3 class="popup-drag-handle" style="font-weight:600;font-size:15px;margin:0 0 8px 0;padding:4px 20px 4px 0;border-bottom:1px solid ${borderColor};color:${textColor};cursor:grab;user-select:none">Stand ${standId}</h3>
+      <h3 class="popup-drag-handle" style="font-weight:600;font-size:15px;margin:0 0 8px 0;padding:4px 20px 4px 0;border-bottom:1px solid ${borderColor};color:${textColor};cursor:grab;user-select:none">${pl.standPrefix} ${standId}</h3>
 
-      <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:${sectionTitleColor};text-transform:uppercase;letter-spacing:0.5px">Stand details</h4>
+      <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:${sectionTitleColor};text-transform:uppercase;letter-spacing:0.5px">${pl.standDetails}</h4>
       <div style="margin:0 0 8px 0">
-        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Dev. class</span><span style="color:${mutedColor};text-align:right">${devClass}</span></div>
-        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Site type</span><span style="color:${mutedColor};text-align:right">${siteType}</span></div>
-        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Area (ha)</span><span style="color:${mutedColor};text-align:right">${area}</span></div>
-        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Age</span><span style="color:${mutedColor};text-align:right">${age}</span></div>
-        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Volume (m³)</span><span style="color:${mutedColor};text-align:right">${volume}</span></div>
-        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Basal area</span><span style="color:${mutedColor};text-align:right">${basalArea}</span></div>
-        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Avg diam.</span><span style="color:${mutedColor};text-align:right">${avgDiam} cm</span></div>
-        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">Avg height</span><span style="color:${mutedColor};text-align:right">${avgHt} m</span></div>
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">${pl.devClass}</span><span style="color:${mutedColor};text-align:right">${devClass}</span></div>
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">${pl.siteType}</span><span style="color:${mutedColor};text-align:right">${siteType}</span></div>
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">${pl.areaHa}</span><span style="color:${mutedColor};text-align:right">${area}</span></div>
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">${pl.age}</span><span style="color:${mutedColor};text-align:right">${age}</span></div>
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">${pl.volumeM3}</span><span style="color:${mutedColor};text-align:right">${volume}</span></div>
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">${pl.basalArea}</span><span style="color:${mutedColor};text-align:right">${basalArea}</span></div>
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">${pl.avgDiam}</span><span style="color:${mutedColor};text-align:right">${avgDiam} cm</span></div>
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5"><span style="color:${labelColor}">${pl.avgHeight}</span><span style="color:${mutedColor};text-align:right">${avgHt} m</span></div>
       </div>
 
       ${speciesRows ? `
-      <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:${sectionTitleColor};text-transform:uppercase;letter-spacing:0.5px">Species</h4>
+      <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:${sectionTitleColor};text-transform:uppercase;letter-spacing:0.5px">${pl.species}</h4>
       <div style="margin:0 0 8px 0">${speciesRows}</div>` : ""}
 
       ${opsRows ? `
-      <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:${sectionTitleColor};text-transform:uppercase;letter-spacing:0.5px">Operations</h4>
+      <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:${sectionTitleColor};text-transform:uppercase;letter-spacing:0.5px">${pl.operations}</h4>
       <div>${opsRows}</div>` : ""}
     </div>
   `;

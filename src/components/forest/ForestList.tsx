@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useForestStore } from "@/lib/store";
+import { dashboardLabels } from "@/lib/i18n";
 import type { Forest } from "@/types/database";
 import Link from "next/link";
 
@@ -11,6 +13,8 @@ export default function ForestList() {
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const language = useForestStore((s) => s.language) ?? "en";
+  const L = dashboardLabels(language);
 
   const fetchForests = () => {
     const supabase = createClient();
@@ -61,14 +65,13 @@ export default function ForestList() {
 
       if (!res.ok) {
         const body = await res.json();
-        throw new Error(body.error || "Failed to delete forest");
+        throw new Error(body.error || L.deleteFailed);
       }
 
-      // Remove from local state
       setForests((prev) => prev.filter((f) => f.id !== id));
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to delete forest"
+        err instanceof Error ? err.message : L.deleteFailed
       );
     } finally {
       setDeleting(null);
@@ -99,7 +102,7 @@ export default function ForestList() {
   if (error) {
     return (
       <div className="rounded-md bg-red-50 dark:bg-red-950 px-4 py-3 text-sm text-red-700 dark:text-red-400">
-        Failed to load forests: {error}
+        {L.loadError}: {error}
       </div>
     );
   }
@@ -107,15 +110,15 @@ export default function ForestList() {
   if (forests.length === 0) {
     return (
       <div className="text-center py-12">
-        <p className="text-gray-500 dark:text-gray-400">No forests yet.</p>
+        <p className="text-gray-500 dark:text-gray-400">{L.noForests}</p>
         <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
-          Import your first forest to get started.
+          {L.noForestsHint}
         </p>
         <Link
           href="/forest/new"
           className="mt-4 inline-block rounded-md bg-green-700 dark:bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 dark:hover:bg-green-700 transition-colors"
         >
-          Import Forest
+          {L.importForestBtn}
         </Link>
       </div>
     );
@@ -148,20 +151,20 @@ export default function ForestList() {
 
             {confirmId === forest.id ? (
               <div className="flex items-center gap-2 ml-4">
-                <span className="text-xs text-red-600 dark:text-red-400">Delete?</span>
+                <span className="text-xs text-red-600 dark:text-red-400">{L.deleteConfirm}</span>
                 <button
                   onClick={() => handleDelete(forest.id)}
                   disabled={deleting === forest.id}
                   className="rounded bg-red-600 dark:bg-red-500 px-2 py-1 text-xs font-semibold text-white hover:bg-red-700 dark:hover:bg-red-600 disabled:opacity-50"
                 >
-                  {deleting === forest.id ? "…" : "Yes"}
+                  {deleting === forest.id ? "…" : L.deleteYes}
                 </button>
                 <button
                   onClick={cancelDelete}
                   disabled={deleting === forest.id}
                   className="rounded bg-gray-200 dark:bg-gray-700 px-2 py-1 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 disabled:opacity-50"
                 >
-                  No
+                  {L.deleteNo}
                 </button>
               </div>
             ) : (
@@ -172,7 +175,7 @@ export default function ForestList() {
                 }}
                 className="ml-4 rounded-md border border-red-200 dark:border-red-800 px-3 py-1.5 text-xs font-semibold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:border-red-300 dark:hover:border-red-700 transition-colors"
               >
-                Delete
+                {L.deleteBtn}
               </button>
             )}
           </div>

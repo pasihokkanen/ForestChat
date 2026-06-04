@@ -1,5 +1,8 @@
 "use client";
 
+import { importLabels } from "@/lib/i18n";
+import type { Language } from "@/lib/i18n";
+
 export type ImportStage =
   | "idle"
   | "parsing_csv"
@@ -14,55 +17,57 @@ export type ImportStage =
 interface ImportProgressProps {
   stage: ImportStage;
   message?: string;
+  language?: Language;
 }
 
-const apiStages: { key: ImportStage; label: string }[] = [
-  {
-    key: "fetching_boundary",
-    label: "Fetching property boundary from National Land Survey…",
-  },
-  {
-    key: "fetching_stands",
-    label: "Fetching stand data from Finnish Forest Centre…",
-  },
-  { key: "storing", label: "Processing and storing data…" },
-];
+type StageKey = "stageBoundary" | "stageStands" | "stageStoring" | "stageParseCsv" | "stageStoreStands" | "stageStoreSpecies";
 
-const csvStages: { key: ImportStage; label: string }[] = [
-  { key: "parsing_csv", label: "Parsing CSV file…" },
-  {
-    key: "fetching_boundary",
-    label: "Fetching property boundary from National Land Survey…",
-  },
-  { key: "storing_stands", label: "Storing stand data…" },
-  { key: "storing_species", label: "Importing species breakdown…" },
+const API_STAGE_TO_LABEL: Record<string, StageKey> = {
+  fetching_boundary: "stageBoundary",
+  fetching_stands: "stageStands",
+  storing: "stageStoring",
+};
+
+const CSV_STAGE_TO_LABEL: Record<string, StageKey> = {
+  parsing_csv: "stageParseCsv",
+  fetching_boundary: "stageBoundary",
+  storing_stands: "stageStoreStands",
+  storing_species: "stageStoreSpecies",
+};
+
+const stages = [
+  { keys: API_STAGE_TO_LABEL, isCsv: false },
+  { keys: CSV_STAGE_TO_LABEL, isCsv: true },
 ];
 
 export default function ImportProgress({
   stage,
   message,
+  language = "en",
 }: ImportProgressProps) {
   if (stage === "idle" || stage === "done") return null;
 
-  // Pick stage list based on whether we're in a CSV path
+  const L = importLabels(language);
+
   const isCsvPath =
     stage === "parsing_csv" ||
     stage === "storing_stands" ||
     stage === "storing_species";
 
-  const stages = isCsvPath ? csvStages : apiStages;
-  const currentIndex = stages.findIndex((s) => s.key === stage);
+  const mapping = isCsvPath ? CSV_STAGE_TO_LABEL : API_STAGE_TO_LABEL;
+  const entries = Object.entries(mapping);
+  const currentIndex = entries.findIndex(([key]) => key === stage);
 
   return (
     <div className="mt-4 rounded-md bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 px-4 py-3 text-sm">
       {stage === "error" ? (
         <p className="text-red-700 dark:text-red-400">
-          {message || "Import failed"}
+          {message || L.importFailedFallback}
         </p>
       ) : (
         <div className="space-y-1">
-          {stages.map((s, i) => (
-            <div key={s.key} className="flex items-center gap-2">
+          {entries.map(([key, labelKey], i) => (
+            <div key={key} className="flex items-center gap-2">
               {i < currentIndex ? (
                 <span className="text-green-600">✓</span>
               ) : i === currentIndex ? (
@@ -81,7 +86,7 @@ export default function ImportProgress({
                       : "text-gray-400 dark:text-gray-500"
                 }
               >
-                {s.label}
+                {(L as unknown as Record<string, string>)[labelKey]}
               </span>
             </div>
           ))}

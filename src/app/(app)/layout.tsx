@@ -1,7 +1,12 @@
+"use client";
+
+import { useState, useEffect } from "react";
 import UserMenu from "@/components/auth/UserMenu";
 import ThemeToggle from "@/components/shared/ThemeToggle";
 import LanguageToggle from "@/components/shared/LanguageToggle";
 import ErrorBoundary from "@/components/shared/ErrorBoundary";
+import { useForestStore } from "@/lib/store";
+import { appName } from "@/lib/i18n";
 import Link from "next/link";
 
 export default function ForestLayout({
@@ -9,6 +14,10 @@ export default function ForestLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const language = useForestStore((s) => s.language) ?? "en";
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
   return (
     <ErrorBoundary>
       <div className="flex flex-col h-screen">
@@ -17,7 +26,7 @@ export default function ForestLayout({
             href="/dashboard"
             className="font-semibold text-gray-900 dark:text-gray-100 hover:text-green-700 dark:hover:text-green-400 transition-colors"
           >
-            ForestChat
+            {mounted ? appName(language) : "ForestChat"}
           </Link>
           <div className="flex items-center gap-1">
             <ThemeToggle />

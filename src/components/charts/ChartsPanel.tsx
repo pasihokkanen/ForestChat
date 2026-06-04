@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForestStore } from "@/lib/store";
 import { persistActiveTab } from "@/lib/store/visualization-slice";
+import { chartEmptyTitle, chartEmptyTip } from "@/lib/i18n";
 import ChartTabBar from "./ChartTabBar";
 import ChartCard from "./ChartCard";
 
@@ -14,6 +15,9 @@ export default function ChartsPanel() {
   const chartsFullscreen = useForestStore((s) => s.chartsFullscreen);
   const setChartsFullscreen = useForestStore((s) => s.setChartsFullscreen);
   const forest = useForestStore((s) => s.forest);
+  const language = useForestStore((s) => s.language) ?? "en";
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   const activeTab = chartTabs.find((t) => t.id === activeChartTab);
 
@@ -70,11 +74,9 @@ export default function ChartsPanel() {
           <div className="flex items-center justify-center h-full text-gray-400 dark:text-gray-500 text-sm">
             <div className="text-center">
               <div className="text-3xl mb-2">📊</div>
-              <p>No charts yet</p>
+              <p>{mounted ? chartEmptyTitle(language) : "No charts yet"}</p>
               <p className="text-xs mt-1">
-                Ask the AI to create a chart,
-                <br />
-                e.g. &ldquo;Show me yearly income as a bar chart&rdquo;
+                {mounted ? chartEmptyTip(language) : 'Ask the AI to create a chart,\ne.g. "Show me yearly income as a bar chart"'}
               </p>
             </div>
           </div>

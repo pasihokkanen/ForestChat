@@ -3,17 +3,9 @@
 import { useState, useRef, useCallback, useEffect, KeyboardEvent } from "react";
 import { useForestStore } from "@/lib/store";
 import CommandsMenu from "./CommandsMenu";
+import { getPlaceholders, keyboardTip } from "@/lib/i18n";
 
-const PLACEHOLDERS = [
-  "Ask about your forest plan...",
-  "Show me stands ready for harvest",
-  "Create a yearly income bar chart",
-  "Generate a 20-year forest management plan",
-  "Show species distribution as a pie chart",
-  "Compare growth vs harvest volume",
-  "List all clearcuts in the plan",
-  "Summarize the current plan",
-];
+const EN_PLACEHOLDERS = getPlaceholders("en");
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -23,18 +15,25 @@ interface ChatInputProps {
 export default function ChatInput({ onSend, disabled }: ChatInputProps) {
   const [value, setValue] = useState("");
   const [placeholderIdx, setPlaceholderIdx] = useState(0);
-  const { commandsOpen, toggleCommands } = useForestStore();
+  const [mounted, setMounted] = useState(false);
+  const { commandsOpen, toggleCommands, language } = useForestStore();
+  const lang = language ?? "en";
+  // Use English defaults initially to match SSR; switch after mount
+  const placeholders = mounted ? getPlaceholders(lang) : EN_PLACEHOLDERS;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const cmdBtnRef = useRef<HTMLDivElement>(null);
 
+  // Mark as mounted on client
+  useEffect(() => { setMounted(true); }, []);
+
   // Randomize start index and rotate placeholder every 4 seconds (client-only)
   useEffect(() => {
-    setPlaceholderIdx(Math.floor(Math.random() * PLACEHOLDERS.length));
+    setPlaceholderIdx(Math.floor(Math.random() * placeholders.length));
     const interval = setInterval(() => {
-      setPlaceholderIdx((prev) => (prev + 1) % PLACEHOLDERS.length);
+      setPlaceholderIdx((prev) => (prev + 1) % placeholders.length);
     }, 4000);
     return () => clearInterval(interval);
-  }, []);
+  }, [placeholders.length]);
 
   // Re-focus textarea when streaming finishes (disabled → enabled)
   const prevDisabled = useRef(disabled);
@@ -148,7 +147,7 @@ export default function ChatInput({ onSend, disabled }: ChatInputProps) {
             adjustHeight();
           }}
           onKeyDown={handleKeyDown}
-          placeholder={PLACEHOLDERS[placeholderIdx]}
+          placeholder={placeholders[placeholderIdx]}
           disabled={disabled}
           rows={1}
           className="flex-1 resize-none rounded-xl border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm text-gray-800 dark:text-gray-100 bg-white dark:bg-gray-800 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
@@ -177,7 +176,7 @@ export default function ChatInput({ onSend, disabled }: ChatInputProps) {
         </button>
       </div>
       <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 px-1">
-        Enter to send · Shift+Enter for new line · Ctrl+Enter to send
+        {mounted ? keyboardTip(lang) : keyboardTip("en")}
       </p>
     </div>
   );

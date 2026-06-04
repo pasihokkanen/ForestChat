@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import LanguageRoot from "@/components/shared/LanguageRoot";
@@ -19,28 +20,22 @@ export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Read theme cookie server-side to prevent flash of light theme on dark-mode users
+  const cookieStore = await cookies();
+  const theme = cookieStore.get("forestchat-theme")?.value;
+  const isDark = theme === "dark";
+
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased${isDark ? " dark" : ""}`}
       suppressHydrationWarning
     >
-      <head>
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `try {
-  var t=localStorage.getItem("forestchat-theme");
-  if (t==="dark"||(!t&&window.matchMedia("(prefers-color-scheme:dark)").matches))
-    document.documentElement.classList.add("dark");
-} catch(e){}`,
-          }}
-        />
-      </head>
       <body className="min-h-full flex flex-col"><LanguageRoot>{children}</LanguageRoot></body>
     </html>
   );

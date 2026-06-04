@@ -10,6 +10,7 @@ import { addOperation, removeOperation, batchUpdateOperations } from "../ai/edit
 import { checkSustainability, validatePlan } from "../ai/validation-tools";
 import { recomputeChartData } from "../ai/chart-engine";
 import type { ChartQueryConfig, AnyQueryConfig } from "../ai/chart-engine";
+import { serverMsg } from "../i18n";
 
 export interface ToolResult {
   success: boolean;
@@ -24,6 +25,7 @@ export interface ToolContext {
   userId: string;
   supabase: SupabaseClient;
   sendSse?: (event: string, data: unknown) => void;
+  language?: string;
 }
 
 type ToolHandler = (
@@ -232,7 +234,7 @@ const toolHandlers: Record<string, ToolHandler> = {
 
         return {
           success: true,
-          result: `✅ Chart "${title}" created (${type}, ${engineResult.data.length} data points). Auto-updates when plan changes.`,
+          result: serverMsg("chartCreatedEngine", (ctx.language ?? "en") as "en" | "fi", String(title), String(type), String(engineResult.data.length)),
         };
       } catch (err) {
         return {
@@ -284,7 +286,7 @@ const toolHandlers: Record<string, ToolHandler> = {
 
     return {
       success: true,
-      result: `✅ Chart "${title}" created (${type}, ${data.length} data points). The chart is now visible in the visualization panel.`,
+      result: serverMsg("chartCreatedLegacy", (ctx.language ?? "en") as "en" | "fi", String(title), String(type), String(data.length)),
     };
   },
 
@@ -296,7 +298,7 @@ const toolHandlers: Record<string, ToolHandler> = {
     ctx.sendSse?.("select_stand", { stand_id });
     return {
       success: true,
-      result: `✅ Stand ${stand_id} selected on map.`,
+      result: serverMsg("standSelected", (ctx.language ?? "en") as "en" | "fi", String(stand_id)),
     };
   },
 
@@ -316,7 +318,7 @@ const toolHandlers: Record<string, ToolHandler> = {
     ctx.sendSse?.("remove_chart", { chart_id });
     return {
       success: true,
-      result: `✅ Chart "${chart_id}" removed.`,
+      result: serverMsg("chartRemoved", (ctx.language ?? "en") as "en" | "fi", chart_id as string),
     };
   },
 
@@ -332,7 +334,7 @@ const toolHandlers: Record<string, ToolHandler> = {
     ctx.sendSse?.("clear_charts", {});
     return {
       success: true,
-      result: "✅ All charts cleared from the visualization panel.",
+      result: serverMsg("chartsCleared", (ctx.language ?? "en") as "en" | "fi"),
     };
   },
 };

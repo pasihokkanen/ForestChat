@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useForestStore } from "@/lib/store";
+import { importLabels } from "@/lib/i18n";
 import ImportProgress from "@/components/import/ImportProgress";
 import * as Papa from "papaparse";
 
@@ -24,8 +26,9 @@ export default function NewForestPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [stage, setStage] = useState<ImportStage>("idle");
+  const language = useForestStore((s) => s.language) ?? "en";
+  const L = importLabels(language);
 
-  // CSV-specific state
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvPreview, setCsvPreview] = useState<{
     standCount: number;
@@ -34,7 +37,6 @@ export default function NewForestPage() {
 
   const router = useRouter();
 
-  // Client-side CSV preview on file select
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] ?? null;
     setCsvFile(file);
@@ -42,7 +44,6 @@ export default function NewForestPage() {
 
     if (!file) return;
 
-    // Parse in browser for preview
     const reader = new FileReader();
     reader.onload = () => {
       const text = reader.result as string;
@@ -67,12 +68,10 @@ export default function NewForestPage() {
       });
     };
     reader.onerror = () => {
-      setError("Failed to read CSV file");
+      setError(L.csvReadError);
     };
     reader.readAsText(file);
   }
-
-  // ─── API import (unchanged) ───
 
   async function handleApiSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -97,7 +96,7 @@ export default function NewForestPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Import failed");
+        throw new Error(data.error || L.importFailed);
       }
 
       setStage("done");
@@ -105,12 +104,10 @@ export default function NewForestPage() {
       router.push(`/forest/${data.forest_id}`);
     } catch (err) {
       setStage("error");
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      setError(err instanceof Error ? err.message : L.somethingWrong);
       setLoading(false);
     }
   }
-
-  // ─── CSV import ───
 
   async function handleCsvSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -142,7 +139,7 @@ export default function NewForestPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Import failed");
+        throw new Error(data.error || L.importFailed);
       }
 
       setStage("done");
@@ -150,7 +147,7 @@ export default function NewForestPage() {
       router.push(`/forest/${data.forest_id}`);
     } catch (err) {
       setStage("error");
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      setError(err instanceof Error ? err.message : L.somethingWrong);
       setLoading(false);
     }
   }
@@ -161,7 +158,7 @@ export default function NewForestPage() {
     <div className="flex items-center justify-center h-full bg-gray-50 dark:bg-gray-950">
       <div className="w-full max-w-md rounded-xl bg-white dark:bg-gray-900 p-8 shadow-sm border border-gray-200 dark:border-gray-700">
         <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-          Import Stand Data
+          {L.heading}
         </h1>
 
         {/* Tabs */}
@@ -174,7 +171,7 @@ export default function NewForestPage() {
                 : "border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
             }`}
           >
-            Metsäkeskus API
+            {L.tabApi}
           </button>
           <button
             onClick={() => { setTab("csv"); setError(null); }}
@@ -184,15 +181,13 @@ export default function NewForestPage() {
                 : "border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
             }`}
           >
-            CSV File
+            {L.tabCsv}
           </button>
         </div>
 
         {/* Tab description */}
         <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">
-          {isApi
-            ? "Import stand data from the Finnish Forest Centre (Metsäkeskus) open WFS API. Enter your property ID to fetch stands automatically."
-            : "Import stand data from a CSV file. The file must contain stand attributes, species breakdown, and polygon geometry in WKT format."}
+          {isApi ? L.apiDesc : L.csvDesc}
         </p>
 
         <form
@@ -205,7 +200,7 @@ export default function NewForestPage() {
               htmlFor="propertyId"
               className="block text-sm font-medium text-gray-700 dark:text-gray-300"
             >
-              Property ID
+              {L.propertyId}
             </label>
             <input
               id="propertyId"
@@ -217,8 +212,7 @@ export default function NewForestPage() {
               className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm shadow-sm focus:border-green-500 dark:focus:border-green-400 focus:ring-1 focus:ring-green-500 dark:focus:ring-green-400 font-mono dark:bg-gray-900 dark:text-gray-100"
             />
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Format: XXX-XXX-XXXX-XXXX. Dashes are optional — the API
-              auto-normalizes.
+              {L.propertyIdHint}
             </p>
           </div>
 
@@ -229,7 +223,7 @@ export default function NewForestPage() {
                 htmlFor="csvFile"
                 className="block text-sm font-medium text-gray-700 dark:text-gray-300"
               >
-                Stand data CSV file
+                {L.csvFileLabel}
               </label>
               <input
                 id="csvFile"
@@ -239,10 +233,11 @@ export default function NewForestPage() {
                 onChange={handleFileSelect}
                 className="mt-1 block w-full text-sm text-gray-700 dark:text-gray-300 file:mr-4 file:rounded-md file:border-0 file:bg-green-50 dark:file:bg-green-900 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-green-700 dark:file:text-green-300 hover:file:bg-green-100 dark:hover:file:bg-green-800"
               />
-              {/* Preview */}
               {csvPreview && (
                 <p className="mt-1 text-xs text-green-700 dark:text-green-400">
-                  {csvPreview.standCount} stands · {csvPreview.totalVolume.toLocaleString()} m³ total volume
+                  {L.csvPreview
+                    .replace("{0}", String(csvPreview.standCount))
+                    .replace("{1}", csvPreview.totalVolume.toLocaleString())}
                 </p>
               )}
             </div>
@@ -254,7 +249,7 @@ export default function NewForestPage() {
               htmlFor="name"
               className="block text-sm font-medium text-gray-700 dark:text-gray-300"
             >
-              Forest name (optional)
+              {L.forestName}
             </label>
             <input
               id="name"
@@ -275,6 +270,7 @@ export default function NewForestPage() {
           <ImportProgress
             stage={stage}
             message={stage === "error" ? (error ?? undefined) : undefined}
+            language={language}
           />
 
           <button
@@ -284,7 +280,7 @@ export default function NewForestPage() {
             }
             className="w-full rounded-md bg-green-700 dark:bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 dark:hover:bg-green-700 disabled:opacity-50 transition-colors"
           >
-            {loading ? "Importing…" : "Import Stand Data"}
+            {loading ? L.importing : L.importBtn}
           </button>
         </form>
       </div>

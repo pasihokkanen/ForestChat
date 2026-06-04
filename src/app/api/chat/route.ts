@@ -10,6 +10,7 @@ import { recomputeAllCharts } from "@/lib/ai/chart-engine";
 import { getForestById } from "@/lib/repos/forests";
 import { env } from "@/lib/env";
 import { buildSystemPrompt } from "@/lib/chat/system-prompt";
+import { serverMsg } from "@/lib/i18n";
 import { getTools } from "@/lib/chat/tools";
 import { getCompartmentsByForest } from "@/lib/repos/compartments";
 
@@ -319,7 +320,8 @@ export async function POST(request: NextRequest) {
 
       // 2. Parse request
       const body = await request.json();
-      const { message, session_id, forest_id } = body;
+      const { message, session_id, forest_id, language } = body;
+      const lang = (language as "en" | "fi") ?? "en";
       if (!message || !forest_id) {
         send({ event: "error", data: { error: "message and forest_id required" } });
         close();
@@ -333,7 +335,7 @@ export async function POST(request: NextRequest) {
       // /new — Start a fresh conversation (creates new session)
       if (message === "/new") {
         const newSession = await createSession(forest_id, user.id, undefined, session.model ?? undefined);
-        send({ event: "chunk", data: { content: "🆕 Started a new conversation. How can I help with your forest?" } });
+        send({ event: "chunk", data: { content: serverMsg("newConversation", lang) } });
         send({ event: "done", data: { message_id: "", session_id: newSession.id, model: newSession.model } });
         close();
         return;
@@ -348,7 +350,7 @@ export async function POST(request: NextRequest) {
           return;
         }
         await updateSessionModel(session.id, modelName);
-        send({ event: "chunk", data: { content: "✅ Model switched to `" + modelName + "` for this conversation." } });
+        send({ event: "chunk", data: { content: serverMsg("modelSwitched", lang, modelName) } });
         send({ event: "done", data: { message_id: "", session_id: session.id, model: modelName } });
         close();
         return;
@@ -367,7 +369,7 @@ export async function POST(request: NextRequest) {
       const activeModel = resolveModel(session.model);
 
       // 7. Build messages array for OpenRouter
-      const systemPrompt = buildSystemPrompt(forest, compartments);
+      const systemPrompt = buildSystemPrompt(forest, compartments, language ?? "en");
       const tools = getTools();
 
       const openRouterMessages: Array<{ role: string; content: string; tool_call_id?: string }> = [
@@ -410,6 +412,7 @@ export async function POST(request: NextRequest) {
         userId: user.id,
         supabase,
         sendSse,
+        language: (language as string) ?? "en",
       };
 
       const DATA_MUTATION_TOOLS = new Set([
@@ -469,12 +472,7 @@ export async function POST(request: NextRequest) {
 
             send({ event: "tool_start", data: { name: chunk.name, args: chunk.arguments as Record<string, unknown> } });
 
-            const result = await executeTool(chunk.name, chunk.arguments, {
-              forestId: forest_id,
-              userId: user.id,
-              supabase,
-              sendSse,
-            });
+            const result = await executeTool(chunk.name, chunk.arguments, ctx);
 
             // Phase 4b: Set recompute flag instead of nuking charts
             if (result.success && DATA_MUTATION_TOOLS.has(chunk.name)) {
@@ -533,15 +531,15 @@ export async function POST(request: NextRequest) {
         if (hasToolCalls) {
           // Model called tools but returned no text — use the tool's own result
           finalContent = lastToolResult ?? (createdChart
-            ? "✅ Chart created. You can ask me to create more charts, edit the plan, or check sustainability."
-            : "✅ Done. You can ask me to make changes, create charts, or check sustainability.");
+            ? serverMsg("chartCreatedFallback", lang)
+            : serverMsg("doneFallback", lang));
           send({ event: "chunk", data: { content: finalContent } });
         } else {
           // Model produced nothing and didn't call any tools — provider issue.
           // Try auto-detect: if user looks like they want a plan, generate one.
           const userMsg = openRouterMessages.filter(m => m.role === "user").pop()?.content?.toLowerCase() ?? "";
           if (userMsg.includes("plan") || userMsg.includes("summary") || userMsg.includes("management")) {
-            send({ event: "chunk", data: { content: "🔧 Generating your plan…\n" } });
+            send({ event: "chunk", data: { content: serverMsg("generatingPlan", lang) } });
             const result = await executeTool("generate_plan", {}, ctx);
             if (result.success) {
               finalContent = result.result;
@@ -555,7 +553,7 @@ export async function POST(request: NextRequest) {
             // Model produced nothing for a chart request — auto-detect intent and create one.
             const chartArgs = detectChartIntent(userMsg);
             if (chartArgs) {
-              send({ event: "chunk", data: { content: "🔧 Creating your chart…\n" } });
+              send({ event: "chunk", data: { content: serverMsg("creatingChart", lang) } });
               const result = await executeTool("create_chart", chartArgs, ctx);
               if (result.success) {
                 finalContent = result.result;
@@ -565,11 +563,11 @@ export async function POST(request: NextRequest) {
                 send({ event: "chunk", data: { content: finalContent } });
               }
             } else {
-              finalContent = "I can create charts for you. Try asking something like: \"Show yearly income as a bar chart\" or \"Create a pie chart of species distribution.\"";
+              finalContent = serverMsg("emptyResponseChart", lang);
               send({ event: "chunk", data: { content: finalContent } });
             }
           } else {
-            finalContent = "⚠️ The AI model returned an empty response. This can happen with some model/provider combinations. Try a simpler query or ask me to generate your forest plan with 'Generate a plan'.";
+            finalContent = serverMsg("emptyResponseGeneric", lang);
             send({ event: "chunk", data: { content: finalContent } });
           }
         }

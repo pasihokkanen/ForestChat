@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useForestStore } from "@/lib/store";
-import { displayOperationType } from "@/lib/ai/config";
+import { displayDevClass, displaySpecies, displayOp, operationListLabels } from "@/lib/i18n";
 import type maplibregl from "maplibre-gl";
 
 interface OperationListProps {
@@ -18,28 +18,24 @@ const SPECIES_OPTIONS = [
   "pine", "spruce", "silver_birch", "downy_birch", "larch", "grey_alder",
 ] as const;
 
-const OP_COLUMNS = [
-  { key: "stand_id", label: "Stand" },
-  { key: "type", label: "Type" },
-  { key: "year", label: "Year" },
-  { key: "species", label: "Species" },
-  { key: "area_ha", label: "Area (ha)" },
-  { key: "volume_m3", label: "Vol. (m³)" },
-  { key: "removal_pct", label: "Removal %" },
-  { key: "income_eur", label: "Income (€)" },
-  { key: "cost_eur", label: "Cost (€)" },
-  { key: "development_class", label: "Dev. Class" },
+// Column keys — labels come from i18n
+const OP_COLUMN_KEYS = [
+  "colStand", "colType", "colYear", "colSpecies", "colArea",
+  "colVolume", "colRemoval", "colIncome", "colCost", "colDevClass",
 ] as const;
 
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-function formatDisplayDevClass(dc: string): string {
-  return dc
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
+const COL_KEY_TO_DATA: Record<string, string> = {
+  colStand: "stand_id",
+  colType: "type",
+  colYear: "year",
+  colSpecies: "species",
+  colArea: "area_ha",
+  colVolume: "volume_m3",
+  colRemoval: "removal_pct",
+  colIncome: "income_eur",
+  colCost: "cost_eur",
+  colDevClass: "development_class",
+};
 
 const naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 function naturalCompare(a: unknown, b: unknown): number {
@@ -71,15 +67,15 @@ export default function OperationList({ map }: OperationListProps) {
   const setActiveMainTab = useForestStore((s) => s.setActiveMainTab);
   const setPendingStandSelection = useForestStore((s) => s.setPendingStandSelection);
   const aiOperationFilters = useForestStore((s) => s.aiOperationFilters);
+  const language = useForestStore((s) => s.language) ?? "en";
+  const L = operationListLabels(language);
 
-  // Build compartment lookup map
   const compMap = useMemo(() => {
     const m = new Map<string, typeof compartments[0]>();
     for (const c of compartments) m.set(c.id, c);
     return m;
   }, [compartments]);
 
-  // ── State backed by module-level opPersist to survive tab switches ──
   const [yearFrom, setYearFromRaw] = useState<number | null>(opPersist.yearFrom);
   const setYearFrom = (v: number | null) => { opPersist.yearFrom = v; setYearFromRaw(v); };
   const [yearTo, setYearToRaw] = useState<number | null>(opPersist.yearTo);
@@ -113,7 +109,6 @@ export default function OperationList({ map }: OperationListProps) {
   const [globalFilter, setGlobalFilterRaw] = useState(opPersist.globalFilter);
   const setGlobalFilter = (v: string) => { opPersist.globalFilter = v; setGlobalFilterRaw(v); };
 
-  // Sort state
   const [sortKey, setSortKeyRaw] = useState<string | null>(opPersist.sortKey);
   const setSortKey = (k: string | null) => { opPersist.sortKey = k; setSortKeyRaw(k); };
   const [sortDir, setSortDirRaw] = useState<"asc" | "desc">(opPersist.sortDir);
@@ -125,7 +120,6 @@ export default function OperationList({ map }: OperationListProps) {
     });
   };
 
-  // Apply AI-pushed filters
   useEffect(() => {
     if (aiOperationFilters) {
       const f = aiOperationFilters as Record<string, unknown>;
@@ -142,7 +136,6 @@ export default function OperationList({ map }: OperationListProps) {
     }
   }, [aiOperationFilters]);
 
-  // Scroll-position persistence across tab switches
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = scrollRef.current;
@@ -160,7 +153,6 @@ export default function OperationList({ map }: OperationListProps) {
     }
   };
 
-  // Build stand → operation-IDs map for bulk selection
   const standToOpIds = useMemo(() => {
     const map = new Map<string, string[]>();
     for (const op of operations) {
@@ -168,11 +160,8 @@ export default function OperationList({ map }: OperationListProps) {
       if (!comp) continue;
       const standId = comp.stand_id;
       const ids = map.get(standId);
-      if (ids) {
-        ids.push(op.id);
-      } else {
-        map.set(standId, [op.id]);
-      }
+      if (ids) ids.push(op.id);
+      else map.set(standId, [op.id]);
     }
     return map;
   }, [operations, compMap]);
@@ -185,8 +174,6 @@ export default function OperationList({ map }: OperationListProps) {
     let newStandIds: string[];
 
     if (shiftKey && opPersist.lastClickedStandId) {
-      // Shift+click: range select between last clicked stand and current
-      // Use unique stand IDs in display order
       const seen = new Set<string>();
       const orderedIds: string[] = [];
       for (const row of displayRows) {
@@ -205,38 +192,30 @@ export default function OperationList({ map }: OperationListProps) {
         newStandIds = [standId];
       }
     } else if (ctrlKey) {
-      // Ctrl+click: toggle stand
       if (currentStands.includes(standId)) {
         newStandIds = currentStands.filter((id) => id !== standId);
       } else {
         newStandIds = [...currentStands, standId];
       }
     } else {
-      // No modifier: replace selection
       newStandIds = [standId];
     }
 
     opPersist.lastClickedStandId = standId;
     setHighlightedStands(newStandIds);
 
-    // Bulk operation selection: when a stand is selected, all its operations
-    // are selected; when a stand is deselected, all its operations are removed.
     let newOpIds: string[];
     if (ctrlKey) {
-      // Toggle: add/remove operations for the toggled stand only
       const wasSelected = currentStands.includes(standId);
       if (wasSelected) {
-        // Removing stand — remove its operation IDs
         const removedOps = standToOpIds.get(standId) ?? [];
         const removedSet = new Set(removedOps);
         newOpIds = currentOps.filter((id) => !removedSet.has(id));
       } else {
-        // Adding stand — add its operation IDs
         const addedOps = standToOpIds.get(standId) ?? [];
         newOpIds = [...currentOps, ...addedOps];
       }
     } else {
-      // Replace or range: rebuild operation IDs from the new stand set
       const opSet = new Set<string>();
       for (const sid of newStandIds) {
         const ops = standToOpIds.get(sid);
@@ -245,7 +224,6 @@ export default function OperationList({ map }: OperationListProps) {
       newOpIds = Array.from(opSet);
     }
     setHighlightedOperations(newOpIds);
-    // Popup visibility is handled by StandLayer's popup-sync useEffect
   };
 
   const handleShowOnMap = (standId: string) => {
@@ -279,14 +257,12 @@ export default function OperationList({ map }: OperationListProps) {
     setGlobalFilter("");
   };
 
-  // Build filtered + sorted display rows
   const displayRows = useMemo(() => {
     let filtered = operations.map((op) => {
       const comp = compMap.get(op.compartment_id);
       return { op, comp };
     });
 
-    // Apply filters
     if (yearFrom != null) filtered = filtered.filter((r) => r.op.year >= yearFrom);
     if (yearTo != null) filtered = filtered.filter((r) => r.op.year <= yearTo);
     if (typeFilter.size > 0) filtered = filtered.filter((r) => typeFilter.has(r.op.type));
@@ -313,14 +289,13 @@ export default function OperationList({ map }: OperationListProps) {
       });
     }
 
-    // Sort with multi-key fallback: primary → year → type → stand_id
-    // Always applies so initial order is year/type/stand_id even without a click
-    const SORT_KEYS = [sortKey, "year", "type", "stand_id"].filter(
-      (k, i, arr) => k != null && arr.indexOf(k) === i  // dedupe
+    const SORT_KEYS = [sortKey, "colYear", "colType", "colStand"].filter(
+      (k, i, arr) => k != null && arr.indexOf(k) === i
     ) as string[];
 
     const getSortVal = (row: typeof filtered[0], key: string): unknown => {
-      switch (key) {
+      const dataKey = COL_KEY_TO_DATA[key] ?? key;
+      switch (dataKey) {
         case "stand_id": return row.comp?.stand_id ?? "";
         case "type": return row.op.type;
         case "year": return row.op.year;
@@ -343,7 +318,6 @@ export default function OperationList({ map }: OperationListProps) {
           ? aVal - bVal
           : naturalCompare(aVal, bVal);
         if (cmp !== 0) {
-          // Direction only applies to the primary sort key
           const dir = key === sortKey ? (sortDir === "asc" ? 1 : -1) : 1;
           return cmp * dir;
         }
@@ -357,8 +331,8 @@ export default function OperationList({ map }: OperationListProps) {
   if (operations.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-gray-400 text-sm gap-2">
-        <p>No operations found.</p>
-        <p>Ask the AI to generate a forest management plan to see operations here.</p>
+        <p>{L.emptyNoOps}</p>
+        <p>{L.emptyNoOpsHint}</p>
       </div>
     );
   }
@@ -371,7 +345,7 @@ export default function OperationList({ map }: OperationListProps) {
           {/* Year range */}
           <input
             type="number"
-            placeholder="Year from"
+            placeholder={L.placeholderYearFrom}
             value={yearFrom ?? ""}
             onChange={(e) => setYearFrom(e.target.value ? Number(e.target.value) : null)}
             className="w-20 px-1.5 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800"
@@ -379,7 +353,7 @@ export default function OperationList({ map }: OperationListProps) {
           <span className="text-xs text-gray-400">–</span>
           <input
             type="number"
-            placeholder="Year to"
+            placeholder={L.placeholderYearTo}
             value={yearTo ?? ""}
             onChange={(e) => setYearTo(e.target.value ? Number(e.target.value) : null)}
             className="w-20 px-1.5 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800"
@@ -388,7 +362,7 @@ export default function OperationList({ map }: OperationListProps) {
           {/* Type multi-select */}
           <div className="relative group">
             <button className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
-              Type {typeFilter.size > 0 ? `(${typeFilter.size})` : "▼"}
+              {L.filterType}{typeFilter.size > 0 ? ` (${typeFilter.size})` : " ▼"}
             </button>
             <div className="absolute top-full left-0 mt-1 z-10 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg p-1 hidden group-hover:block min-w-[200px]">
               {OP_TYPE_OPTIONS.map((t) => (
@@ -399,7 +373,7 @@ export default function OperationList({ map }: OperationListProps) {
                     onChange={() => toggleFilter(setTypeFilter, t)}
                     className="h-3 w-3"
                   />
-                  {displayOperationType(t)}
+                  {displayOp(t, language)}
                 </label>
               ))}
             </div>
@@ -408,7 +382,7 @@ export default function OperationList({ map }: OperationListProps) {
           {/* Species multi-select */}
           <div className="relative group">
             <button className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
-              Species {speciesFilter.size > 0 ? `(${speciesFilter.size})` : "▼"}
+              {L.filterSpecies}{speciesFilter.size > 0 ? ` (${speciesFilter.size})` : " ▼"}
             </button>
             <div className="absolute top-full left-0 mt-1 z-10 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg p-1 hidden group-hover:block min-w-[160px]">
               {SPECIES_OPTIONS.map((s) => (
@@ -419,7 +393,7 @@ export default function OperationList({ map }: OperationListProps) {
                     onChange={() => toggleFilter(setSpeciesFilter, s)}
                     className="h-3 w-3"
                   />
-                  {capitalize(s)}
+                  {displaySpecies(s, language)}
                 </label>
               ))}
             </div>
@@ -428,7 +402,7 @@ export default function OperationList({ map }: OperationListProps) {
           {/* Stand filter */}
           <input
             type="text"
-            placeholder="Stand ID"
+            placeholder={L.placeholderStandId}
             value={standFilter}
             onChange={(e) => setStandFilter(e.target.value)}
             className="w-24 px-1.5 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800"
@@ -437,7 +411,7 @@ export default function OperationList({ map }: OperationListProps) {
           {/* Global search */}
           <input
             type="text"
-            placeholder="🔍 Search..."
+            placeholder={L.placeholderSearch}
             value={globalFilter}
             onChange={(e) => setGlobalFilter(e.target.value)}
             className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 w-32"
@@ -448,7 +422,7 @@ export default function OperationList({ map }: OperationListProps) {
               onClick={clearAllFilters}
               className="px-2 py-1 text-xs text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
             >
-              Clear all
+              {L.clearAll}
             </button>
           )}
         </div>
@@ -458,25 +432,25 @@ export default function OperationList({ map }: OperationListProps) {
           <div className="flex flex-wrap gap-1">
             {(yearFrom != null || yearTo != null) && (
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded">
-                Year: {yearFrom ?? "?"}–{yearTo ?? "?"}
+                {L.chipYear}: {yearFrom ?? "?"}–{yearTo ?? "?"}
                 <button onClick={() => { setYearFrom(null); setYearTo(null); }} className="ml-0.5 hover:text-red-500">✕</button>
               </span>
             )}
             {Array.from(typeFilter).map((t) => (
               <span key={`t-${t}`} className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded">
-                {displayOperationType(t)}
+                {displayOp(t, language)}
                 <button onClick={() => toggleFilter(setTypeFilter, t)} className="ml-0.5 hover:text-red-500">✕</button>
               </span>
             ))}
             {Array.from(speciesFilter).map((s) => (
               <span key={`sp-${s}`} className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 rounded">
-                Species: {capitalize(s)}
+                {L.chipSpecies}: {displaySpecies(s, language)}
                 <button onClick={() => toggleFilter(setSpeciesFilter, s)} className="ml-0.5 hover:text-red-500">✕</button>
               </span>
             ))}
             {standFilter && (
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 rounded">
-                Stand: {standFilter}
+                {L.chipStand}: {standFilter}
                 <button onClick={() => setStandFilter("")} className="ml-0.5 hover:text-red-500">✕</button>
               </span>
             )}
@@ -493,14 +467,14 @@ export default function OperationList({ map }: OperationListProps) {
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-gray-100 dark:bg-gray-800 z-10">
             <tr>
-              {OP_COLUMNS.map((col) => (
+              {OP_COLUMN_KEYS.map((colKey) => (
                 <th
-                  key={col.key}
+                  key={colKey}
                   className="px-2 py-1.5 text-left text-xs font-medium text-gray-600 dark:text-gray-400 cursor-pointer hover:text-gray-900 dark:hover:text-gray-200 select-none"
-                  onClick={() => handleSort(col.key)}
+                  onClick={() => handleSort(colKey)}
                 >
-                  {col.label}
-                  {sortKey === col.key && (sortDir === "asc" ? " ▲" : " ▼")}
+                  {(L as unknown as Record<string, string>)[colKey]}
+                  {sortKey === colKey && (sortDir === "asc" ? " ▲" : " ▼")}
                 </th>
               ))}
               <th className="w-16 px-1 py-1.5 text-right"></th>
@@ -522,9 +496,9 @@ export default function OperationList({ map }: OperationListProps) {
                   onClick={(e) => handleOperationRowClick(standId, op.id, e)}
                 >
                   <td className="px-2 py-1 font-mono text-xs">{standId}</td>
-                  <td className="px-2 py-1 text-xs">{displayOperationType(op.type)}</td>
+                  <td className="px-2 py-1 text-xs">{displayOp(op.type, language)}</td>
                   <td className="px-2 py-1 text-right">{op.year}</td>
-                  <td className="px-2 py-1">{capitalize(comp?.main_species ?? "")}</td>
+                  <td className="px-2 py-1">{displaySpecies(comp?.main_species ?? "", language) || "—"}</td>
                   <td className="px-2 py-1 text-right">{(comp?.area_ha ?? 0).toFixed(1)}</td>
                   <td className="px-2 py-1 text-right">{Math.round(comp?.volume_m3 ?? 0).toLocaleString()}</td>
                   <td className="px-2 py-1 text-right">
@@ -541,16 +515,13 @@ export default function OperationList({ map }: OperationListProps) {
                       : ""}
                   </td>
                   <td className="px-2 py-1 text-xs">
-                    {comp?.development_class ? formatDisplayDevClass(comp.development_class) : ""}
+                    {comp?.development_class ? displayDevClass(comp.development_class, language) : ""}
                   </td>
                   <td className="px-1 py-1 text-right">
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleShowOnMap(standId);
-                      }}
+                      onClick={(e) => { e.stopPropagation(); handleShowOnMap(standId); }}
                       className="text-xs text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-                      title="Show on map"
+                      title={L.showOnMap}
                     >
                       📍
                     </button>
@@ -562,15 +533,15 @@ export default function OperationList({ map }: OperationListProps) {
         </table>
         {displayRows.length === 0 && hasActiveFilters && (
           <div className="flex items-center justify-center h-32 text-gray-400 text-sm">
-            No operations match the current filters.
+            {L.emptyNoMatch}
           </div>
         )}
       </div>
 
       {/* Footer */}
       <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 px-3 py-1.5 text-xs text-gray-500 bg-gray-50 dark:bg-gray-800/50">
-        {displayRows.length} operations
-        {hasActiveFilters ? ` (filtered from ${operations.length})` : ` / ${operations.length} total`}
+        {displayRows.length} {L.footerOps}
+        {hasActiveFilters ? ` ${L.footerFilteredFrom} ${operations.length})` : ` / ${operations.length} ${L.footerTotal}`}
       </div>
     </div>
   );

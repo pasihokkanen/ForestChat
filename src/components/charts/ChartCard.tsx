@@ -29,7 +29,7 @@ import {
 } from "recharts";
 import type { ChartTab } from "@/lib/store/visualization-slice";
 import { useForestStore } from "@/lib/store";
-import { displayOperationType } from "@/lib/ai/config";
+import { displayOp } from "@/lib/i18n";
 
 // Format number with space as thousand separator (Finnish/SI convention: 10 000)
 function formatNumber(value: number): string {
@@ -234,6 +234,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
   const selectedYear = useForestStore((s) => s.selectedYear);
   const setSelectedYear = useForestStore((s) => s.setSelectedYear);
   const setHighlightedStands = useForestStore((s) => s.setHighlightedStands);
+  const language = useForestStore((s) => s.language) ?? "en";
 
   // Handle click on chart element — uses _stand_ids for cross-highlighting.
   // Toggle semantics prevent selection loops: clicking a bar whose stands
@@ -276,7 +277,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
       const translated: Record<string, unknown> = { ...row };
       for (const key of typeKeys) {
         if (row[key] && typeof row[key] === "string") {
-          const en = displayOperationType(row[key] as string);
+          const en = displayOp(row[key] as string, language);
           if (en !== row[key]) translated[key] = en;
         }
       }
@@ -378,7 +379,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
         for (const row of tab.data) {
           const xVal = String(row[effectiveXKey ?? "x"] ?? "");
           const rawColorVal = String(row[tab.colorKey ?? ""] ?? "");
-          const displayColorVal = displayOperationType(rawColorVal);
+          const displayColorVal = displayOp(rawColorVal, language);
           colorValues.add(displayColorVal);
           if (!pivotMap.has(xVal)) {
             const entry: Record<string, unknown> = {};

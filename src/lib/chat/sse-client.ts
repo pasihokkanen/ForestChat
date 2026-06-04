@@ -37,12 +37,13 @@ export async function streamChat(
   message: string,
   forestId: string,
   sessionId: string | null,
+  language: string,
   callbacks: SseCallbacks
 ): Promise<void> {
   const response = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, forest_id: forestId, session_id: sessionId }),
+    body: JSON.stringify({ message, forest_id: forestId, session_id: sessionId, language }),
   });
 
   if (!response.ok) {

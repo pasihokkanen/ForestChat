@@ -1,17 +1,22 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { useForestStore } from "@/lib/store";
 import type { MainTab } from "@/lib/store/tab-slice";
+import { tabLabel } from "@/lib/i18n";
 
-const TAB_DEFS: { id: MainTab; label: string; icon: string }[] = [
-  { id: "map", label: "Map", icon: "🗺️" },
-  { id: "stands", label: "Stands", icon: "🌲" },
-  { id: "operations", label: "Operations", icon: "🪓" },
+const TAB_DEFS: { id: MainTab; icon: string }[] = [
+  { id: "map", icon: "🗺️" },
+  { id: "stands", icon: "🌲" },
+  { id: "operations", icon: "🪓" },
 ];
 
 export default function MainTabBar() {
   const activeMainTab = useForestStore((s) => s.activeMainTab);
   const setActiveMainTab = useForestStore((s) => s.setActiveMainTab);
+  const language = useForestStore((s) => s.language) ?? "en";
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   return (
     <div className="flex items-center border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 shrink-0">
@@ -27,7 +32,7 @@ export default function MainTabBar() {
           aria-current={activeMainTab === tab.id ? "page" : undefined}
         >
           <span className="text-base">{tab.icon}</span>
-          <span>{tab.label}</span>
+          <span>{mounted ? tabLabel(tab.id, language) : tab.id.charAt(0).toUpperCase() + tab.id.slice(1)}</span>
         </button>
       ))}
     </div>

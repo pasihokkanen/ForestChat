@@ -130,7 +130,7 @@ describe("ChatMessages", () => {
         error={null}
       />
     );
-    expect(screen.getByText("Generating plan...")).toBeInTheDocument();
+    expect(screen.getByText("Generating plan…")).toBeInTheDocument();
     expect(screen.getByText("Running")).toBeInTheDocument();
   });
 

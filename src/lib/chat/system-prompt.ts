@@ -4,10 +4,12 @@
 // and key rules for how the AI should behave.
 
 import type { Forest, Compartment } from "@/types/database";
+import type { Language } from "@/lib/i18n";
 
 export function buildSystemPrompt(
   forest: Forest | null,
-  compartments: Compartment[]
+  compartments: Compartment[],
+  language: Language = "en",
 ): string {
   const totalVolume = compartments.reduce((s, c) => s + (c.volume_m3 ?? 0), 0);
   const totalArea = compartments.reduce((s, c) => s + (c.area_ha ?? 0), 0);
@@ -42,7 +44,7 @@ export function buildSystemPrompt(
     `3. When the user asks for modifications, use the editing tools.`,
     `4. Always check harvest sustainability after making changes.`,
     `5. Explain your recommendations in forestry terms.`,
-    `6. Respond in English (UI language is English; underlying data is Finnish).`,
+    `6. ${language === "fi" ? "Vastaa suomeksi. Kaikki työkalukutsut ja parametrit pysyvät englanniksi (järjestelmän sisäinen kieli), mutta käyttäjälle näytettävä teksti on suomeksi." : "Respond in English."}`,
     `7. KEEP RESPONSES SHORT! All stand data, charts, and plan summaries are already visible in the UI (map popup, visualization panel, tables). Never repeat data that's shown in the UI. For actions like selecting a stand or creating a chart, a one-sentence confirmation is enough. Don't describe stand attributes, don't reformat tool results into tables, and don't add analysis text unless the user explicitly asks for it.`,
     `8. ALWAYS execute the requested tool — never skip a tool because you think the result is the same as before. The user's last interaction (e.g. clicking on the map) may have changed the UI state. Always call the tool when asked.`,
     `9. When the user asks to "show" or "list" stands or operations (e.g., "show me all clear-cuts from 2030-2035"), call search_stands or query_operations with appropriate filters. The results will automatically appear in the relevant tab (Stands or Operations). Briefly acknowledge what was shown — don't re-list all the data in text.`,

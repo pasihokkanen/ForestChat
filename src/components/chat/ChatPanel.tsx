@@ -22,6 +22,7 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
     sessionId,
     activeModel,
     error,
+    language,
     addMessage,
     setMessages,
     appendStreamContent,
@@ -86,7 +87,7 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
       clearStream();
       setError(null);
 
-      await sseStreamChat(message, forestId, sessionId, {
+      await sseStreamChat(message, forestId, sessionId, language ?? "en", {
         onChunk: (text) => {
           appendStreamContent(text);
         },

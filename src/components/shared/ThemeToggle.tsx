@@ -3,26 +3,36 @@
 import { useState, useEffect } from "react";
 
 const STORAGE_KEY = "forestchat-theme";
+const COOKIE_KEY = "forestchat-theme";
 
 export default function ThemeToggle() {
   const [dark, setDark] = useState(false);
   const [mounted, setMounted] = useState(false);
 
+  function applyTheme(isDark: boolean) {
+    if (isDark) {
+      document.documentElement.classList.add("dark");
+      localStorage.setItem(STORAGE_KEY, "dark");
+      document.cookie = `${COOKIE_KEY}=dark; path=/; max-age=31536000; SameSite=Lax`;
+    } else {
+      document.documentElement.classList.remove("dark");
+      localStorage.setItem(STORAGE_KEY, "light");
+      document.cookie = `${COOKIE_KEY}=light; path=/; max-age=31536000; SameSite=Lax`;
+    }
+  }
+
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored === "dark") {
       setDark(true);
-      document.documentElement.classList.add("dark");
+      applyTheme(true);
     } else if (stored === "light") {
       setDark(false);
-      document.documentElement.classList.remove("dark");
+      applyTheme(false);
     } else {
-      // No stored preference — follow OS
       const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
       setDark(prefersDark);
-      if (prefersDark) {
-        document.documentElement.classList.add("dark");
-      }
+      applyTheme(prefersDark);
     }
     setMounted(true);
   }, []);
@@ -30,13 +40,7 @@ export default function ThemeToggle() {
   const toggle = () => {
     const next = !dark;
     setDark(next);
-    if (next) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem(STORAGE_KEY, "dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem(STORAGE_KEY, "light");
-    }
+    applyTheme(next);
   };
 
   // Avoid flash of wrong icon before hydration
