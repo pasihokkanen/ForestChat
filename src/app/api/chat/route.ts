@@ -493,7 +493,7 @@ export async function POST(request: NextRequest) {
               if (chartId) chartIdsCreatedThisTurn.add(chartId);
             }
 
-            send({ event: "tool_start", data: { name: chunk.name, args: chunk.arguments as Record<string, unknown> } });
+            send({ event: "tool_start", data: { id: chunk.id, name: chunk.name, args: chunk.arguments as Record<string, unknown> } });
 
             const result = await executeTool(chunk.name, chunk.arguments, ctx);
 
@@ -510,7 +510,7 @@ export async function POST(request: NextRequest) {
               createdChart = true;
             }
 
-            send({ event: "tool_end", data: { name: chunk.name, result: result.result, error: result.error } });
+            send({ event: "tool_end", data: { id: chunk.id, name: chunk.name, result: result.result, error: result.error } });
 
             const toolContent = result.success ? result.result : `Error: ${result.error}`;
             hasToolCalls = true;

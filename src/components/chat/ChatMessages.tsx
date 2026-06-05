@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ChatMessage as ChatMessageType } from "@/types/database";
+import type { ToolCallStatus } from "@/lib/store/chat-slice";
 import ChatMessage from "./ChatMessage";
-import ToolCallCard from "./ToolCallCard";
 import { useForestStore } from "@/lib/store";
 import { chatEmptyTitle, chatEmptyTip } from "@/lib/i18n";
 
@@ -11,11 +11,7 @@ interface ChatMessagesProps {
   messages: ChatMessageType[];
   streamingContent: string;
   isStreaming?: boolean;
-  toolCallStatus: {
-    name: string;
-    status: "running" | "done" | "error";
-    result?: string;
-  } | null;
+  toolCalls: ToolCallStatus[];
   error: string | null;
 }
 
@@ -23,7 +19,7 @@ export default function ChatMessages({
   messages,
   streamingContent,
   isStreaming: storeIsStreaming = false,
-  toolCallStatus,
+  toolCalls,
   error,
 }: ChatMessagesProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -37,6 +33,7 @@ export default function ChatMessages({
   }, [messages, streamingContent]);
 
   const hasStreamContent = streamingContent.length > 0;
+  const hasToolCalls = toolCalls.length > 0;
 
   return (
     <div className="flex-1 overflow-y-auto px-3 py-4 space-y-3 dark:bg-gray-900">
@@ -66,18 +63,8 @@ export default function ChatMessages({
           <ChatMessage key={msg.id} message={msg} />
         ))}
 
-      {/* Tool call card */}
-      {toolCallStatus && (
-        <ToolCallCard
-          name={toolCallStatus.name}
-          status={toolCallStatus.status}
-          result={toolCallStatus.result}
-          language={language}
-        />
-      )}
-
-      {/* Streaming content — show after first token arrives */}
-      {hasStreamContent && !toolCallStatus && (
+      {/* Streaming content — always visible while streaming, even during tool calls */}
+      {hasStreamContent && (
         <div className="flex justify-start">
           <div className="max-w-[85%] rounded-2xl px-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm text-gray-800 dark:text-gray-200 leading-relaxed whitespace-pre-wrap">
             {streamingContent}
@@ -87,7 +74,7 @@ export default function ChatMessages({
       )}
 
       {/* Thinking indicator — bouncing dots while waiting for AI */}
-      {storeIsStreaming && streamingContent === "" && toolCallStatus === null && (
+      {storeIsStreaming && streamingContent === "" && !hasToolCalls && (
         <div className="flex justify-start">
           <div className="max-w-[120px] rounded-2xl px-5 py-3.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center gap-1">
             <span className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />

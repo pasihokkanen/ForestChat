@@ -7,7 +7,7 @@ const mockStore: Record<string, unknown> = {
   messages: [] as Array<{ id: string; session_id: string; role: string; content: string; tool_calls: unknown; created_at: string }>,
   isStreaming: false,
   streamingContent: "",
-  toolCallStatus: null,
+  toolCalls: [] as Array<{ id: string; name: string; status: string; result?: string }>,
   sessionId: null,
   activeModel: "deepseek/deepseek-v4-flash",
   error: null,
@@ -16,7 +16,9 @@ const mockStore: Record<string, unknown> = {
   appendStreamContent: vi.fn(),
   clearStream: vi.fn(),
   setStreaming: vi.fn(),
-  setToolCall: vi.fn(),
+  addToolCall: vi.fn(),
+  updateToolCall: vi.fn(),
+  clearToolCalls: vi.fn(),
   setSessionId: vi.fn(),
   setActiveModel: vi.fn(),
   setError: vi.fn(),
@@ -45,10 +47,10 @@ vi.mock("@/components/chat/ChatHeader", () => ({
 }));
 
 vi.mock("@/components/chat/ChatMessages", () => ({
-  default: ({ messages, streamingContent, toolCallStatus, error }: any) => (
+  default: ({ messages, streamingContent, toolCalls, error }: any) => (
     <div data-testid="chat-messages">
       <span data-testid="msg-count">{messages.length}</span>
-      {toolCallStatus && <span data-testid="tool-running">{toolCallStatus.name}</span>}
+      {toolCalls?.length > 0 && <span data-testid="tool-running">{toolCalls[0].name}</span>}
       {error && <span data-testid="error-display">{error}</span>}
     </div>
   ),
@@ -64,13 +66,18 @@ vi.mock("@/components/chat/ChatInput", () => ({
   ),
 }));
 
+vi.mock("@/components/chat/ToolCallBar", () => ({
+  default: ({ toolCalls }: any) =>
+    toolCalls?.length > 0 ? <div data-testid="tool-call-bar">ToolCallBar</div> : null,
+}));
+
 // Mock fetch for the GET /api/chat history call
 beforeEach(() => {
   vi.clearAllMocks();
   mockStore.messages = [];
   mockStore.isStreaming = false;
   mockStore.streamingContent = "";
-  mockStore.toolCallStatus = null;
+  mockStore.toolCalls = [];
   mockStore.sessionId = null;
   mockStore.error = null;
 

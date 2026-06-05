@@ -1,15 +1,18 @@
 import type { StateCreator } from "zustand";
 import type { ChatMessage } from "@/types/database";
 
+export interface ToolCallStatus {
+  id: string;
+  name: string;
+  status: "running" | "done" | "error";
+  result?: string;
+}
+
 export interface ChatSlice {
   messages: ChatMessage[];
   isStreaming: boolean;
   streamingContent: string;
-  toolCallStatus: {
-    name: string;
-    status: "running" | "done" | "error";
-    result?: string;
-  } | null;
+  toolCalls: ToolCallStatus[];
   sessionId: string | null;
   activeModel: string;
   commandsOpen: boolean;
@@ -20,7 +23,9 @@ export interface ChatSlice {
   setStreaming: (v: boolean) => void;
   appendStreamContent: (chunk: string) => void;
   clearStream: () => void;
-  setToolCall: (status: ChatSlice["toolCallStatus"]) => void;
+  addToolCall: (tc: ToolCallStatus) => void;
+  updateToolCall: (id: string, updates: Partial<Pick<ToolCallStatus, "status" | "result">>) => void;
+  clearToolCalls: () => void;
   setSessionId: (id: string) => void;
   setActiveModel: (model: string) => void;
   toggleCommands: () => void;
@@ -32,7 +37,7 @@ const initialState = {
   messages: [] as ChatMessage[],
   isStreaming: false,
   streamingContent: "",
-  toolCallStatus: null as ChatSlice["toolCallStatus"],
+  toolCalls: [] as ToolCallStatus[],
   sessionId: null as string | null,
   activeModel: "deepseek/deepseek-v4-flash",
   commandsOpen: false,
@@ -54,7 +59,17 @@ export const createChatSlice: StateCreator<ChatSlice> = (set) => ({
 
   clearStream: () => set({ streamingContent: "" }),
 
-  setToolCall: (status) => set({ toolCallStatus: status }),
+  addToolCall: (tc) =>
+    set((state) => ({ toolCalls: [tc, ...state.toolCalls] })),
+
+  updateToolCall: (id, updates) =>
+    set((state) => ({
+      toolCalls: state.toolCalls.map((tc) =>
+        tc.id === id ? { ...tc, ...updates } : tc
+      ),
+    })),
+
+  clearToolCalls: () => set({ toolCalls: [] }),
 
   setSessionId: (id) => set({ sessionId: id }),
 

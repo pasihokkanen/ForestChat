@@ -31,7 +31,7 @@ describe("ChatMessages", () => {
       <ChatMessages
         messages={[]}
         streamingContent=""
-        toolCallStatus={null}
+        toolCalls={[]}
         error={null}
       />
     );
@@ -46,7 +46,7 @@ describe("ChatMessages", () => {
       <ChatMessages
         messages={[makeMsg({ role: "user", content: "Hi" })]}
         streamingContent=""
-        toolCallStatus={null}
+        toolCalls={[]}
         error={null}
       />
     );
@@ -59,7 +59,7 @@ describe("ChatMessages", () => {
       <ChatMessages
         messages={[]}
         streamingContent="Streaming..."
-        toolCallStatus={null}
+        toolCalls={[]}
         error={null}
       />
     );
@@ -72,7 +72,7 @@ describe("ChatMessages", () => {
       <ChatMessages
         messages={[]}
         streamingContent=""
-        toolCallStatus={null}
+        toolCalls={[]}
         error="Something went wrong"
       />
     );
@@ -84,7 +84,7 @@ describe("ChatMessages", () => {
       <ChatMessages
         messages={[makeMsg({ role: "user", content: "User message" })]}
         streamingContent=""
-        toolCallStatus={null}
+        toolCalls={[]}
         error={null}
       />
     );
@@ -97,7 +97,7 @@ describe("ChatMessages", () => {
       <ChatMessages
         messages={[makeMsg({ role: "assistant", content: "Assistant reply" })]}
         streamingContent=""
-        toolCallStatus={null}
+        toolCalls={[]}
         error={null}
       />
     );
@@ -113,7 +113,7 @@ describe("ChatMessages", () => {
           makeMsg({ id: "m2", role: "tool", content: "tool result" }),
         ]}
         streamingContent=""
-        toolCallStatus={null}
+        toolCalls={[]}
         error={null}
       />
     );
@@ -121,17 +121,17 @@ describe("ChatMessages", () => {
     expect(screen.queryByText("tool result")).not.toBeInTheDocument();
   });
 
-  it("shows ToolCallCard when toolCallStatus is set", () => {
+  it("shows streaming content even when tool calls are active", () => {
     render(
       <ChatMessages
         messages={[]}
-        streamingContent=""
-        toolCallStatus={{ name: "generate_plan", status: "running" }}
+        streamingContent="Partial response"
+        toolCalls={[{ id: "tc1", name: "generate_plan", status: "running" }]}
         error={null}
       />
     );
-    expect(screen.getByText("Generating plan…")).toBeInTheDocument();
-    expect(screen.getByText("Running")).toBeInTheDocument();
+    // Streaming text should be visible even during tool calls
+    expect(screen.getByText("Partial response")).toBeInTheDocument();
   });
 
   it("shows streaming content with blinking cursor", () => {
@@ -139,7 +139,7 @@ describe("ChatMessages", () => {
       <ChatMessages
         messages={[]}
         streamingContent="Partial response"
-        toolCallStatus={null}
+        toolCalls={[]}
         error={null}
       />
     );
@@ -153,7 +153,7 @@ describe("ChatMessages", () => {
       <ChatMessages
         messages={[]}
         streamingContent=""
-        toolCallStatus={null}
+        toolCalls={[]}
         error="Network failure"
       />
     );
@@ -169,7 +169,7 @@ describe("ChatMessages", () => {
           makeMsg({ id: "m3", role: "user", content: "Third" }),
         ]}
         streamingContent=""
-        toolCallStatus={null}
+        toolCalls={[]}
         error={null}
       />
     );

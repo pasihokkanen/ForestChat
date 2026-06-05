@@ -21,8 +21,8 @@ export interface ShowInUiPayload {
 
 interface SseCallbacks {
   onChunk?: (text: string) => void;
-  onToolStart?: (name: string, args: Record<string, unknown>) => void;
-  onToolEnd?: (name: string, result: string, error?: string) => void;
+  onToolStart?: (id: string, name: string, args: Record<string, unknown>) => void;
+  onToolEnd?: (id: string, name: string, result: string, error?: string) => void;
   onDone?: (messageId: string, sessionId: string, model?: string | null) => void;
   onError?: (error: string) => void;
   onSelectStand?: (standIds: string[]) => void;
@@ -81,10 +81,10 @@ export async function streamChat(
               callbacks.onChunk?.(data.content);
               break;
             case "tool_start":
-              callbacks.onToolStart?.(data.name, data.args);
+              callbacks.onToolStart?.(data.id, data.name, data.args);
               break;
             case "tool_end":
-              callbacks.onToolEnd?.(data.name, data.result, data.error);
+              callbacks.onToolEnd?.(data.id, data.name, data.result, data.error);
               break;
             case "done":
               callbacks.onDone?.(data.message_id, data.session_id, data.model);

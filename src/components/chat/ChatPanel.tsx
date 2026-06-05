@@ -8,6 +8,7 @@ import type { MainTab } from "@/lib/store/tab-slice";
 import ChatHeader from "./ChatHeader";
 import ChatMessages from "./ChatMessages";
 import ChatInput from "./ChatInput";
+import ToolCallBar from "./ToolCallBar";
 
 interface ChatPanelProps {
   forestId: string;
@@ -18,7 +19,7 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
     messages,
     isStreaming,
     streamingContent,
-    toolCallStatus,
+    toolCalls,
     sessionId,
     activeModel,
     error,
@@ -28,7 +29,9 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
     appendStreamContent,
     clearStream,
     setStreaming,
-    setToolCall,
+    addToolCall,
+    updateToolCall,
+    clearToolCalls,
     setSessionId,
     setActiveModel,
     setError,
@@ -87,6 +90,9 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
       useForestStore.getState().setAiStandFilters(null);
       useForestStore.getState().setAiOperationFilters(null);
 
+      // Clear previous tool call indicators — each message starts fresh
+      useForestStore.getState().clearToolCalls();
+
       setStreaming(true);
       clearStream();
       setError(null);
@@ -95,11 +101,11 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
         onChunk: (text) => {
           appendStreamContent(text);
         },
-        onToolStart: (name, args) => {
-          setToolCall({ name, status: "running" });
+        onToolStart: (id, name) => {
+          addToolCall({ id, name, status: "running" });
         },
-        onToolEnd: (name, result, error) => {
-          setToolCall({ name, status: error ? "error" : "done", result: error || result });
+        onToolEnd: (id, name, result, error) => {
+          updateToolCall(id, { status: error ? "error" : "done", result: error || result });
         },
         onDone: (messageId, newSessionId, model) => {
           // /new command creates a fresh session — clear old messages
@@ -119,7 +125,7 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
             }
             clearStream();
             setStreaming(false);
-            setToolCall(null);
+            clearToolCalls();
             setSessionId(newSessionId);
             if (model) setActiveModel(model);
             return;
@@ -139,7 +145,7 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
           }
           clearStream();
           setStreaming(false);
-          setToolCall(null);
+          clearToolCalls;
           if (newSessionId) setSessionId(newSessionId);
           if (model) setActiveModel(model);
           // Trigger data refetch after plan operations
@@ -148,7 +154,7 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
         onError: (err) => {
           setError(err);
           setStreaming(false);
-          setToolCall(null);
+          clearToolCalls;
         },
         onSelectStand: (standIds) => {
           setHighlightedStands(standIds);
@@ -201,7 +207,9 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
       appendStreamContent,
       clearStream,
       setStreaming,
-      setToolCall,
+      addToolCall,
+      updateToolCall,
+      clearToolCalls,
       setSessionId,
       setActiveModel,
       setError,
@@ -222,9 +230,10 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
         messages={messages}
         streamingContent={streamingContent}
         isStreaming={isStreaming}
-        toolCallStatus={toolCallStatus}
+        toolCalls={toolCalls}
         error={error}
       />
+      <ToolCallBar toolCalls={toolCalls} language={language ?? "en"} />
       <ChatInput onSend={handleSend} disabled={isStreaming} />
     </div>
   );
