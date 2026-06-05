@@ -228,7 +228,7 @@ export async function searchStands(
       const totalVolume = stands.reduce((s, c) => s + (c.volume_m3 ?? 0), 0);
       return {
         success: true,
-        result: `Found ${stands.length} stands (total area: ${totalArea.toFixed(1)} ha, total volume: ${Math.round(totalVolume).toLocaleString()} m³). Results shown in the Stands panel.`,
+        result: `Found ${stands.length} stands (total area: ${totalArea.toFixed(1)} ha, total volume: ${Math.round(totalVolume).toLocaleString()} m³). Use show_stands to display these in the Stands tab.`,
         data: stands as unknown as Record<string, unknown>[],
       };
     }
@@ -474,7 +474,7 @@ export async function queryOperations(
         : "N/A";
       return {
         success: true,
-        result: `Found ${results.length} operations across ${yearRange} (${types.size} types, total income: ${Math.round(totalIncome).toLocaleString()} €). Results shown in the Operations panel.`,
+        result: `Found ${results.length} operations across ${yearRange} (${types.size} types, total income: ${Math.round(totalIncome).toLocaleString()} €). Use show_operations to display these in the Operations tab.`,
       };
     }
 
