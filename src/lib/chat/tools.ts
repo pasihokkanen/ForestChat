@@ -224,7 +224,7 @@ SINGLE OPERATION mode — provide stand_id, year, type (and optional removal_pct
 
 BATCH MODE — provide operations: [{stand_id, year, type, removal_pct?}, ...]. Use this when adding the same operation type to multiple stands. Validation is performed server-side before each operation is added.
 
-IMPORTANT: After adding operations, just confirm the result in one sentence. Do NOT call select_stand, search_stands, or any visualization tool afterwards — the user can already see the updated operations in the UI.`,
+IMPORTANT: After adding operations, just confirm the result in one sentence. Do NOT call select_stand, search_stands, or any visualization tool afterwards. Refresh the page if you need to see the updated operations list.`,
         parameters: {
           type: "object",
           properties: {
@@ -254,7 +254,7 @@ IMPORTANT: After adding operations, just confirm the result in one sentence. Do 
       type: "function",
       function: {
         name: "remove_operation",
-        description: "Remove planned operations. Supports multiple modes:\n- Single stand, single year: stand_id + year\n- Single stand, all years: stand_id only\n- Multiple stands, single year: stand_ids + year\n- Multiple stands, all years: stand_ids only\n- Filter by type: add type parameter (e.g., type: 'thinning')\nAll matching operations are deleted.\n\nIMPORTANT: After removing operations, just confirm the result. Do NOT call select_stand, search_stands, or any visualization tool — the UI updates automatically.",
+        description: "Remove planned operations. Supports multiple modes:\n- Single stand, single year: stand_id + year\n- Single stand, all years: stand_id only\n- Multiple stands, single year: stand_ids + year\n- Multiple stands, all years: stand_ids only\n- Filter by type: add type parameter (e.g., type: 'thinning')\nAll matching operations are deleted.\n\nIMPORTANT: After removing operations, just confirm the result. Do NOT call select_stand, search_stands, or any visualization tool. Refresh the page to see the updated operations list.",
         parameters: {
           type: "object",
           properties: {
