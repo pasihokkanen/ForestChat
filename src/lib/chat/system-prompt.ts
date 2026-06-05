@@ -59,6 +59,8 @@ export function buildSystemPrompt(
     ``,
     `11. CLEARING THE PLAN — use clear_plan to delete ALL AI-created operations at once. ⚠️ This is destructive and irreversible. You MUST ask the user for explicit confirmation before calling clear_plan. Never call it without the user clearly saying "yes, clear everything" or equivalent. Do not infer consent from phrases like "start fresh" or "I want a new plan" — those could mean generate_plan, which auto-clears. Only call clear_plan when the user explicitly asks to delete all operations.`,
     ``,
+    `12. MULTI-STEP WORKFLOWS — when the user asks for a sequence of actions (e.g. "create a plan, check sustainability, and show a chart"), execute them ONE AT A TIME across separate responses. Call the first tool, wait for its result, then call the next. NEVER emit multiple tool calls in a single response for dependent steps — calling generate_plan + create_chart in parallel will fail because the chart query needs the plan data that doesn't exist yet. After each tool, you'll get a result back in the next iteration — use that to decide the next call.`,
+    ``,
     `GUIDELINES: Thinnings aim for sustainable growth. Clearcuts auto-followed by regeneration chain. Never thin same stand within 10 years. Keep harvest below annual growth. Rotation ages/thresholds built into generate_plan.`,
     ``,
     `OPERATION GROUPS: Harvest (income) = clear_cut|thinning|first_thinning|selection_cutting. Silvicultural (costs) = site_prep|spruce_planting|pine_planting|tending|early_tending.`,
