@@ -239,6 +239,10 @@ export function serverMsg(key: string, lang: Language, ...args: string[]): strin
       en: "✅ Chart created. You can ask me to create more charts, edit the plan, or check sustainability.",
       fi: "✅ Kaavio luotu. Voit pyytää lisää kaavioita, muokata suunnitelmaa tai tarkistaa kestävyyttä.",
     },
+    chartUpdated: {
+      en: '✅ Chart "{0}" updated ({1}).',
+      fi: '✅ Kaavio "{0}" päivitetty ({1}).',
+    },
     doneFallback: {
       en: "✅ Done. You can ask me to make changes, create charts, or check sustainability.",
       fi: "✅ Valmis. Voit pyytää muutoksia, luoda kaavioita tai tarkistaa kestävyyttä.",
@@ -246,6 +250,58 @@ export function serverMsg(key: string, lang: Language, ...args: string[]): strin
     standSelected: {
       en: "✅ Stand {0} selected on map.",
       fi: "✅ Kuvio {0} valittu kartalla.",
+    },
+    standsSelected: {
+      en: "✅ {0} stands selected on map ({1}).",
+      fi: "✅ {0} kuviota valittu kartalla ({1}).",
+    },
+    standsShown: {
+      en: "✅ Stand filters applied. Results shown in the Stands tab.",
+      fi: "✅ Kuviosuodattimet asetettu. Tulokset näkyvät Kuviot-välilehdellä.",
+    },
+    operationsShown: {
+      en: "✅ Operation filters applied. Results shown in the Operations tab.",
+      fi: "✅ Toimenpidesuodattimet asetettu. Tulokset näkyvät Toimenpiteet-välilehdellä.",
+    },
+    operationAdded: {
+      en: "✅ Added {0} to stand {1} in {2} (removal: {3}%, income: {4} €{5}).",
+      fi: "✅ Lisätty {0} kuviolle {1} vuonna {2} (poisto: {3}%, tulo: {4} €{5}).",
+    },
+    operationsAdded: {
+      en: "Added {0}/{1} operation(s):\n{2}",
+      fi: "Lisätty {0}/{1} toimenpidettä:\n{2}",
+    },
+    operationAddError: {
+      en: "❌ {0}: {1}",
+      fi: "❌ {0}: {1}",
+    },
+    operationsRemoved: {
+      en: "✅ Removed {0} operation(s) from {1}{2}{3}.",
+      fi: "✅ Poistettu {0} toimenpidettä kohteesta {1}{2}{3}.",
+    },
+    noOperationsForStand: {
+      en: "No operations found for {0}{1}{2}.",
+      fi: "Ei toimenpiteitä löytynyt: {0}{1}{2}.",
+    },
+    operationsUpdated: {
+      en: "✅ Updated {0} operation(s) from {1} year(s), {2} type(s){3}.",
+      fi: "✅ Päivitetty {0} toimenpidettä, {1} vuotta, {2} tyyppiä{3}.",
+    },
+    noMatchingOperations: {
+      en: "No matching operations found.",
+      fi: "Ei vastaavia toimenpiteitä löytynyt.",
+    },
+    noMatchingOperationsFiltered: {
+      en: "No matching operations found after filtering.",
+      fi: "Ei vastaavia toimenpiteitä löytynyt suodatuksen jälkeen.",
+    },
+    noChartsFound: {
+      en: "No charts found.",
+      fi: "Ei kaavioita löytynyt.",
+    },
+    chartsListed: {
+      en: "{0} chart(s):\n{1}",
+      fi: "{0} kaaviota:\n{1}",
     },
     chartRemoved: {
       en: '✅ Chart "{0}" removed.',

@@ -25,7 +25,7 @@ interface SseCallbacks {
   onToolEnd?: (name: string, result: string, error?: string) => void;
   onDone?: (messageId: string, sessionId: string, model?: string | null) => void;
   onError?: (error: string) => void;
-  onSelectStand?: (standId: string) => void;
+  onSelectStand?: (standIds: string[]) => void;
   onCreateChart?: (chartConfig: Record<string, unknown>) => void;
   onRemoveChart?: (chartId: string) => void;
   onClearCharts?: () => void;
@@ -92,9 +92,11 @@ export async function streamChat(
             case "error":
               callbacks.onError?.(data.error);
               break;
-            case "select_stand":
-              callbacks.onSelectStand?.(data.stand_id as string);
+            case "select_stand": {
+              const ids = data.stand_ids as string[] ?? (data.stand_id ? [data.stand_id as string] : []);
+              callbacks.onSelectStand?.(ids);
               break;
+            }
             case "create_chart":
               callbacks.onCreateChart?.(data);
               break;

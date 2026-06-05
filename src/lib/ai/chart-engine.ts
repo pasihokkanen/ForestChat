@@ -541,6 +541,36 @@ function buildSelect(config: ChartQueryConfig): string {
   }
   return parts.join(", ");
 }
+/** Parse a filter value that may embed a comparison operator.
+ *  Supports: ">60", ">=0", "<100", "<=50", and object form {gt: 60}, {gte: 0, lte: 100}.
+ *  Returns {op, val} where op is the PostgREST filter operator and val is the parsed number. */
+function parseFilterOp(raw: unknown): { op: string; val: unknown } | null {
+  // Object form: {gt: 60} or {gte: 0, lte: 100} — only first key used
+  if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+    const entries = Object.entries(raw as Record<string, unknown>);
+    for (const [op, v] of entries) {
+      if (["gt", "gte", "lt", "lte", "eq", "neq"].includes(op) && v !== undefined) {
+        return { op, val: typeof v === "string" ? parseNumeric(v) : v };
+      }
+    }
+  }
+  // String form: ">60", ">=0", "<100", "<=50"
+  if (typeof raw === "string") {
+    const m = raw.match(/^(>=?|<=?)\s*(.+)$/);
+    if (m) {
+      const opMap: Record<string, string> = { ">": "gt", ">=": "gte", "<": "lt", "<=": "lte" };
+      return { op: opMap[m[1]], val: parseNumeric(m[2]) };
+    }
+  }
+  return null;
+}
+
+/** Try to parse a string as a number; return the original if not numeric. */
+function parseNumeric(s: string): number | string {
+  const n = Number(s);
+  return isNaN(n) ? s : n;
+}
+
 function buildQuery(
   supabase: SupabaseClient,
   forestId: string,
@@ -557,20 +587,33 @@ function buildQuery(
   // (e.g. "comp.development_class") for embedded resource filtering
   if (config.filters) {
     for (const [key, val] of Object.entries(config.filters)) {
+      // Check for comparison operators embedded in the value
+      const parsed = parseFilterOp(val);
+      const isArray = Array.isArray(val);
+      const resolvedKey = resolveFieldAlias(key);
+
       // Check for join-prefixed filter key
       const joinResolved = resolveJoinField(key);
       if (joinResolved.table) {
         // Embedded resource filter via PostgREST path syntax
         const embeddedKey = `${joinResolved.table}.${joinResolved.field}`;
-        if (Array.isArray(val)) {
+        if (isArray) {
           query = query.filter(embeddedKey, "in", `(${val.join(",")})`);
+        } else if (parsed) {
+          query = query.filter(embeddedKey, parsed.op, parsed.val);
         } else if (val !== undefined && val !== null) {
           query = query.filter(embeddedKey, "eq", val);
         }
       } else {
-        const resolvedKey = resolveFieldAlias(key);
-        if (Array.isArray(val)) {
+        if (isArray) {
           query = query.in(resolvedKey, val);
+        } else if (parsed) {
+          if (parsed.op === "gt") query = query.gt(resolvedKey, parsed.val);
+          else if (parsed.op === "gte") query = query.gte(resolvedKey, parsed.val);
+          else if (parsed.op === "lt") query = query.lt(resolvedKey, parsed.val);
+          else if (parsed.op === "lte") query = query.lte(resolvedKey, parsed.val);
+          else if (parsed.op === "neq") query = query.neq(resolvedKey, parsed.val);
+          else query = query.eq(resolvedKey, parsed.val);
         } else if (val !== undefined && val !== null) {
           query = query.eq(resolvedKey, val);
         }

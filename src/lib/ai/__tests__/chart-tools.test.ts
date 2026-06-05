@@ -42,7 +42,7 @@ function makeQueryConfigSupabaseMock(
     const node: Record<string, unknown> = {};
     node.then = (resolve: (v: unknown) => void) =>
       resolve({ data: targetData, error: null });
-    for (const m of ["select", "eq", "limit", "in", "filter", "order", "not"]) {
+    for (const m of ["select", "eq", "limit", "in", "filter", "order", "not", "gt", "gte", "lt", "lte", "neq"]) {
       node[m] = () => chain(targetData);
     }
     return node;
@@ -164,7 +164,7 @@ describe("create_chart tool", () => {
 
     expect(result.success).toBe(true);
     expect(sendSse).toHaveBeenCalledWith("create_chart", expect.objectContaining({
-      nameKey: "species",
+      name_key: "species",
       type: "pie",
     }));
   });
@@ -244,7 +244,7 @@ describe("create_chart tool — query_config mode (Phase 4b)", () => {
     expect(result.success).toBe(true);
     const call = sendSse.mock.calls.find((c: unknown[]) => c[0] === "create_chart")!;
     // yKey should be resolved to "cost" (the 'as' name), not "cost_eur"
-    expect(call[1].yKey).toBe("cost");
+    expect(call[1].y_key).toBe("cost");
     expect(call[1].data[0].cost).toBe(8000);
   });
 
@@ -273,7 +273,7 @@ describe("create_chart tool — query_config mode (Phase 4b)", () => {
 
     expect(result.success).toBe(true);
     const call = sendSse.mock.calls.find((c: unknown[]) => c[0] === "create_chart")!;
-    expect(call[1].nameKey).toBe("species");  // auto-detected from aggregate[0].group_by
+    expect(call[1].name_key).toBe("species");  // auto-detected from aggregate[0].group_by
   });
 
   it("rejects query_config string that cannot be parsed", async () => {
@@ -322,27 +322,29 @@ describe("select_stand tool", () => {
     const sendSse = vi.fn();
     const ctx = makeCtx({ sendSse });
 
-    const result = await executeTool("select_stand", { stand_id: "42" }, ctx);
+    const result = await executeTool("select_stand", { stand_ids: ["42"] }, ctx);
 
     expect(result.success).toBe(true);
     expect(result.result).toContain("Stand 42");
-    expect(sendSse).toHaveBeenCalledWith("select_stand", { stand_id: "42" });
+    expect(sendSse).toHaveBeenCalledWith("select_stand", { stand_ids: ["42"] });
   });
 
-  it("handles missing stand_id gracefully", async () => {
+  it("handles missing stand_ids gracefully", async () => {
     const ctx = makeCtx();
     const result = await executeTool("select_stand", {}, ctx);
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("stand_id");
+    expect(result.error).toContain("stand_ids");
   });
 
-  it("handles non-string stand_id", async () => {
-    const ctx = makeCtx();
-    const result = await executeTool("select_stand", { stand_id: 123 }, ctx);
+  it("normalizes single string to array (backward compat)", async () => {
+    const sendSse = vi.fn();
+    const ctx = makeCtx({ sendSse });
+    const result = await executeTool("select_stand", { stand_ids: "42" }, ctx);
 
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("stand_id");
+    expect(result.success).toBe(true);
+    expect(result.result).toContain("Stand 42");
+    expect(sendSse).toHaveBeenCalledWith("select_stand", { stand_ids: ["42"] });
   });
 });
 
@@ -376,5 +378,39 @@ describe("remove_chart tool", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("chart_id");
+  });
+});
+
+describe("list_charts tool", () => {
+  it("returns no charts when DB is empty", async () => {
+    const ctx = makeCtx();
+    const result = await executeTool("list_charts", {}, ctx);
+    expect(result.success).toBe(true);
+    expect(result.result).toContain("No charts");
+  });
+});
+
+describe("update_chart tool", () => {
+  it("rejects missing chart_id", async () => {
+    const ctx = makeCtx();
+    const result = await executeTool("update_chart", {}, ctx);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("chart_id");
+  });
+});
+
+describe("recreate_chart tool", () => {
+  it("rejects missing chart_id", async () => {
+    const ctx = makeCtx();
+    const result = await executeTool("recreate_chart", {}, ctx);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("chart_id");
+  });
+
+  it("rejects missing query_config", async () => {
+    const ctx = makeCtx();
+    const result = await executeTool("recreate_chart", { chart_id: "chart-1" }, ctx);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("query_config");
   });
 });

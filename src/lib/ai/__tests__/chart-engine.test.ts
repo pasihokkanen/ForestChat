@@ -22,7 +22,7 @@ function makeMockSupabase(dataByTable: Record<string, Record<string, unknown>[]>
     node.then = (resolve: (v: unknown) => void) =>
       resolve({ data: targetData, error: null });
     // All chain methods return a new chain node with the same data
-    for (const m of ["select", "eq", "limit", "in", "filter", "order", "not"]) {
+    for (const m of ["select", "eq", "limit", "in", "filter", "order", "not", "gt", "gte", "lt", "lte", "neq"]) {
       node[m] = () => chain(targetData);
     }
     return node;
@@ -352,7 +352,7 @@ describe("error handling", () => {
       const node: Record<string, unknown> = {};
       node.then = (resolve: (v: unknown) => void) =>
         resolve({ data: null, error: { message: "Database connection error" } });
-      for (const m of ["select", "eq", "limit", "in", "filter", "order", "not"]) {
+      for (const m of ["select", "eq", "limit", "in", "filter", "order", "not", "gt", "gte", "lt", "lte", "neq"]) {
         node[m] = () => errorChain();
       }
       return node;
@@ -361,7 +361,7 @@ describe("error handling", () => {
     function successChain(data: Record<string, unknown>[]): Record<string, unknown> {
       const node: Record<string, unknown> = {};
       node.then = (resolve: (v: unknown) => void) => resolve({ data, error: null });
-      for (const m of ["select", "eq", "limit", "in", "filter", "order", "not"]) {
+      for (const m of ["select", "eq", "limit", "in", "filter", "order", "not", "gt", "gte", "lt", "lte", "neq"]) {
         node[m] = () => successChain(data);
       }
       return node;
@@ -395,5 +395,130 @@ describe("error handling", () => {
     await expect(
       recomputeChartData(supabase, "forest-1", config)
     ).rejects.toThrow("Sub-query (operations) failed");
+  });
+});
+
+// ─── Comparison operator filter parsing ───────────────────────────────
+
+describe("comparison filter operators", () => {
+  it("parses string \">60\" as gt filter", async () => {
+    const supabase = makeMockSupabase({
+      compartments: [
+        { stand_id: "1", age_years: 65, volume_m3: 500 },
+        { stand_id: "2", age_years: 45, volume_m3: 300 },
+        { stand_id: "3", age_years: 80, volume_m3: 700 },
+      ],
+    });
+
+    const config: ChartQueryConfig = {
+      source: "compartments",
+      aggregate: [{ group_by: "stand_id" }],
+      values: [{ field: "volume_m3", as: "vol", fn: "sum" }],
+      filters: { age_years: ">60" },
+    };
+
+    const result = await recomputeChartData(supabase, "forest-1", config);
+    // Mock doesn't actually filter data, but the query should build without error
+    expect(result.data).toBeDefined();
+    expect(result.data.length).toBeGreaterThan(0);
+  });
+
+  it("parses string \">=40\" as gte filter", async () => {
+    const supabase = makeMockSupabase({
+      compartments: [{ stand_id: "1", age_years: 55, volume_m3: 500 }],
+    });
+
+    const config: ChartQueryConfig = {
+      source: "compartments",
+      aggregate: [{ group_by: "stand_id" }],
+      values: [{ field: "volume_m3", as: "vol", fn: "sum" }],
+      filters: { age_years: ">=40" },
+    };
+
+    const result = await recomputeChartData(supabase, "forest-1", config);
+    expect(result.data).toBeDefined();
+  });
+
+  it("parses string \"<5\" as lt filter", async () => {
+    const supabase = makeMockSupabase({
+      compartments: [{ stand_id: "1", area_ha: 3.5, volume_m3: 500 }],
+    });
+
+    const config: ChartQueryConfig = {
+      source: "compartments",
+      aggregate: [{ group_by: "stand_id" }],
+      values: [{ field: "volume_m3", as: "vol", fn: "sum" }],
+      filters: { area_ha: "<5" },
+    };
+
+    const result = await recomputeChartData(supabase, "forest-1", config);
+    expect(result.data).toBeDefined();
+  });
+
+  it("parses string \"<=100\" as lte filter", async () => {
+    const supabase = makeMockSupabase({
+      compartments: [{ stand_id: "1", volume_m3: 80, area_ha: 2 }],
+    });
+
+    const config: ChartQueryConfig = {
+      source: "compartments",
+      aggregate: [{ group_by: "stand_id" }],
+      values: [{ field: "area_ha", as: "area", fn: "sum" }],
+      filters: { volume_m3: "<=100" },
+    };
+
+    const result = await recomputeChartData(supabase, "forest-1", config);
+    expect(result.data).toBeDefined();
+  });
+
+  it("parses object form {gt: 60}", async () => {
+    const supabase = makeMockSupabase({
+      compartments: [{ stand_id: "1", age_years: 75, volume_m3: 500 }],
+    });
+
+    const config: ChartQueryConfig = {
+      source: "compartments",
+      aggregate: [{ group_by: "stand_id" }],
+      values: [{ field: "volume_m3", as: "vol", fn: "sum" }],
+      filters: { age_years: { gt: 60 } },
+    };
+
+    const result = await recomputeChartData(supabase, "forest-1", config);
+    expect(result.data).toBeDefined();
+  });
+
+  it("plain number still uses eq (backward compatible)", async () => {
+    const supabase = makeMockSupabase({
+      compartments: [{ stand_id: "1", age_years: 60, volume_m3: 500 }],
+    });
+
+    const config: ChartQueryConfig = {
+      source: "compartments",
+      aggregate: [{ group_by: "stand_id" }],
+      values: [{ field: "volume_m3", as: "vol", fn: "sum" }],
+      filters: { age_years: 60 },
+    };
+
+    const result = await recomputeChartData(supabase, "forest-1", config);
+    expect(result.data).toBeDefined();
+  });
+
+  it("join-prefixed comparison filter uses filter() with parsed op", async () => {
+    const supabase = makeMockSupabase({
+      compartment_species: [
+        { species: "pine", compartments: { development_class: "mature_thinning", age_years: 70 } },
+      ],
+    });
+
+    const config: ChartQueryConfig = {
+      source: "compartment_species",
+      join: { table: "compartments", on: "compartment_id", fields: ["development_class", "age_years"] },
+      aggregate: [{ group_by: "species" }],
+      values: [{ field: "area_ha", as: "total_ha", fn: "sum" }],
+      filters: { "comp.age_years": ">60" },
+    };
+
+    const result = await recomputeChartData(supabase, "forest-1", config);
+    expect(result.data).toBeDefined();
   });
 });

@@ -55,6 +55,13 @@ function makeMockSupabase(
     // .in() — pass through
     node.in = () => chain(targetData, filters);
 
+    // .gt(), .gte(), .lt(), .lte(), .neq() — pass through
+    node.gt = () => chain(targetData, filters);
+    node.gte = () => chain(targetData, filters);
+    node.lt = () => chain(targetData, filters);
+    node.lte = () => chain(targetData, filters);
+    node.neq = () => chain(targetData, filters);
+
     // .filter() — pass through
     node.filter = () => chain(targetData, filters);
 
@@ -242,7 +249,7 @@ describe("recomputeAllCharts", () => {
           const errorNode: Record<string, unknown> = {};
           errorNode.then = (resolve: (v: unknown) => void) =>
             resolve({ data: null, error: { message: "Connection refused" } });
-          for (const m of ["select", "eq", "limit", "in", "filter", "order", "not"]) {
+          for (const m of ["select", "eq", "limit", "in", "filter", "order", "not", "gt", "gte", "lt", "lte", "neq"]) {
             errorNode[m] = () => errorNode;
           }
           return errorNode;

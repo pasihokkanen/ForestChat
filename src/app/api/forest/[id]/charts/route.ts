@@ -17,11 +17,11 @@ function mapTabToRow(forestId: string, tab: ChartTab) {
     title: tab.title,
     type: tab.type,
     data: tab.data,
-    x_key: tab.xKey,
-    y_key: tab.yKey,
-    y_key2: tab.yKey2,
-    name_key: tab.nameKey,
-    color_key: tab.colorKey,
+    x_key: tab.x_key,
+    y_key: tab.y_key,
+    y_key2: tab.y_key2,
+    name_key: tab.name_key,
+    color_key: tab.color_key,
     ...(tab.query_config ? { query_config: tab.query_config } : {}),
     ...(tab.computed_at ? { computed_at: tab.computed_at } : {}),
     ...(tab.waterfall_base != null ? { waterfall_base: tab.waterfall_base } : {}),
@@ -72,7 +72,7 @@ export async function POST(
 
     // Validate required fields — data is optional when query_config is present
     const hasQueryConfig = !!body.query_config;
-    if (!body.id || !body.title || !body.type || !body.yKey) {
+    if (!body.id || !body.title || !body.type || !body.y_key) {
       return NextResponse.json(
         { error: "Missing required fields: id, title, type, yKey" },
         { status: 400 }

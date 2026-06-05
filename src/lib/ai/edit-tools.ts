@@ -9,6 +9,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Compartment, Operation } from "@/types/database";
 import { calculateOperationIncome } from "./income-calculator";
 import { COSTS, normalizeOperationType } from "./config";
+import { serverMsg } from "../i18n";
+import type { Language } from "../i18n";
 
 const VALID_TYPES = [
   "clear_cut",
@@ -50,7 +52,8 @@ export async function addOperation(
   supabase: SupabaseClient,
   forestId: string,
   userId: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  language: Language = "en",
 ): Promise<{ success: boolean; result: string; error?: string }> {
   const standId = args.stand_id as string;
   const year = args.year as number;
@@ -121,43 +124,59 @@ export async function addOperation(
 
   if (error) return { success: false, result: "", error: error.message };
 
-  const costInfo = costEur > 0 ? `, cost: ${costEur.toLocaleString()} €` : "";
-  return { success: true, result: `✅ Added ${type} to stand ${standId} in ${year} (removal: ${removalPct}%, income: ${incomeEur.toLocaleString()} €${costInfo}).` };
+  const costLabel = language === "fi" ? "kulu" : "cost";
+  const costInfo = costEur > 0 ? `, ${costLabel}: ${costEur.toLocaleString()} €` : "";
+  return {
+    success: true,
+    result: serverMsg("operationAdded", language, String(type), String(standId), String(year), String(removalPct), incomeEur.toLocaleString(), costInfo),
+  };
 }
 
-export async function removeOperation(
+export async function removeOperations(
   supabase: SupabaseClient,
   forestId: string,
-  standId: string,
-  year: number
+  standIds: string[],
+  year?: number,
+  typeFilter?: string,
+  language: Language = "en",
 ): Promise<{ success: boolean; result: string; error?: string }> {
-  if (!standId || !year) {
-    return { success: false, result: "", error: "stand_id and year are required" };
-  }
-
-  const { data: compartment } = await supabase
+  // Resolve stand IDs to compartment IDs
+  const { data: compartments } = await supabase
     .from("compartments")
-    .select("id")
+    .select("id, stand_id")
     .eq("forest_id", forestId)
-    .eq("stand_id", standId)
-    .single();
+    .in("stand_id", standIds);
 
-  if (!compartment) {
-    return { success: false, result: "", error: `Stand ${standId} not found` };
+  if (!compartments || compartments.length === 0) {
+    return { success: false, result: "", error: `No stands found: ${standIds.join(", ")}` };
   }
 
-  const { data: deleted, error } = await supabase
+  const compIds = compartments.map((c) => (c as { id: string }).id);
+
+  let query = supabase
     .from("operations")
     .delete()
-    .eq("compartment_id", (compartment as { id: string }).id)
     .eq("forest_id", forestId)
-    .eq("year", year);
+    .in("compartment_id", compIds);
+
+  if (year != null) query = query.eq("year", year);
+  if (typeFilter) query = query.eq("type", typeFilter);
+
+  const { data: deleted, error } = await query.select("id");
 
   if (error) return { success: false, result: "", error: error.message };
 
-  const count = (deleted as Operation[] | null)?.length ?? 0;
-  if (count === 0) return { success: true, result: `No operations found for stand ${standId} in ${year}.` };
-  return { success: true, result: `✅ Removed ${count} operation(s) from stand ${standId} in ${year}.` };
+  const count = (deleted as unknown[] | null)?.length ?? 0;
+  const yearLabel = language === "fi" ? "vuonna" : "in";
+  const yearClause = year != null ? ` ${yearLabel} ${year}` : "";
+  const typeLabel = language === "fi" ? "tyyppi" : "type";
+  const typeClause = typeFilter ? ` (${typeLabel}: ${typeFilter})` : "";
+  const standLabel = standIds.length <= 3 ? standIds.join(", ") : `${standIds.length} stands`;  // numeric, no i18n needed
+
+  if (count === 0) {
+    return { success: true, result: serverMsg("noOperationsForStand", language, standLabel, yearClause, typeClause) };
+  }
+  return { success: true, result: serverMsg("operationsRemoved", language, String(count), standLabel, yearClause, typeClause) };
 }
 
 // ── batch_update_operations ──
@@ -202,7 +221,8 @@ export async function batchUpdateOperations(
   supabase: SupabaseClient,
   forestId: string,
   filter: BatchUpdateFilter,
-  update: BatchUpdatePayload
+  update: BatchUpdatePayload,
+  language: Language = "en",
 ): Promise<{ success: boolean; result: string; error?: string }> {
   try {
     // Validate update payload — reject any field not in whitelist
@@ -246,7 +266,7 @@ export async function batchUpdateOperations(
     if (error) throw new Error(error.message);
 
     if (!data || data.length === 0) {
-      return { success: true, result: "No matching operations found." };
+      return { success: true, result: serverMsg("noMatchingOperations", language) };
     }
 
     // Post-filter on stand-level fields
@@ -319,7 +339,7 @@ export async function batchUpdateOperations(
     }
 
     if (results.length === 0) {
-      return { success: true, result: "No matching operations found after filtering." };
+      return { success: true, result: serverMsg("noMatchingOperationsFiltered", language) };
     }
 
     // Step 2: Build a summary of what's being changed (for the response message)
@@ -327,13 +347,13 @@ export async function batchUpdateOperations(
     const typesAffected = new Set(results.map(r => r.type));
     const summaryParts: string[] = [];
     if (update.year !== undefined) {
-      summaryParts.push(`moved to ${update.year}`);
+      summaryParts.push(language === "fi" ? `siirretty vuoteen ${update.year}` : `moved to ${update.year}`);
     }
     if (update.removal_pct !== undefined) {
       summaryParts.push(`removal_pct → ${update.removal_pct}%`);
     }
     if (update.notes !== undefined) {
-      summaryParts.push("notes updated");
+      summaryParts.push(language === "fi" ? "muistiinpanot päivitetty" : "notes updated");
     }
 
     // Step 3: Execute the atomic update with forest_id defense-in-depth
@@ -354,7 +374,7 @@ export async function batchUpdateOperations(
     const summary = summaryParts.length > 0 ? ` (${summaryParts.join(", ")})` : "";
     return {
       success: true,
-      result: `✅ Updated ${results.length} operation(s) from ${yearsAffected.size} year(s), ${typesAffected.size} type(s)${summary}.`,
+      result: serverMsg("operationsUpdated", language, String(results.length), String(yearsAffected.size), String(typesAffected.size), summary),
     };
   } catch (err) {
     return {

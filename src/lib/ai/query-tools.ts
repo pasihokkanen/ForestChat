@@ -117,6 +117,7 @@ export interface SearchStandsFilter {
   growth_min?: number;
   growth_max?: number;
   fields?: string[];  // Also controls DB-level .select() — reduces payload
+  limit?: number;     // Max results (default: 500, use 0 for no limit)
 }
 
 // ── get_stand ──
@@ -213,11 +214,25 @@ export async function searchStands(
     if (filters.growth_min !== undefined) query = query.gte("growth_m3_per_ha", filters.growth_min);
     if (filters.growth_max !== undefined) query = query.lte("growth_m3_per_ha", filters.growth_max);
 
-    const { data, error } = await query.order("stand_id").limit(50);
+    // Apply limit (default 500, set 0 for unlimited, max 500 cap when explicit)
+    const rawLimit = filters.limit;
+    const effectiveLimit = rawLimit === 0 ? 100000 : Math.min(rawLimit ?? 500, 500);
+    const { data, error } = await query.order("stand_id").limit(effectiveLimit);
     if (error) return { success: false, result: "", error: error.message };
 
     const stands = ((data as unknown) as Compartment[]) ?? [];
-    return { success: true, result: formatStandResult(stands, filters.fields) };
+    // Summary mode: when >20 results, return a compact summary
+    // (full results go to UI via show_in_ui SSE from the tool executor)
+    if (stands.length > 20) {
+      const totalArea = stands.reduce((s, c) => s + (c.area_ha ?? 0), 0);
+      const totalVolume = stands.reduce((s, c) => s + (c.volume_m3 ?? 0), 0);
+      return {
+        success: true,
+        result: `Found ${stands.length} stands (total area: ${totalArea.toFixed(1)} ha, total volume: ${Math.round(totalVolume).toLocaleString()} m³). Results shown in the Stands panel.`,
+        data: stands as unknown as Record<string, unknown>[],
+      };
+    }
+    return { success: true, result: formatStandResult(stands, filters.fields), data: stands as unknown as Record<string, unknown>[] };
   } catch (err) {
     return {
       success: false,
@@ -322,6 +337,7 @@ export interface QueryOperationsFilter {
 
   // Field selection (controls both DB payload and text output)
   fields?: string[];
+  limit?: number;     // Max results (default: 500, use 0 for no limit)
 }
 
 const OP_QUERY_FIELDS: Record<string, string> = {
@@ -390,10 +406,10 @@ export async function queryOperations(
     if (filters.cost_min !== undefined) query = query.gte("cost_eur", filters.cost_min);
     if (filters.cost_max !== undefined) query = query.lte("cost_eur", filters.cost_max);
 
-    const { data, error } = await query
-      .order("year")
-      .order("type")
-      .limit(500); // Safety limit
+    // Apply limit (default 500, set 0 for unlimited, max 500 cap when explicit)
+    const rawLimit = filters.limit;
+    const effectiveLimit = rawLimit === 0 ? 100000 : Math.min(rawLimit ?? 500, 500);
+    const { data, error } = await query.order("year").order("type").limit(effectiveLimit);
 
     if (error) throw new Error(error.message);
 
@@ -446,6 +462,20 @@ export async function queryOperations(
 
     if (results.length === 0) {
       return { success: true, result: "No matching operations found (filtered by stand criteria)." };
+    }
+
+    // Summary mode: when >20 results, return a compact summary
+    if (results.length > 20) {
+      const years = new Set(results.map(r => r.year));
+      const types = new Set(results.map(r => r.type));
+      const totalIncome = results.reduce((s, r) => s + (r.income_eur ?? 0), 0);
+      const yearRange = years.size > 0
+        ? `${Math.min(...years)}–${Math.max(...years)}`
+        : "N/A";
+      return {
+        success: true,
+        result: `Found ${results.length} operations across ${yearRange} (${types.size} types, total income: ${Math.round(totalIncome).toLocaleString()} €). Results shown in the Operations panel.`,
+      };
     }
 
     // Step 3: Format output with selected fields

@@ -428,8 +428,12 @@ export async function POST(request: NextRequest) {
       const TERMINAL_TOOLS = new Set([
         "create_chart",
         "select_stand",
+        "show_stands",
+        "show_operations",
         "remove_chart",
         "clear_charts",
+        "update_chart",
+        "recreate_chart",
       ]);
 
       let needsRecompute = false;

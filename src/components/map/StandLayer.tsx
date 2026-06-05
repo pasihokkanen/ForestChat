@@ -305,16 +305,26 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
     return steps as unknown as maplibregl.Expression;
   }, [ageBrackets]);
 
-  // Register source + layers. Reacts directly to map style lifecycle
-  // (every style.load) instead of depending on parent's styleVersion prop.
-  // This avoids the async notification gap between MapView → ForestView → StandLayer.
+  // Refs to provide current data to the style.load handler without
+  // triggering full layer rebuilds when compartments or expression change.
+  // Those are handled by separate in-place update effects below.
+  const compartmentsRef = useRef(compartments);
+  compartmentsRef.current = compartments;
+  const buildMatchExpressionRef = useRef(buildMatchExpression);
+  buildMatchExpressionRef.current = buildMatchExpression;
+
+  // Register source + layers ONLY on style.load (initial mount + theme toggle).
+  // compartment changes → setData effect (no rebuild)
+  // expression changes → setPaintProperty effect (no rebuild)
   useEffect(() => {
     if (!map) return;
 
     const SOURCE_ID = "stands";
     const LAYER_ID = "stands-fill";
 
-    // Rebuild layers on every style load (initial + setStyle)
+    // Rebuild layers on every style load (initial + setStyle).
+    // Reads current highlight state from the store so rebuilt layers
+    // preserve any active selection.
     const onStyleLoad = () => {
       try {
         for (const id of ["stands-highlight", "stands-highlight-fill", LAYER_ID]) {
@@ -322,7 +332,7 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
         }
         if (map.getSource(SOURCE_ID)) map.removeSource(SOURCE_ID);
 
-        map.addSource(SOURCE_ID, { type: "geojson", data: compartments });
+        map.addSource(SOURCE_ID, { type: "geojson", data: compartmentsRef.current });
 
         map.addLayer({
           id: LAYER_ID,
@@ -330,17 +340,29 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
           source: SOURCE_ID,
           paint: {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            "fill-color": buildMatchExpression() as any,
+            "fill-color": buildMatchExpressionRef.current() as any,
             "fill-opacity": 0.6,
             "fill-outline-color": "#333",
           },
         });
 
+        // Compute the correct initial filter from current store state
+        const hlIds = useForestStore.getState().highlightedStandIds;
+        const selId = useForestStore.getState().selectedStandId;
+        const ids = hlIds.length > 0
+          ? hlIds
+          : selId
+            ? [selId]
+            : [];
+        const highlightFilter = ids.length > 0
+          ? (["in", ["get", "stand_id"], ["literal", ids]] as any)
+          : (["==", ["get", "stand_id"], ""] as any);
+
         map.addLayer({
           id: "stands-highlight-fill",
           type: "fill",
           source: SOURCE_ID,
-          filter: ["==", ["get", "stand_id"], ""],
+          filter: highlightFilter,
           paint: { "fill-color": "#FFD700", "fill-opacity": 0.3 },
         });
 
@@ -348,7 +370,7 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
           id: "stands-highlight",
           type: "line",
           source: SOURCE_ID,
-          filter: ["==", ["get", "stand_id"], ""],
+          filter: highlightFilter,
           paint: { "line-color": "#FFD700", "line-width": 4, "line-opacity": 0.9 },
         });
       } catch { /* transitional — next style.load will retry */ }
@@ -363,7 +385,33 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
     return () => {
       map.off("style.load", onStyleLoad);
     };
-  }, [map, compartments, buildMatchExpression]);
+  }, [map]);
+
+  // Update source data in-place when compartments change — no layer rebuild.
+  useEffect(() => {
+    if (!map) return;
+    try {
+      const source = map.getSource("stands") as maplibregl.GeoJSONSource | undefined;
+      if (source?.setData) {
+        source.setData(compartments);
+      }
+    } catch {
+      // Source may not be available during layout transitions — skip
+    }
+  }, [map, compartments]);
+
+  // Update fill-color paint property in-place when expression changes.
+  useEffect(() => {
+    if (!map) return;
+    try {
+      if (map.getLayer("stands-fill")) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        map.setPaintProperty("stands-fill", "fill-color", buildMatchExpression() as any);
+      }
+    } catch {
+      // skip
+    }
+  }, [map, buildMatchExpression]);
 
   // Mouse & click handlers — registered on the layer, re-wired when the
   // effect above rebuilds the layer (triggered by compartments / buildMatchExpression change).
@@ -435,19 +483,6 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
     };
   }, [map, isDark, styleVersion]);
 
-  // Update source data when compartments change
-  useEffect(() => {
-    if (!map) return;
-    try {
-      const source = map.getSource("stands") as maplibregl.GeoJSONSource | undefined;
-      if (source?.setData) {
-        source.setData(compartments);
-      }
-    } catch {
-      // Source may not be available during layout transitions — skip
-    }
-  }, [map, compartments]);
-
   // Update highlight layer filters when selection changes (P4.6)
   useEffect(() => {
     if (!map) return;
@@ -473,34 +508,47 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
     }
   }, [map, selectedStandId, highlightedStandIds, styleVersion]);
 
-  // Zoom to selected stand when selection changes via AI or chart click
-  // (NOT on direct map click — those are handled separately with clickedStandRef)
-  // Skip if map tab is not active — popup uses getBoundingClientRect which fails on hidden elements
+  // Zoom to selected/highlighted stands when selection changes via AI or chart click.
+  // Handles both single-stand (zoom + popup) and multi-stand (zoom to bounds, no popup).
+  // NOT on direct map click — those are handled separately with clickedStandRef.
+  // Skip if map tab is not active — popup uses getBoundingClientRect which fails on hidden elements.
   useEffect(() => {
-    if (!map || !selectedStandId || activeMainTab !== "map") return;
+    if (!map || activeMainTab !== "map") return;
 
-    // If selection came from map click, skip zoom
-    if (clickedStandRef.current === selectedStandId) {
+    // Determine the set of stands to zoom to
+    const idsToZoom = highlightedStandIds.length > 0
+      ? highlightedStandIds
+      : selectedStandId
+        ? [selectedStandId]
+        : [];
+
+    if (idsToZoom.length === 0) return;
+
+    // If selection came from map click on the single selected stand, skip zoom
+    if (idsToZoom.length === 1 && clickedStandRef.current === idsToZoom[0]) {
       clickedStandRef.current = null;
       return;
     }
 
-    // Find the feature in the compartments data directly instead of querying the map source
-    const feature = compartments.features.find(
-      (f) => f.properties?.stand_id === selectedStandId
+    // Collect geometry for all target stands
+    const features = compartments.features.filter(
+      (f) => idsToZoom.includes(f.properties?.stand_id as string)
     );
-    if (!feature || !feature.geometry) return;
+    if (features.length === 0) return;
 
     try {
-      // Compute bounds from feature geometry
+      // Compute combined bounds from all target features
       const bounds = new maplibregl.LngLatBounds();
-      const geom = feature.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
-      const coords =
-        geom.type === "Polygon"
-          ? geom.coordinates[0]
-          : geom.coordinates.flatMap((ring) => ring[0]);
-      for (const [lng, lat] of coords as [number, number][]) {
-        bounds.extend([lng, lat]);
+      for (const feature of features) {
+        if (!feature.geometry) continue;
+        const geom = feature.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
+        const coords =
+          geom.type === "Polygon"
+            ? geom.coordinates[0]
+            : geom.coordinates.flatMap((ring) => ring[0]);
+        for (const [lng, lat] of coords as [number, number][]) {
+          bounds.extend([lng, lat]);
+        }
       }
 
       // Cancel any in-progress animation before fitting
@@ -510,24 +558,27 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
       map.resize();
       map.fitBounds(bounds, { padding: 80, maxZoom: 16, duration: 800 });
 
-      // Show popup AFTER the zoom animation completes (moveend)
-      const props = feature.properties as Record<string, unknown>;
+      // Show popup ONLY for single stand — multi-stand just zooms to the area
+      if (idsToZoom.length === 1) {
+        const singleFeature = features[0];
+        const props = singleFeature.properties as Record<string, unknown>;
+        const standId = idsToZoom[0];
 
-      const onMoveEnd = () => {
-        if (useForestStore.getState().selectedStandId !== selectedStandId) return;
-        showCustomPopup(map, popupRef, props, isDark);
-      };
-      // Use once() so it auto-removes after firing
-      map.once("moveend", onMoveEnd);
+        const onMoveEnd = () => {
+          if (useForestStore.getState().selectedStandId !== standId) return;
+          showCustomPopup(map, popupRef, props, isDark);
+        };
+        map.once("moveend", onMoveEnd);
 
-      return () => {
-        map.stop();
-        map.off("moveend", onMoveEnd);
-      };
+        return () => {
+          map.stop();
+          map.off("moveend", onMoveEnd);
+        };
+      }
     } catch {
       // Silently handle geometry format issues
     }
-  }, [map, selectedStandId, compartments, activeMainTab]);
+  }, [map, selectedStandId, highlightedStandIds, compartments, activeMainTab]);
 
   // Auto-zoom to fit stands on first load
   useEffect(() => {

@@ -146,9 +146,8 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
           setStreaming(false);
           setToolCall(null);
         },
-        onSelectStand: (standId) => {
-          selectStand(standId);
-          setHighlightedStands([standId]);
+        onSelectStand: (standIds) => {
+          setHighlightedStands(standIds);
         },
         onCreateChart: (chartConfig) => {
           addChartTab(chartConfig as unknown as Parameters<typeof addChartTab>[0]);

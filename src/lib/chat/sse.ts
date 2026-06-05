@@ -33,6 +33,7 @@ export interface SseEvent {
     model?: string | null;
     error?: string;
     stand_id?: string;
+    stand_ids?: string[];
     chart_id?: string;
     chart_ids?: string[];
     /** show_in_ui target tab */

@@ -151,10 +151,10 @@ function getYearAxisLabel(lang: string) {
 }
 
 // Shared YAxis props: formats numbers with thousand separators and shows unit label.
-// Usage: <YAxis {...yAxisProps(tab.yKey)} />
-function yAxisProps(yKey: string | null | undefined, yKey2?: string | null) {
-  const anyEuro = isEuroKey(yKey) || isEuroKey(yKey2);
-  const anyNumeric = isNumericKey(yKey) || isNumericKey(yKey2);
+// Usage: <YAxis {...yAxisProps(tab.y_key)} />
+function yAxisProps(yKey: string | null | undefined, y_key2?: string | null) {
+  const anyEuro = isEuroKey(yKey) || isEuroKey(y_key2);
+  const anyNumeric = isNumericKey(yKey) || isNumericKey(y_key2);
   return {
     tick: { fontSize: 12 as const },
     tickFormatter: (v: number) => {
@@ -163,7 +163,7 @@ function yAxisProps(yKey: string | null | undefined, yKey2?: string | null) {
       if (typeof v === "number" && !Number.isInteger(v)) return v.toFixed(1);
       return String(v);
     },
-    label: getAxisLabel(yKey) ?? getAxisLabel(yKey2),
+    label: getAxisLabel(yKey) ?? getAxisLabel(y_key2),
   };
 }
 
@@ -269,13 +269,13 @@ export default function ChartCard({ tab }: ChartCardProps) {
 
   // Fallback xKey: if null but data has "year" column, auto-detect it.
   // Prevents all years collapsing into one bar when AI omits x_key.
-  const effectiveXKey = tab.xKey ?? (tab.data?.[0] && "year" in tab.data[0] ? "year" : null);
+  const effectiveXKey = tab.x_key ?? (tab.data?.[0] && "year" in tab.data[0] ? "year" : null);
 
   // Translate operation type names in data for display (Finnish → English).
-  // Applies to charts where xKey or nameKey corresponds to operation types.
+  // Applies to charts where xKey or name_key corresponds to operation types.
   const translatedData = React.useMemo(() => {
     if (!tab.data?.length) return tab.data;
-    const typeKeys = [effectiveXKey, tab.nameKey, tab.colorKey].filter(Boolean) as string[];
+    const typeKeys = [effectiveXKey, tab.name_key, tab.color_key].filter(Boolean) as string[];
     if (typeKeys.length === 0) return tab.data;
     return tab.data.map((row) => {
       const translated: Record<string, unknown> = { ...row };
@@ -287,22 +287,22 @@ export default function ChartCard({ tab }: ChartCardProps) {
       }
       return translated;
     });
-  }, [tab.data, effectiveXKey, tab.nameKey, tab.colorKey]);
+  }, [tab.data, effectiveXKey, tab.name_key, tab.color_key]);
 
-  // Filter out rows with null/undefined/"null" nameKey values for pie/donut charts.
-  // Recharts Pie fails to render slices when nameKey resolves to null.
+  // Filter out rows with null/undefined/"null" name_key values for pie/donut charts.
+  // Recharts Pie fails to render slices when name_key resolves to null.
   // DB stores some nulls as the literal string "null".
   const cleanData = React.useMemo(() => {
     if (!translatedData?.length) return translatedData;
     const isPieLike = tab.type === "pie" || tab.type === "donut";
-    if (!isPieLike || !tab.nameKey) return translatedData;
+    if (!isPieLike || !tab.name_key) return translatedData;
     const filtered = translatedData.filter((row) => {
-      const v = row[tab.nameKey!];
+      const v = row[tab.name_key!];
       return v != null && v !== "null";
     });
-    console.log("[ChartCard] donut/pie cleanData:", { type: tab.type, nameKey: tab.nameKey, yKey: tab.yKey, total: translatedData.length, filtered: filtered.length, sample: filtered.slice(0, 2) });
+    console.log("[ChartCard] donut/pie cleanData:", { type: tab.type, name_key: tab.name_key, yKey: tab.y_key, total: translatedData.length, filtered: filtered.length, sample: filtered.slice(0, 2) });
     return filtered;
-  }, [translatedData, tab.type, tab.nameKey]);
+  }, [translatedData, tab.type, tab.name_key]);
 
   // Determine if a data point contains any of the highlighted stands.
   // Uses _stand_ids injected by the chart engine during aggregation.
@@ -343,10 +343,10 @@ export default function ChartCard({ tab }: ChartCardProps) {
               tick={{ fontSize: 12 }}
               label={isYearKey(effectiveXKey) ? yearAxisLabel : undefined}
             />
-            <YAxis {...yAxisProps(tab.yKey)} />
+            <YAxis {...yAxisProps(tab.y_key)} />
             <Tooltip content={<EuroTooltip />} />
             <Bar
-              dataKey={tab.yKey}
+              dataKey={tab.y_key}
               fill="#4CAF50"
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
               radius={[4, 4, 0, 0]}
@@ -369,20 +369,20 @@ export default function ChartCard({ tab }: ChartCardProps) {
     case "stacked_bar":
       // Pivot data: rows like [{year, type, income}] → [{year, "Clearcut": 120k, "Thinning": 34k}]
       // Operation type names are translated from Finnish → English for display.
-      // When yKey2 is present, creates a dual-stack chart: income above zero,
+      // When y_key2 is present, creates a dual-stack chart: income above zero,
       // costs below zero (cost values should be pre-negated via multiply: -1 in query_config).
       const pivotStacked = () => {
-        if (!tab.colorKey) return { pivoted: tab.data, stackKeys: [tab.yKey], dual: false };
+        if (!tab.color_key) return { pivoted: tab.data, stackKeys: [tab.y_key], dual: false };
 
         const colorValues = new Set<string>();
         const pivotMap = new Map<string, Record<string, unknown>>();
         // Collect _stand_ids per pivot key for cross-highlighting
         const standIdSets = new Map<string, Set<string>>();
-        const hasDual = !!(tab.yKey2); // income (yKey) + costs (yKey2)
+        const hasDual = !!(tab.y_key2); // income (yKey) + costs (y_key2)
 
         for (const row of tab.data) {
           const xVal = String(row[effectiveXKey ?? "x"] ?? "");
-          const rawColorVal = String(row[tab.colorKey ?? ""] ?? "");
+          const rawColorVal = String(row[tab.color_key ?? ""] ?? "");
           const displayColorVal = displayOp(rawColorVal, language);
           colorValues.add(displayColorVal);
           if (!pivotMap.has(xVal)) {
@@ -399,12 +399,12 @@ export default function ChartCard({ tab }: ChartCardProps) {
           if (hasDual) {
             // Dual-stack: income above zero, costs below zero
             entry[`${displayColorVal}_Income`] =
-              ((entry[`${displayColorVal}_Income`] as number) ?? 0) + (row[tab.yKey] as number ?? 0);
+              ((entry[`${displayColorVal}_Income`] as number) ?? 0) + (row[tab.y_key] as number ?? 0);
             entry[`${displayColorVal}_Cost`] =
-              ((entry[`${displayColorVal}_Cost`] as number) ?? 0) + (row[tab.yKey2!] as number ?? 0);
+              ((entry[`${displayColorVal}_Cost`] as number) ?? 0) + (row[tab.y_key2!] as number ?? 0);
           } else {
             // Single-stack (legacy)
-            entry[displayColorVal] = row[tab.yKey];
+            entry[displayColorVal] = row[tab.y_key];
           }
         }
         // Sort alphabetically for stable color assignment across recomputes
@@ -455,7 +455,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
               tick={{ fontSize: 12 }}
               label={isYearKey(effectiveXKey) ? yearAxisLabel : undefined}
             />
-            <YAxis {...yAxisProps(tab.yKey, tab.yKey2)} />
+            <YAxis {...yAxisProps(tab.y_key, tab.y_key2)} />
             <Tooltip content={<EuroTooltip />} />
             <Legend />
             {dual
@@ -528,7 +528,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
             <XAxis
               type="number"
-              {...yAxisProps(tab.yKey)}
+              {...yAxisProps(tab.y_key)}
             />
             <YAxis
               dataKey={effectiveXKey ?? undefined}
@@ -538,7 +538,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             />
             <Tooltip content={<EuroTooltip />} />
             <Bar
-              dataKey={tab.yKey}
+              dataKey={tab.y_key}
               fill="#FF9800"
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
               radius={[0, 4, 4, 0]}
@@ -564,12 +564,12 @@ export default function ChartCard({ tab }: ChartCardProps) {
           <PieChart>
             <Pie
               data={cleanData}
-              dataKey={tab.yKey}
-              nameKey={tab.nameKey ?? undefined}
+              dataKey={tab.y_key}
+              nameKey={tab.name_key ?? undefined}
               cx="50%"
               cy="50%"
               outerRadius={100}
-              label={({ name, value }) => formatPieLabel(tab.yKey, name ?? "", value as number)}
+              label={({ name, value }) => formatPieLabel(tab.y_key, name ?? "", value as number)}
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
 
             >
@@ -596,13 +596,13 @@ export default function ChartCard({ tab }: ChartCardProps) {
           <PieChart>
             <Pie
               data={cleanData}
-              dataKey={tab.yKey}
-              nameKey={tab.nameKey ?? undefined}
+              dataKey={tab.y_key}
+              nameKey={tab.name_key ?? undefined}
               cx="50%"
               cy="50%"
               innerRadius={50}
               outerRadius={100}
-              label={({ name, value }) => formatPieLabel(tab.yKey, name ?? "", value as number)}
+              label={({ name, value }) => formatPieLabel(tab.y_key, name ?? "", value as number)}
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
 
             >
@@ -641,11 +641,11 @@ export default function ChartCard({ tab }: ChartCardProps) {
               tick={{ fontSize: 12 }}
               label={isYearKey(effectiveXKey) ? yearAxisLabel : undefined}
             />
-            <YAxis {...yAxisProps(tab.yKey)} />
+            <YAxis {...yAxisProps(tab.y_key)} />
             <Tooltip content={<EuroTooltip />} />
             <Line
               type="monotone"
-              dataKey={tab.yKey}
+              dataKey={tab.y_key}
               stroke="#2196F3"
               strokeWidth={2}
               activeDot={{ r: 8 }}
@@ -655,10 +655,10 @@ export default function ChartCard({ tab }: ChartCardProps) {
                 return <circle cx={cx} cy={cy} r={4} fill={highlighted ? "#2196F3" : "#e5e5e5"} fillOpacity={highlighted ? 1 : 0.3} />;
               }}
             />
-            {tab.yKey2 && (
+            {tab.y_key2 && (
               <Line
                 type="monotone"
-                dataKey={tab.yKey2}
+                dataKey={tab.y_key2}
                 stroke="#FF9800"
                 strokeWidth={2}
                 activeDot={{ r: 6 }}
@@ -691,11 +691,11 @@ export default function ChartCard({ tab }: ChartCardProps) {
               tick={{ fontSize: 12 }}
               label={isYearKey(effectiveXKey) ? yearAxisLabel : undefined}
             />
-            <YAxis {...yAxisProps(tab.yKey)} />
+            <YAxis {...yAxisProps(tab.y_key)} />
             <Tooltip content={<EuroTooltip />} />
             <Area
               type="monotone"
-              dataKey={tab.yKey}
+              dataKey={tab.y_key}
               stroke="#4CAF50"
               fill="#4CAF50"
               fillOpacity={0.3}
@@ -730,10 +730,10 @@ export default function ChartCard({ tab }: ChartCardProps) {
               label={getAxisLabel(effectiveXKey) ?? (isYearKey(effectiveXKey) ? yearAxisLabel : undefined)}
             />
             <YAxis
-              dataKey={tab.yKey}
+              dataKey={tab.y_key}
               type="number"
-              name={tab.yKey}
-              {...yAxisProps(tab.yKey)}
+              name={tab.y_key}
+              {...yAxisProps(tab.y_key)}
             />
             <Tooltip cursor={{ strokeDasharray: "3 3" }} content={<EuroTooltip />} />
             <Scatter
@@ -760,11 +760,11 @@ export default function ChartCard({ tab }: ChartCardProps) {
           <RadarChart data={translatedData}>
             <PolarGrid />
             <PolarAngleAxis dataKey={effectiveXKey ?? undefined} tick={{ fontSize: 11 }} />
-            <PolarRadiusAxis {...yAxisProps(tab.yKey)} />
+            <PolarRadiusAxis {...yAxisProps(tab.y_key)} />
             <Tooltip content={<EuroTooltip />} />
             <Radar
               name={tab.title}
-              dataKey={tab.yKey}
+              dataKey={tab.y_key}
               stroke="#9C27B0"
               fill="#9C27B0"
               fillOpacity={0.3}
@@ -783,10 +783,10 @@ export default function ChartCard({ tab }: ChartCardProps) {
               tick={{ fontSize: 12 }}
               label={isYearKey(effectiveXKey) ? yearAxisLabel : undefined}
             />
-            <YAxis {...yAxisProps(tab.yKey, tab.yKey2)} />
+            <YAxis {...yAxisProps(tab.y_key, tab.y_key2)} />
             <Tooltip content={<EuroTooltip />} />
             <Legend />
-            <Bar dataKey={tab.yKey} fill="#4CAF50" radius={[4, 4, 0, 0]}
+            <Bar dataKey={tab.y_key} fill="#4CAF50" radius={[4, 4, 0, 0]}
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
             >
               {translatedData.map((entry, i) => (
@@ -798,7 +798,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             </Bar>
             <Line
               type="monotone"
-              dataKey={tab.yKey2 ?? tab.yKey}
+              dataKey={tab.y_key2 ?? tab.y_key}
               stroke="#2196F3"
               strokeWidth={2}
               dot={(props: Record<string, unknown>) => {
@@ -812,7 +812,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
       );
 
     case "waterfall": {
-      const wfData = buildWaterfallData(translatedData, tab.yKey, tab.waterfall_base);
+      const wfData = buildWaterfallData(translatedData, tab.y_key, tab.waterfall_base);
       return (
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={wfData}>
@@ -822,12 +822,12 @@ export default function ChartCard({ tab }: ChartCardProps) {
               tick={{ fontSize: 12 }}
               label={isYearKey(effectiveXKey) ? yearAxisLabel : undefined}
             />
-            <YAxis {...yAxisProps(tab.yKey)} />
+            <YAxis {...yAxisProps(tab.y_key)} />
             <Tooltip content={<EuroTooltip />} />
             {/* Invisible base bar — pushes each visible bar to start above previous cumulative */}
             <Bar dataKey="_wfBase" stackId="wf" fill="transparent" />
             <Bar
-              dataKey={tab.yKey}
+              dataKey={tab.y_key}
               stackId="wf"
               shape={<WaterfallBar />}
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}

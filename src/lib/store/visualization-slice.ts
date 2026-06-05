@@ -16,11 +16,11 @@ export interface ChartTab {
     | "composed"
     | "waterfall";
   data: Record<string, unknown>[];
-  xKey: string | null;
-  yKey: string;
-  yKey2: string | null;
-  nameKey: string | null;
-  colorKey: string | null;
+  x_key: string | null;
+  y_key: string;
+  y_key2: string | null;
+  name_key: string | null;
+  color_key: string | null;
   query_config?: Record<string, unknown> | null;
   computed_at?: string | null;
   /** Starting value for waterfall charts (e.g., current total volume). */
