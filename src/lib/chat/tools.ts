@@ -269,6 +269,21 @@ IMPORTANT: After adding operations, just confirm the result in one sentence. Do 
     {
       type: "function",
       function: {
+        name: "clear_plan",
+        description: `Delete ALL AI-generated operations from the plan at once. This is destructive and cannot be undone. Deletes every operation where created_by='ai' for this forest.
+
+⚠️ CRITICAL: You MUST ask the user for explicit confirmation before calling this tool. Never call clear_plan without the user's clear, unambiguous consent. The user must say something like "yes, clear everything" or "delete all operations" — do not infer consent from vague statements.
+
+After clearing, the plan is empty and the user will need to generate a new one or add operations manually.`,
+        parameters: {
+          type: "object",
+          properties: {},
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
         name: "check_harvest_sustainability",
         description: "Compare total harvest volume against annual growth for a specific year or the entire plan period. Returns sustainability assessment.",
         parameters: {

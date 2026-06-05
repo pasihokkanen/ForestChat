@@ -91,6 +91,24 @@ export function displayDrainage(sysValue: string, lang: Language): string {
   return lookup(DRAINAGE_MAP, sysValue, lang);
 }
 
+/** Try all category translators — used by charts where we don't know the column schema. */
+export function translateChartCategory(sysValue: string, lang: Language): string {
+  if (!sysValue) return sysValue;
+  // Check each map in order; first hit wins. No namespace overlaps.
+  const op = OP_MAP[sysValue]?.[lang];
+  if (op) return op;
+  const sp = SPECIES_MAP[sysValue]?.[lang];
+  if (sp) return sp;
+  const dc = DEV_CLASS_MAP[sysValue]?.[lang];
+  if (dc) return dc;
+  const st = SITE_TYPE_MAP[sysValue]?.[lang];
+  if (st) return st;
+  const dr = DRAINAGE_MAP[sysValue]?.[lang];
+  if (dr) return dr;
+  // Fallback: capitalize system value
+  return sysValue.charAt(0).toUpperCase() + sysValue.slice(1).replace(/_/g, " ");
+}
+
 // ── App name ──
 export function appName(lang: Language): string {
   return lang === "fi" ? "MetsäChat" : "ForestChat";
@@ -290,6 +308,14 @@ export function serverMsg(key: string, lang: Language, ...args: string[]): strin
     operationsUpdated: {
       en: "✅ Updated {0} operation(s) from {1} year(s), {2} type(s){3}.",
       fi: "✅ Päivitetty {0} toimenpidettä, {1} vuotta, {2} tyyppiä{3}.",
+    },
+    planCleared: {
+      en: "✅ Cleared the entire plan — {0} AI-generated operation(s) deleted.",
+      fi: "✅ Koko suunnitelma tyhjennetty — {0} tekoälyn luomaa toimenpidettä poistettu.",
+    },
+    planClearNone: {
+      en: "ℹ️ No AI-generated operations to clear — the plan is already empty.",
+      fi: "ℹ️ Ei tyhjennettävää — suunnitelmassa ei ole tekoälyn luomia toimenpiteitä.",
     },
     noMatchingOperations: {
       en: "No matching operations found.",

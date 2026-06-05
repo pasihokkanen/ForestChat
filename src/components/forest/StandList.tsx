@@ -155,6 +155,17 @@ export default function StandList({ map }: StandListProps) {
   // Apply AI-pushed filters
   useEffect(() => {
     if (aiStandFilters) {
+      // Reset ALL filters first — each show_stands payload is a fresh set
+      setSpeciesFilter(new Set());
+      setDevClassFilter(new Set());
+      setSiteTypeFilter(new Set());
+      setAgeMin(null);
+      setAgeMax(null);
+      setAreaMin(null);
+      setAreaMax(null);
+      setVolumeMin(null);
+      setVolumeMax(null);
+
       const f = aiStandFilters as Record<string, unknown>;
       if (Array.isArray(f.species)) setSpeciesFilter(new Set(f.species as string[]));
       if (Array.isArray(f.development_classes)) setDevClassFilter(new Set(f.development_classes as string[]));

@@ -83,6 +83,10 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
         created_at: new Date().toISOString(),
       });
 
+      // Clear AI-pushed filters from previous prompts — each message starts fresh
+      useForestStore.getState().setAiStandFilters(null);
+      useForestStore.getState().setAiOperationFilters(null);
+
       setStreaming(true);
       clearStream();
       setError(null);

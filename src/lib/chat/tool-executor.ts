@@ -6,7 +6,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ToolDefinition } from "./tools";
 import { generatePlan } from "../ai/generate-plan";
 import { getStand, searchStands, planSummary, queryOperations } from "../ai/query-tools";
-import { addOperation, removeOperations, batchUpdateOperations } from "../ai/edit-tools";
+import { addOperation, removeOperations, batchUpdateOperations, clearPlan } from "../ai/edit-tools";
 import { checkSustainability, validatePlan } from "../ai/validation-tools";
 import { recomputeChartData } from "../ai/chart-engine";
 import type { ChartQueryConfig, AnyQueryConfig } from "../ai/chart-engine";
@@ -144,6 +144,9 @@ const toolHandlers: Record<string, ToolHandler> = {
     const typeFilter = args.type as string | undefined;
     return removeOperations(ctx.supabase, ctx.forestId, rawIds, year, typeFilter, (ctx.language ?? "en") as "en" | "fi");
   },
+
+  clear_plan: async (_args, ctx) =>
+    clearPlan(ctx.supabase, ctx.forestId, (ctx.language ?? "en") as "en" | "fi"),
 
   check_harvest_sustainability: async (args, ctx) => checkSustainability(ctx.supabase, ctx.forestId, args.year as number | undefined),
   validate_plan: async (_args, ctx) => validatePlan(ctx.supabase, ctx.forestId),

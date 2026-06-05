@@ -122,6 +122,13 @@ export default function OperationList({ map }: OperationListProps) {
 
   useEffect(() => {
     if (aiOperationFilters) {
+      // Reset ALL filters first — each show_operations payload is a fresh set
+      setYearFrom(null);
+      setYearTo(null);
+      setTypeFilter(new Set());
+      setStandFilter("");
+      setSpeciesFilter(new Set());
+
       const f = aiOperationFilters as Record<string, unknown>;
       if (Array.isArray(f.years) && f.years.length > 0) {
         const yrs = f.years as number[];

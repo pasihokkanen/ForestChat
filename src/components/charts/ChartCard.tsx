@@ -29,7 +29,7 @@ import {
 } from "recharts";
 import type { ChartTab } from "@/lib/store/visualization-slice";
 import { useForestStore } from "@/lib/store";
-import { displayOp } from "@/lib/i18n";
+import { translateChartCategory } from "@/lib/i18n";
 
 // Format number with space as thousand separator (Finnish/SI convention: 10 000)
 function formatNumber(value: number): string {
@@ -271,8 +271,8 @@ export default function ChartCard({ tab }: ChartCardProps) {
   // Prevents all years collapsing into one bar when AI omits x_key.
   const effectiveXKey = tab.x_key ?? (tab.data?.[0] && "year" in tab.data[0] ? "year" : null);
 
-  // Translate operation type names in data for display (Finnish → English).
-  // Applies to charts where xKey or name_key corresponds to operation types.
+  // Translate category values in data for display (species, dev class, site type, operations).
+  // Applies to charts where xKey or name_key corresponds to any categorized column.
   const translatedData = React.useMemo(() => {
     if (!tab.data?.length) return tab.data;
     const typeKeys = [effectiveXKey, tab.name_key, tab.color_key].filter(Boolean) as string[];
@@ -281,13 +281,13 @@ export default function ChartCard({ tab }: ChartCardProps) {
       const translated: Record<string, unknown> = { ...row };
       for (const key of typeKeys) {
         if (row[key] && typeof row[key] === "string") {
-          const en = displayOp(row[key] as string, language);
-          if (en !== row[key]) translated[key] = en;
+          const display = translateChartCategory(row[key] as string, language);
+          if (display !== row[key]) translated[key] = display;
         }
       }
       return translated;
     });
-  }, [tab.data, effectiveXKey, tab.name_key, tab.color_key]);
+  }, [tab.data, effectiveXKey, tab.name_key, tab.color_key, language]);
 
   // Filter out rows with null/undefined/"null" name_key values for pie/donut charts.
   // Recharts Pie fails to render slices when name_key resolves to null.
@@ -356,8 +356,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
                 return (
                   <Cell
                     key={`cell-${index}`}
-                    fill={highlighted ? CHART_COLORS[index % CHART_COLORS.length] : "#e5e5e5"}
-                    fillOpacity={highlighted ? 1 : 0.3}
+                    {...(highlighted ? {} : { fill: "#e5e5e5", fillOpacity: 0.3 })}
                   />
                 );
               })}
@@ -383,7 +382,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
         for (const row of tab.data) {
           const xVal = String(row[effectiveXKey ?? "x"] ?? "");
           const rawColorVal = String(row[tab.color_key ?? ""] ?? "");
-          const displayColorVal = displayOp(rawColorVal, language);
+          const displayColorVal = translateChartCategory(rawColorVal, language);
           colorValues.add(displayColorVal);
           if (!pivotMap.has(xVal)) {
             const entry: Record<string, unknown> = {};
@@ -548,8 +547,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
                 return (
                   <Cell
                     key={`cell-${index}`}
-                    fill={highlighted ? CHART_COLORS[index % CHART_COLORS.length] : "#e5e5e5"}
-                    fillOpacity={highlighted ? 1 : 0.3}
+                    {...(highlighted ? {} : { fill: "#e5e5e5", fillOpacity: 0.3 })}
                   />
                 );
               })}

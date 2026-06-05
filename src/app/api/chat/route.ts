@@ -426,6 +426,7 @@ export async function POST(request: NextRequest) {
       // After executing one of these, the AI should not continue the loop — the UI is
       // already updated and another iteration risks creating duplicate chart instances.
       const TERMINAL_TOOLS = new Set([
+        "clear_plan",
         "create_chart",
         "select_stand",
         "show_stands",

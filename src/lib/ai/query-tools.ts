@@ -226,9 +226,10 @@ export async function searchStands(
     if (stands.length > 20) {
       const totalArea = stands.reduce((s, c) => s + (c.area_ha ?? 0), 0);
       const totalVolume = stands.reduce((s, c) => s + (c.volume_m3 ?? 0), 0);
+      const idList = stands.map(s => s.stand_id).join(", ");
       return {
         success: true,
-        result: `Found ${stands.length} stands (total area: ${totalArea.toFixed(1)} ha, total volume: ${Math.round(totalVolume).toLocaleString()} m³). Use show_stands to display these in the Stands tab.`,
+        result: `Found ${stands.length} stands (total area: ${totalArea.toFixed(1)} ha, total volume: ${Math.round(totalVolume).toLocaleString()} m³). Stand IDs: ${idList}. Use show_stands to display these in the Stands tab.`,
         data: stands as unknown as Record<string, unknown>[],
       };
     }

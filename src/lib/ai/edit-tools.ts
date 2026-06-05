@@ -58,7 +58,13 @@ export async function addOperation(
   const standId = args.stand_id as string;
   const year = args.year as number;
   const type = normalizeType(args.type as string);
-  const removalPct = (args.removal_pct as number) ?? 100;
+  // Type-aware removal percentage defaults (silvicultural ops get 0)
+  const removalPct = (args.removal_pct as number) ?? ({
+    clear_cut: 100,
+    thinning: 28,
+    first_thinning: 25,
+    selection_cutting: 50,
+  } as Record<string, number>)[type] ?? 0;
 
   if (!standId || !year || !type) {
     return { success: false, result: "", error: "Required: stand_id, year, type" };
@@ -383,4 +389,43 @@ export async function batchUpdateOperations(
       error: err instanceof Error ? err.message : "Failed to batch update operations",
     };
   }
+}
+
+/** Delete ALL AI-created operations for a forest. Uses the same pattern as generate_plan. */
+export async function clearPlan(
+  supabase: SupabaseClient,
+  forestId: string,
+  language: Language = "en",
+): Promise<{ success: boolean; result: string; error?: string }> {
+  // Count operations first so we can report what was deleted
+  const { count, error: countErr } = await supabase
+    .from("operations")
+    .select("*", { count: "exact", head: true })
+    .eq("forest_id", forestId)
+    .eq("created_by", "ai");
+
+  if (countErr) {
+    return { success: false, result: "", error: countErr.message };
+  }
+
+  if (!count || count === 0) {
+    return {
+      success: true,
+      result: serverMsg("planClearNone", language),
+    };
+  }
+
+  // Same delete pattern as generate_plan.ts line 118
+  const { error } = await supabase
+    .from("operations")
+    .delete()
+    .eq("forest_id", forestId)
+    .eq("created_by", "ai");
+
+  if (error) return { success: false, result: "", error: error.message };
+
+  return {
+    success: true,
+    result: serverMsg("planCleared", language, String(count)),
+  };
 }
