@@ -235,6 +235,23 @@ const toolHandlers: Record<string, ToolHandler> = {
     let ids: string[];
     if (stand_ids) {
       ids = Array.isArray(stand_ids) ? stand_ids.map(String) : [String(stand_ids)];
+      // Validate — check which IDs actually exist in the DB
+      const { data: existing } = await ctx.supabase
+        .from("compartments")
+        .select("stand_id")
+        .eq("forest_id", ctx.forestId)
+        .in("stand_id", ids);
+      const existingIds = new Set(((existing as Array<{ stand_id: string }>) ?? []).map(r => r.stand_id));
+      const missing = ids.filter(id => !existingIds.has(id));
+      if (missing.length > 0) {
+        const lang = (ctx.language ?? "en") as "en" | "fi";
+        if (missing.length === ids.length) {
+          return { success: false, result: "", error: serverMsg("standsNotFound", lang, missing.join(", ")) };
+        }
+        // Partial match — warn about missing but select the rest
+        ids = ids.filter(id => existingIds.has(id));
+        if (ids.length === 0) return { success: false, result: "", error: serverMsg("standsNotFound", lang, missing.join(", ")) };
+      }
     } else if (age_min !== undefined || age_max !== undefined || species || development_classes || site_types || area_min !== undefined || area_max !== undefined || volume_min !== undefined || volume_max !== undefined || basal_area_min !== undefined || basal_area_max !== undefined || height_min !== undefined || height_max !== undefined || diameter_min !== undefined || diameter_max !== undefined || growth_min !== undefined || growth_max !== undefined) {
       const result = await searchStands(ctx.supabase, ctx.forestId, {
         age_min: age_min as number | undefined,

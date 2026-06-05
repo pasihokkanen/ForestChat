@@ -255,6 +255,10 @@ export function serverMsg(key: string, lang: Language, ...args: string[]): strin
       en: "✅ {0} stands selected on map ({1}).",
       fi: "✅ {0} kuviota valittu kartalla ({1}).",
     },
+    standsNotFound: {
+      en: "❌ Stand(s) not found: {0}",
+      fi: "❌ Kuviota ei löydy: {0}",
+    },
     standsShown: {
       en: "✅ Stand filters applied. Results shown in the Stands tab.",
       fi: "✅ Kuviosuodattimet asetettu. Tulokset näkyvät Kuviot-välilehdellä.",

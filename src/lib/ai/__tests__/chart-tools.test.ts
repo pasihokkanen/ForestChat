@@ -16,6 +16,11 @@ function makeCtx(overrides: Partial<Pick<ToolContext, "sendSse" | "supabase">> =
 
 /** Basic supabase mock for legacy (data-mode) chart tools — supports upsert, delete, select. */
 function makeBasicSupabaseMock() {
+  function chain(data: Record<string, unknown>[] = []) {
+    const node: Record<string, unknown> = {};
+    node.then = (resolve: (v: unknown) => void) => resolve({ data, error: null });
+    return node;
+  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return { from: vi.fn().mockReturnValue({
     upsert: vi.fn().mockResolvedValue({ error: null }),
@@ -26,6 +31,7 @@ function makeBasicSupabaseMock() {
     }),
     select: vi.fn().mockReturnValue({
       eq: vi.fn().mockReturnValue({
+        in: vi.fn().mockImplementation((_field: string, ids: string[]) => chain(ids.map(id => ({ stand_id: id })))),
         order: vi.fn().mockResolvedValue({ data: [], error: null }),
       }),
     }),
