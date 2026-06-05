@@ -443,6 +443,10 @@ export async function POST(request: NextRequest) {
       let lastToolResult: string | undefined;  // last successful tool result text
       const chartIdsCreatedThisTurn = new Set<string>();  // guard against duplicate create_chart calls
 
+      // Guard against leading-whitespace text chunks that some models (DeepSeek)
+      // emit before tool calls. These produce empty rows at the top of the answer.
+      let seenNonWhitespaceText = false;
+
       for (let iteration = 0; iteration < maxIterations; iteration++) {
         let iterationText = "";
         const toolResults: Array<{ role: string; tool_call_id: string; content: string }> = [];
@@ -458,6 +462,20 @@ export async function POST(request: NextRequest) {
             env.openRouterApiKey
           )) {
           if (chunk.type === "text") {
+            // Skip leading whitespace-only chunks — models like DeepSeek
+            // sometimes emit \n\n before actual text or tool calls.
+            // When the first real chunk has embedded leading whitespace
+            // (e.g. "\n\nHello"), strip it so the SSE stream is clean too.
+            if (!seenNonWhitespaceText) {
+              const trimmed = chunk.content.replace(/^\s+/, "");
+              if (!trimmed) continue; // pure whitespace, skip
+              seenNonWhitespaceText = true;
+              iterationText += trimmed;
+              finalContent += trimmed;
+              send({ event: "chunk", data: { content: trimmed } });
+              continue;
+            }
+            seenNonWhitespaceText = true;
             iterationText += chunk.content;
             finalContent += chunk.content;
             send({ event: "chunk", data: { content: chunk.content } });
@@ -527,6 +545,11 @@ export async function POST(request: NextRequest) {
           openRouterMessages.push(tr);
         }
       }
+
+      // Strip any remaining leading whitespace from model output (belt-and-suspenders
+      // to the streaming guard above — catches edge cases like whitespace that slips
+      // through due to multi-iteration accumulation).
+      finalContent = finalContent.replace(/^\n+/, "");
 
       // When model returns no text after tool execution (DeepSeek quirk),
       // generate a fallback summary so the user isn't left with empty output.

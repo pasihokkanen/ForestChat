@@ -38,6 +38,13 @@ function formatNumber(value: number): string {
     .replace(/\B(?=(\d{3})+(?!\d))/g, "\u00A0"); // non-breaking space
 }
 
+// Format area (ha) with one decimal — area values are typically small (0.5–50 ha)
+function formatArea(value: number): string {
+  return Math.abs(value)
+    .toFixed(1)
+    .replace(/\B(?=(\d{3})+(?!\d))/g, "\u00A0");
+}
+
 // Backwards-compatible alias for euro formatting
 function formatEuro(value: number): string {
   const formatted = formatNumber(value);
@@ -48,7 +55,7 @@ function formatEuro(value: number): string {
 function formatPieLabel(yKey: string | null | undefined, name: string, value: number): string {
   if (isEuroKey(yKey)) return `${name}: ${formatEuro(value)} €`;
   if (isVolumeKey(yKey)) return `${name}: ${formatNumber(value)} m³`;
-  if (isAreaKey(yKey)) return `${name}: ${formatNumber(value)} ha`;
+  if (isAreaKey(yKey)) return `${name}: ${formatArea(value)} ha`;
   return `${name}: ${Number.isInteger(value) ? value : value.toFixed(1)}`;
 }
 
@@ -130,7 +137,7 @@ function EuroTooltip({ active, payload, label }: Record<string, unknown>) {
                 : isVolumeKey(name) || isVolumeKey(entry.dataKey as string)
                   ? `${formatNumber(val)} m³`
                   : isAreaKey(name) || isAreaKey(entry.dataKey as string)
-                    ? `${formatNumber(val)} ha`
+                    ? `${formatArea(val)} ha`
                     : isNumericKey(name) || isNumericKey(entry.dataKey as string)
                       ? formatNumber(val)
                       : typeof val === "number" && !Number.isInteger(val)
@@ -159,7 +166,8 @@ function yAxisProps(yKey: string | null | undefined, y_key2?: string | null) {
     tick: { fontSize: 12 as const },
     tickFormatter: (v: number) => {
       if (anyEuro) return formatEuro(v);
-      if (anyNumeric || isVolumeKey(yKey) || isAreaKey(yKey)) return formatNumber(v);
+      if (isAreaKey(yKey) || isAreaKey(y_key2)) return formatArea(v);
+      if (anyNumeric || isVolumeKey(yKey) || isVolumeKey(y_key2)) return formatNumber(v);
       if (typeof v === "number" && !Number.isInteger(v)) return v.toFixed(1);
       return String(v);
     },
