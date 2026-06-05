@@ -162,7 +162,7 @@ export async function searchStands(
   supabase: SupabaseClient,
   forestId: string,
   filters: SearchStandsFilter
-): Promise<{ success: boolean; result: string; error?: string }> {
+): Promise<{ success: boolean; result: string; error?: string; data?: Record<string, unknown>[] }> {
   try {
     let query = supabase
       .from("compartments")
