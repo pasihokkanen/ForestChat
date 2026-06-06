@@ -284,7 +284,7 @@ Format:   JSON ("format": "json")
 
 #### Caching
 
-- Fetch the latest 4 weeks of prices at most once per 24 hours
+- Fetch the latest week of prices at most once per 24 hours
 - Store in `timber_prices` table (`price_data` JSONB with full response, `fetched_at`, `region`)
 - On plan generation: check cache → if stale, fetch from Luke → cache → use
 - Fallback chain: fresh cache (≤24h) → stale cache (≤7d) → live fetch (5s timeout) → hardcoded `PRICES` in `config.ts`
@@ -296,7 +296,7 @@ Format:   JSON ("format": "json")
 2. Determine Luke region code from forest.property_id prefix
 3. Check timber_prices cache for this region, fresh within 24h
 4a. If fresh: parse cached JSON, extract tukki/kuitu prices per species/tier
-4b. If stale: POST to Luke API with JSON query for latest 4 weeks, cache response, parse
+4b. If stale: POST to Luke API with JSON query for latest week, cache response, parse
 5. Pass prices into classifyAndValueStands() → calculateValue()
 6. Fallback: if Luke is unreachable, use hardcoded PRICES from config.ts
 ```
@@ -434,7 +434,7 @@ Use this in `classify.ts` `getSpeciesData()` to normalize any non-standard speci
 **Files:** New file `src/lib/ai/price-fetcher.ts`
 **Effort:** ~3h
 
-- Implement `fetchLukePrices(regionCode)`: POST to Luke PxWeb API with JSON query for latest 4 weeks
+- Implement `fetchLukePrices(regionCode)`: POST to Luke PxWeb API with JSON query for the latest week
   - Endpoint: `https://statdb.luke.fi:443/PXWeb/api/v1/fi/LUKE/met/metryv/0100_metryv.px`
   - Query variables: W (week), MPKH (region), HAKT (operation type), PTL (wood type)
   - Compute current week dynamically (e.g., `2026W22`) — do NOT hardcode. Use `new Date()` to calculate ISO week number and year.
