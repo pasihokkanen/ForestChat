@@ -145,87 +145,165 @@ Present the goals clearly: maximum_growth_aggressive, maximum_growth_balanced, c
 Do NOT pick a default — the user must choose.
 ```
 
-### 4. Goal-Driven Scheduling Engine
+### 4. Year-by-Year Scheduling Engine
 
-**File:** `src/lib/ai/schedule.ts` — complete rewrite required
+**Files:** `src/lib/ai/schedule.ts` — complete rewrite; uses `src/lib/ai/forest-state.ts`
 
-The scheduler becomes a strategy-pattern engine. Core structure:
+The scheduler becomes an iterative, growth-aware engine. Instead of placing all operations at once based on static urgency, it walks year-by-year through the plan period, simulating stand growth between each step.
+
+#### Core Loop
+
+```
+state ← initial compartments (year 0, today's data from DB)
+pool ← all classified operations (from classify.ts, goal-aware per T11)
+carryover ← []  // ops from previous year that didn't fit volume cap
+
+for year = startYear to endYear:
+    1. DEDUCE which pool operations are due this year based on current simulated state:
+       - Clearcut due? → simulated age ≥ goal-adjusted optMin
+       - Thinning due? → simulated BA ≥ THINNING_BA threshold
+       - Tending due? → simulated age within tending window
+    2. MERGE due ops + carryover → this year's candidate pool.
+       Each operation tracks `dueYear` — the first year it became due.
+    3. SELECT: strategy picks operations from candidate pool, respecting this year's volume cap
+       (volumeCap × annualGrowthM3). Candidates are priority-ordered before selection (see below).
+    4. APPLY selected ops to mutable stand state:
+       - Harvest: reduce volume, reduce BA (proportionally for thinning), reset age on clearcut
+       - Regeneration: mark stand cleared = false (growth resumes next year)
+    5. SIMULATE one year of growth on ALL stands:
+       - growthM3 = getGrowthRate(site, soil, species, age, BA, devClass) × areaHa
+       - volume += growthM3; age += 1
+    6. CARRYOVER: candidate pool minus selected ops → pushed to next year's carryover
+    7. CHAIN regeneration: for each harvest that fired this year, schedule regeneration ops
+       (site_prep, planting, tending) delayed by regenDelayYears() per goal
+```
+
+#### Simulation Engine
+
+The existing `estimateForestState()` in `forest-state.ts` already handles year-by-year growth + operation application. It:
+- Computes `getGrowthRate()` per stand per year (VMI13 base rate × species × age × density multipliers)
+- Applies harvest removal (100% for clearcut, proportional for thinning/selection_cutting, reduces BA)
+- Handles regeneration (resets age/volume/BA to 0, un-clears the stand so growth resumes next year)
+- Returns `ForestStateTimeline` — per-stand, per-year snapshots (volumeM3, ageYears, growthM3, harvestM3, operationType)
+
+The scheduler wraps this in its own year loop to make strategic decisions between simulation steps. It uses the same `getGrowthRate()` and mutates state in-place rather than calling `estimateForestState()` with a pre-baked operation list — this avoids the circular dependency (need ops to simulate, need sim to decide ops).
+
+#### Candidate Priority Ordering
+
+Before `selectOperations()` chooses which candidates to execute this year, the candidate pool is sorted by a universal priority rule that applies across all goals:
+
+1. **Primary sort — waiting time (dueYear):** Operations that became due earlier get higher priority. An operation that was due in year 1 but couldn't fit due to volume cap has waited 3 years by year 4 and must be prioritized over an operation that just became due in year 4. This prevents starvation of operations on larger stands that keep getting pushed out.
+
+2. **Secondary sort — goal-specific metric (tiebreaker for same dueYear):** When multiple operations became due in the same year (including all initially classified operations at year 0), the goal-specific metric decides order:
+
+| Goal | Tiebreaker metric | Rationale |
+|------|-------------------|-----------|
+| `maximum_growth_aggressive` | Volume descending | Biggest harvests first — maximize throughput |
+| `maximum_growth_balanced` | Thinnings first, then volume descending | Thinnings use less cap room, then big clearcuts |
+| `carbon_storage` | Selection cuttings first, then age descending (oldest first) | Preserve stock; harvest oldest if needed |
+| `biodiversity` | Mixed species priority, then age descending | Non-monoculture stands first; oldest next |
+| `balanced` | Age descending (most overdue first) | Standard silvicultural practice |
+
+3. **Tertiary sort — stand wishes (`_priority_boost`):** Stands with `accelerate_harvest` wish get a ×2.0 multiplier applied to their sort position (after step 2), pushing them ahead of same-dueYear peers. Stands with `delay_harvest` (year cap) are excluded from candidates until the cap year passes — they never appear in the pool before then.
+
+**Selection within priority order:** After sorting, the strategy's `selectOperations()` walks the sorted list and accepts operations until the volume cap is exhausted. This means the priority ordering is the *input* to `selectOperations()`, and the strategy's role is to apply any additional filtering or quota rules (e.g., `maximum_growth_balanced` may still refuse a clearcut that fits the cap if thinnings haven't been exhausted).
+
+#### SchedulingStrategy Interface
 
 ```typescript
 interface SchedulingStrategy {
   name: string;
-  /** Priority score for a final harvest on this stand (higher = sooner). */
-  finalHarvestUrgency(stand: StandData, op: PlannedOperation): number;
-  /** Spread pattern: how many m³ of harvest removal are allowed per year.
-   *  Expressed as a multiplier of total annual growth — the scheduler computes
-   *  `maxRemovalM3PerYear` once and fills year slots until the volume budget is exhausted.
-   *  - 3.0× = maximum_growth_aggressive (front-load, no practical cap)
-   *  - 1.25× = maximum_growth_balanced (capped growth)
-   *  - 1.0× = balanced (harvest = growth, sustainable)
-   *  - 0.75× = biodiversity (building stock slowly)
-   *  - 0.5× = carbon_storage (building stock aggressively) */
-  spreadConfig(annualGrowthM3: number): { maxRemovalM3PerYear: number; interleave: "even-first" | "round-robin" | "front-loaded" };
-  /** Whether to consider splitting a stand when its single-year income would exceed the 
-   *  target (maximum_growth_balanced: >150% avg; others: never). Returns max parts (2, 3, or 4) or 0=don't split. */
-  shouldSplit(standIncome: number, targetYearlyIncome: number): number;
-  /** Thinning priority relative to final harvests. Controls which operations get first claim
-   *  on year slots during scheduling:
-   *  - "before_harvests": Place all thinnings into year slots FIRST, then fill remaining
-   *    capacity with final harvests. Used by maximum_growth_balanced because thinnings produce income
-   *    with less volume shock — smoother annual harvest curve.
-   *  - "after_harvests": Place final harvests first, then fill gaps with thinnings.
-   *    Used by carbon_storage where harvests are rare and thinnings are supplementary.
-   *  - "interleaved": Round-robin placement — one thinning, one harvest, one thinning, etc.
-   *    Used by maximum_growth_aggressive and biodiversity. */
-  thinningPriority(): "before_harvests" | "after_harvests" | "interleaved";
-  /** Post-harvest regeneration delay (years). */
-  regenerationDelay(): number;
-  /** Species preference for replanting. */
+  /** Per-year harvest volume cap, as a multiplier of the property's total annual growth (m³).
+   *  The scheduler multiplies this by the total annual growth to get maxRemovalM3PerYear. */
+  volumeCapMultiplier(): number;
+  /** Select operations to execute this year from the candidate pool.
+   *  Candidates arrive PRE-SORTED by priority (dueYear → goal metric → wishes).
+   *  The strategy walks the sorted list and accepts ops until volume cap is exhausted,
+   *  applying any additional filtering or quota rules (e.g., thinnings-first quota).
+   *  @param year           Current plan year
+   *  @param standStates    Current simulated state per stand (age, volume, BA, development class)
+   *  @param candidates     Operations due this year + carryover from prior years (pre-sorted)
+   *  @param volumeCapM3    Maximum m³ of harvest removal allowed this year
+   *  @param annualGrowthM3 Property's total annual growth (reference for relative sizing)
+   *  @returns              { scheduled: ops to execute this year, remaining: ops pushed to next year } */
+  selectOperations(
+    year: number,
+    standStates: Map<string, StandYearState>,
+    candidates: PlannedOperation[],
+    volumeCapM3: number,
+    annualGrowthM3: number
+  ): { scheduled: PlannedOperation[]; remaining: PlannedOperation[] };
+  /** Whether to split a stand's harvest when its single-year volume would exceed the cap.
+   *  Returns max parts (2, 3, or 4), or 0 = never split. */
+  shouldSplit(standHarvestVolumeM3: number, volumeCapM3: number): number;
+  /** Years to wait after clearcut before regeneration (site_prep + planting). */
+  regenDelayYears(): number;
+  /** Species preference for replanting after clearcut. */
   regenerationSpecies(stand: StandData): "spruce" | "pine" | "mixed";
 }
 ```
 
-#### Strategy implementations:
+#### Strategy Implementations
 
 **`maximum_growth_aggressive`:**
-- `finalHarvestUrgency`: `-(ageYears - optMax)` — standard urgency, higher = sooner
-- `spreadConfig`: `{ maxRemovalM3PerYear: annualGrowthM3 * 3.0, interleave: "front-loaded" }` — 3× annual growth cap. Effectively no practical limit for most properties — all regeneration-ready stands get harvested as fast as possible.
-- `shouldSplit`: `() => 0` — never split; the goal is to regenerate ASAP
-- `thinningPriority`: `"interleaved"` — thinnings fill gaps between final harvests
-- `regenerationDelay`: `0` — replant same year
-- `regenerationSpecies`: site-appropriate (spruce on mesic+, pine on sub-xeric)
+- `volumeCapMultiplier()`: `3.0` — effectively no practical limit; all ready stands regenerate immediately
+- `selectOperations()`: Sort candidates by volume descending (biggest harvests first). Fill the year slot greedily until volume cap hit. All harvest types are equal priority — the goal is maximum throughput. Thinnings and clearcuts compete on equal footing.
+- `shouldSplit()`: `() => 0` — never split; the goal is to regenerate ASAP
+- `regenDelayYears()`: `0` — replant same year (growth resumes next season)
+- `regenerationSpecies()`: site-appropriate (spruce on mesic+, pine on sub-xeric)
 
 **`maximum_growth_balanced`:**
-- `finalHarvestUrgency`: `-(ageYears - optMax)` — same urgency as maximum_growth_aggressive (front-load regeneration), but constrained by the volume cap
-- `spreadConfig`: `{ maxRemovalM3PerYear: annualGrowthM3 * 1.25, interleave: "front-loaded" }` — capped at 125% of annual growth. Harvests spill into later years when the cap is hit.
-- `shouldSplit`: if a single stand's removal would exceed `maxRemovalM3PerYear`, return smallest N (2, 3, or 4) that brings each part under the cap; otherwise 0
-- `thinningPriority`: `"before_harvests"` — place thinnings first since they produce less volume per €, leaving more cap room for clearcuts
-- `regenerationDelay`: `1` — replant next year to spread costs
-- `regenerationSpecies`: site-appropriate
+- `volumeCapMultiplier()`: `1.25` — capped at 125% of annual growth. Harvests spill into later years.
+- `selectOperations()`: **Two-phase selection.** Phase 1: select thinnings first (lower volume per €, smoother curve). They consume volume cap from the bottom. Phase 2: fill remaining cap with clearcuts, largest volume first. If a single clearcut's volume exceeds remaining cap, try `shouldSplit()`; if split fails, push the whole clearcut to next year. **Priority inversion:** when total harvest volume already exceeds annual growth (unsustainable baseline), thinnings get absolute priority — clearcuts only if cap room remains after all thinnings are placed.
+- `shouldSplit()`: if stand harvest volume > `volumeCapM3`, try smallest N (2, 3, or 4) that brings each part under the cap. Each part must be ≥ 1.5 ha.
+- `regenDelayYears()`: `1` — replant next year to spread costs across years
+- `regenerationSpecies()`: site-appropriate
 
 **`carbon_storage`:**
-- `finalHarvestUrgency`: `-(ageYears - (optMax + 15))` — only harvest when 15 years past optimal max
-- `spreadConfig`: `{ maxRemovalM3PerYear: annualGrowthM3 * 0.5, interleave: "round-robin" }` — harvest only 50% of annual growth, building standing stock over time
-- `shouldSplit`: `() => 0` — avoid clearcuts entirely where possible
-- `thinningPriority`: `"after_harvests"`
-- `regenerationDelay`: `2` — allow natural seeding
-- `regenerationSpecies`: spruce-preference (higher carbon density)
+- `volumeCapMultiplier()`: `0.5` — harvest only 50% of growth, building standing stock
+- `selectOperations()`: Selection cuttings first (50% removal, preserves carbon stock). Only schedule clearcuts when a stand is ≥ optMax + 15 years (significantly over-mature). Thinnings have lowest priority — the goal is to keep volume in the forest. Remaining cap room after all selection cuts goes to thinnings.
+- `shouldSplit()`: `() => 0` — avoid clearcuts entirely where possible
+- `regenDelayYears()`: `2` — allow natural seeding before planting
+- `regenerationSpecies()`: `"spruce"` — higher carbon density
 
 **`biodiversity`:**
-- `finalHarvestUrgency`: `-(ageYears - (optMax + 10))` — extended rotation
-- `spreadConfig`: `{ maxRemovalM3PerYear: annualGrowthM3 * 0.75, interleave: "round-robin" }` — harvest 75% of annual growth, slowly building stock
-- `shouldSplit`: `() => 0` — keep stands intact for habitat continuity
-- `thinningPriority`: `"interleaved"`
-- `regenerationDelay`: `2` — favor natural regeneration cues
-- `regenerationSpecies`: `"mixed"` — mix of spruce, pine, birch based on site
+- `volumeCapMultiplier()`: `0.75` — harvest 75% of growth, slowly building stock
+- `selectOperations()`: Mixed-species regeneration drives selection. Avoid clearcuts on stands flagged as waterside or steep slope (these stands are skipped by classification per T11 — they never appear as candidates). Selection cutting preferred over clearcut for stands near water. Retention: reduce harvest volume by 5–10% on all clearcuts (leave standing trees). Thinnings are standard priority.
+- `shouldSplit()`: `() => 0` — keep stands intact for habitat continuity
+- `regenDelayYears()`: `2` — favor natural regeneration cues
+- `regenerationSpecies()`: `"mixed"` — mix of spruce, pine, birch based on site
 
 **`balanced`:**
-- `finalHarvestUrgency`: `-(ageYears - optMax)` — standard urgency, most overdue first
-- `spreadConfig`: `{ maxRemovalM3PerYear: annualGrowthM3 * 1.0, interleave: "round-robin" }` — harvest = growth, fully sustainable
-- `shouldSplit`: `() => 0` — no splitting in balanced mode
-- `thinningPriority`: `"interleaved"` — thinnings and harvests alternate
-- `regenerationDelay`: `1` — replant next year (matches current behavior)
-- `regenerationSpecies`: site-appropriate (spruce on mesic+, pine on sub-xeric)
+- `volumeCapMultiplier()`: `1.0` — harvest = growth, fully sustainable
+- `selectOperations()`: **Round-robin interleaving.** Alternate: one thinning, one clearcut, one thinning, etc. Both types compete for the cap on equal footing. If one type's candidates run out, fill remaining cap with the other type. Most overdue operations (by age) get priority within each type.
+- `shouldSplit()`: `() => 0` — no splitting in balanced mode
+- `regenDelayYears()`: `1` — replant next year (matches current behavior)
+- `regenerationSpecies()`: site-appropriate (spruce on mesic+, pine on sub-xeric)
+
+#### Operation Deduction (Step 1 Detail)
+
+Each year, the scheduler checks every pool operation against the current simulated state to determine if it's due:
+
+| Operation type | Due condition | Source |
+|---|---|---|
+| `clear_cut` | `simulatedAge ≥ goalAdjustedOptMin` | `getOptimalAge()` in `config.ts`, adjusted per goal (T11) |
+| `thinning` / `first_thinning` | `simulatedBA ≥ THINNING_BA[species]` AND `simulatedAge ≥ minThinningAge` | `THINNING_BA` from `config.ts` |
+| `selection_cutting` | `simulatedAge ≥ goalAdjustedOptMin` (same as clearcut) | Preferred over clearcut for `carbon_storage`/`biodiversity` |
+| `early_tending` / `tending` | `simulatedAge` within tending window (e.g., 5–25 years) | Standard tending ages from `config.ts` |
+| Regeneration ops | Chained automatically after harvest — not pooled | `regenDelayYears()` after harvest year |
+
+Operations that are NOT yet due (e.g., stand still too young for thinning) stay in the pool and are re-checked each year. An operation that was borderline in year 0 may become clearly due in year 3 when the stand has grown.
+
+#### Volume Cap Granularity
+
+The volume cap is enforced PER YEAR, not averaged across periods:
+
+1. Compute `annualGrowthM3` from property's compartment data (sum of `area_ha × growth_m3_per_ha`)
+2. `maxRemovalM3PerYear = volumeCapMultiplier() × annualGrowthM3`
+3. Each year, cumulative harvest volume from selected operations ≤ `maxRemovalM3PerYear`
+4. Operations that don't fit carry over to the next year's candidate pool
+
+This means `maximum_growth_aggressive` (3.0×) will typically place all ready harvests in the first 1–2 years, while `carbon_storage` (0.5×) will spread harvests thinly across the entire plan period.
 
 ### 5. Real-Time Price Fetching (Luke PxWeb API)
 
@@ -251,23 +329,49 @@ Format:   JSON ("format": "json")
 | `HAKT` | Operation type | `"0"`=Standing sale, `"8021"`=Regeneration felling, `"8023"`=Thinning, `"8022"`=First thinning |
 | `PTL` | Wood type | `"N1"`=Pine log, `"N2"`=Spruce log, `"N3"`=Birch log, `"N4"`=Pine pulp, `"N5"`=Spruce pulp, `"N6"`=Birch pulp, `"N7"`=Pine small log, `"N8"`=Spruce small log |
 
-**Region mapping from municipality:**
+**Region mapping from municipality (determined at import time):**
 
-Luke divides Finland into 9 pricing regions. The mapping is municipality-based, NOT a simple property-id prefix rule. The `forest.municipality` field (e.g., "Ähtäri", "Helsinki") is used to look up the correct Luke region code.
+Luke divides Finland into 9 pricing regions. The `forests` table stores a `price_region` column (Luke region code) that is computed once at import time — no runtime lookup needed during plan generation.
 
-A hardcoded lookup table in `config.ts` maps Finnish municipality names → Luke region codes. Example:
+The mapping chain at import time:
 
-| Municipality | Luke region |
-|---|---|
-| Helsinki, Espoo, Vantaa, Turku, Tampere... | `"1"` (Etelä-Suomi) |
-| Jyväskylä, Kuopio, Mikkeli... | `"3"` (Keski-Suomi) |
-| Joensuu, Lappeenranta... | `"4"` (Savo-Karjala) |
-| Kouvola, Kotka... | `"5"` (Kymi-Savo) |
-| Seinäjoki, Vaasa, **Ähtäri**... | `"6"` (Etelä-Pohjanmaa) |
-| Oulu, Raahe... | `"71"` (Pohjois-Pohjanmaa) |
-| Kajaani, Kuusamo... | `"72"` (Kainuu-Koillismaa) |
-| Rovaniemi, Inari, Sodankylä... | `"8"` (Lappi) |
-| (unknown / fallback) | `"9"` (KOKO MAA) |
+```
+property_id → first 3 digits → kuntanumero → municipality name + price_region
+    ↓                ↓                ↓                    ↓
+989-405-…          989             989             "Ähtäri" / "6"
+```
+
+**New file:** `src/lib/import/municipality-lookup.ts`
+
+A hardcoded 309-entry lookup table maps every Finnish kuntanumero to `{ name, priceRegion }`. The MML API's GeoJSON `properties.kunta` returns the same 3-digit code already embedded in `property_id` — it adds no new information, so the static table is the authoritative source.
+
+```typescript
+// src/lib/import/municipality-lookup.ts
+export const KUNTANUMERO_MAP: Record<string, { name: string; priceRegion: string }> = {
+  "005": { name: "Alajärvi", priceRegion: "6" },
+  "009": { name: "Alavieska", priceRegion: "71" },
+  "010": { name: "Alavus", priceRegion: "6" },
+  // … 309 total entries
+  "989": { name: "Ähtäri", priceRegion: "6" },
+  "992": { name: "Äänekoski", priceRegion: "3" },
+};
+```
+
+**New column:** `forests.price_region TEXT` — stores the Luke region code (`"1"`–`"9"`, `"71"`, `"72"`). Set at import time alongside `municipality`.
+
+**Luke region codes:**
+
+| Code | Region | Example municipalities |
+|------|--------|----------------------|
+| `"1"` | Etelä-Suomi | Helsinki, Espoo, Turku, Tampere, Lahti, Lappeenranta, Kotka, Hämeenlinna, Porvoo |
+| `"3"` | Keski-Suomi | Jyväskylä, Kuopio, Mikkeli, Savonlinna, Pieksämäki |
+| `"4"` | Savo-Karjala | Joensuu, Lieksa, Nurmes, Ilomantsi |
+| `"5"` | Kymi-Savo | Kouvola, Iitti, Heinola, Mäntyharju |
+| `"6"` | Etelä-Pohjanmaa | Seinäjoki, Vaasa, **Ähtäri**, Kokkola, Pietarsaari |
+| `"71"` | Pohjois-Pohjanmaa | Oulu, Raahe, Ylivieska, Nivala |
+| `"72"` | Kainuu-Koillismaa | Kajaani, Kuusamo, Suomussalmi, Kuhmo |
+| `"8"` | Lappi | Rovaniemi, Inari, Sodankylä, Kittilä |
+| `"9"` | KOKO MAA (fallback) | — used when kuntanumero is unknown |
 
 **Price tiers mapping:**
 
@@ -298,12 +402,12 @@ A hardcoded lookup table in `config.ts` maps Finnish municipality names → Luke
 
 ```
 1. User requests plan → generate_plan tool called
-2. Determine Luke region code from forest.property_id prefix
+2. Read forest.price_region (set at import time from kuntanumero lookup) — already the Luke region code
 3. Check timber_prices cache for this region, fresh within 24h
 4a. If fresh: parse cached JSON, extract tukki/kuitu prices per species/tier
 4b. If stale: POST to Luke API with JSON query for latest week, cache response, parse
 5. Pass prices into classifyAndValueStands() → calculateValue()
-6. Fallback: if Luke is unreachable, use hardcoded PRICES from config.ts
+6. Fallback: if Luke is unreachable, use hardcoded PRICES from config.ts with region multiplier
 ```
 
 ### 6. Stand Wishes (User-Defined Constraints)
@@ -411,21 +515,24 @@ Use this in `classify.ts` `getSpeciesData()` to normalize any non-standard speci
 - Add goal type to `types.ts`: `type PlanGoal = "maximum_growth_aggressive" | "maximum_growth_balanced" | "carbon_storage" | "biodiversity" | "balanced"`
 - Update `generate_plan` handler to accept and forward the goal parameter
 
-### T4: Scheduling Strategy Engine
-**Files:** `schedule.ts` (major rewrite), new file `src/lib/ai/strategies.ts`
-**Effort:** ~6h
+### T4: Year-by-Year Scheduling Engine
+**Files:** `schedule.ts` (major rewrite), new file `src/lib/ai/strategies.ts`, uses `src/lib/ai/forest-state.ts`
+**Effort:** ~7h
 
-- Define `SchedulingStrategy` interface as outlined above
-- Implement 5 strategy objects
-- Refactor `schedulePlan()` to accept a `goal: PlanGoal` parameter
-- Select the strategy based on goal
-- Apply strategy methods for urgency sorting, spreading, thinning priority, regeneration
+- Define `SchedulingStrategy` interface with `volumeCapMultiplier()`, `selectOperations()`, `shouldSplit()`, `regenDelayYears()`, `regenerationSpecies()`
+- Implement the core year-by-year loop: deduce → merge → select → apply → simulate → carryover → chain
+- Use `getGrowthRate()` from `chart-engine.ts` for per-stand, per-year growth simulation (mutating state in-place between year steps)
+- Use `estimateForestState()` for post-scheduling verification — the scheduler builds ops incrementally, then `estimateForestState()` validates the full timeline
+- Implement 5 strategy objects as specified in Section 4
+- Each strategy's `selectOperations()` implements goal-specific priority ordering (greedy, two-phase, selection-first, round-robin)
+- Integrate stand splitting from T2: `shouldSplit()` decides, `trySplitStand()` splits, both volumes and regeneration chain correctly
+- Stand wishes from T7/T8 influence selection via `_priority_boost` and `no_clearcut` conversion
 - Write unit tests for each strategy:
-  - `maximum_growth_aggressive`: all regeneration-ready stands scheduled ASAP under 3× growth cap
-  - `maximum_growth_balanced`: all harvests capped at 125% of annual growth per year, front-loaded
-  - `carbon_storage`: no clearcuts unless significantly over-mature
-  - `biodiversity`: mixed species regeneration
-  - `balanced`: matches current behavior (modulo hardcoded exceptions)
+  - `maximum_growth_aggressive`: all ready stands harvested in year 1 (under 3× cap); thinnings interleaved
+  - `maximum_growth_balanced`: harvests capped at 125% annual growth per year; thinnings first; large stands split when exceeding cap
+  - `carbon_storage`: selection cuttings first; clearcuts only when 15+ years past optMax; minimal volume removed
+  - `biodiversity`: mixed species; retention volume deducted; selection cutting preferred
+  - `balanced`: round-robin interleaving; harvest ≤ growth
 
 ### T5: System Prompt Update
 **Files:** `system-prompt.ts`
@@ -435,19 +542,37 @@ Use this in `classify.ts` `getSpeciesData()` to normalize any non-standard speci
 - Add goal descriptions to the system prompt so AI can explain them to the user
 - Update point 2 in KEY RULES to reference goals
 
+### T5b: Municipality Lookup Table + Import Integration
+**Files:** New file `src/lib/import/municipality-lookup.ts`, `src/lib/import/csv-importer.ts`, `src/app/api/import/property/route.ts`
+**Effort:** ~1.5h
+
+- Build `KUNTANUMERO_MAP`: hardcoded Record mapping all 309 Finnish kuntanumero → `{ name: string, priceRegion: string }`
+  - Source data: official kuntaluettelo (Tilastokeskus). Municipality names in Finnish.
+  - Luke region assignment per maakunta boundaries (see region table in Section 5).
+  - Unknown/unlisted kuntanumero → `{ name: "Tuntematon", priceRegion: "9" }` (KOKO MAA fallback)
+- In both import paths (CSV and WFS/API), after creating the forest record:
+  ```typescript
+  const kuntanumero = propertyId.replace(/-/g, "").slice(0, 3);
+  const lookup = KUNTANUMERO_MAP[kuntanumero] ?? { name: "Tuntematon", priceRegion: "9" };
+  // UPDATE forests SET municipality = lookup.name, price_region = lookup.priceRegion
+  ```
+- Existing `forests.municipality` column (already present, currently NULL) gets populated.
+- New `forests.price_region` column stores the Luke region code for downstream use by T6.
+- Write tests: known kuntanumero (989 → "Ähtäri"/"6"), unknown kuntanumero (fallback), property_id with dashes preserved.
+
 ### T6: Real-Time Price Fetcher (Luke PxWeb API)
 **Files:** New file `src/lib/ai/price-fetcher.ts`
-**Effort:** ~3h
+**Effort:** ~2.5h
 
-- Implement `fetchLukePrices(regionCode)`: POST to Luke PxWeb API with JSON query for the latest week
+- Implement `fetchLukePrices(priceRegion: string)`: POST to Luke PxWeb API with JSON query for the latest week
   - Endpoint: `https://statdb.luke.fi:443/PXWeb/api/v1/fi/LUKE/met/metryv/0100_metryv.px`
-  - Query variables: W (week), MPKH (region), HAKT (operation type), PTL (wood type)
+  - Query variables: W (week), MPKH (region = `priceRegion`), HAKT (operation type), PTL (wood type)
   - Compute current week dynamically (e.g., `2026W22`) — do NOT hardcode. Use `new Date()` to calculate ISO week number and year.
   - Request `"format": "json"` — returns structured price data
-- Region detection from `forest.municipality` using a hardcoded lookup table mapping Finnish municipality names → Luke region codes
+- Region is read directly from `forest.price_region` — no runtime lookup needed. The field is populated at import time via the `KUNTANUMERO_MAP` table.
 - Parse response: extract tukki (log) and kuitu (pulp) prices per species per operation tier
 - Caching: store full JSON response in `timber_prices` table with `region`, `fetched_at`
-- Fallback chain: fresh cache (≤24h) → stale cache (≤7d) → live fetch (5s timeout) → hardcoded `PRICES` from `config.ts`
+- Fallback chain: fresh cache (≤24h) → stale cache (≤7d) → live fetch (5s timeout) → hardcoded `PRICES` from `config.ts` with region multiplier
 - Write tests with mock HTTP responses for known price values
 
 ### T7: Stand Wishes Database + API
@@ -542,10 +667,13 @@ Create a single migration covering all schema changes:
 ```sql
 -- stand_wishes table (see Section 6 for full DDL)
 -- plan_metadata.goal column: ALTER TABLE plan_metadata ADD COLUMN IF NOT EXISTS goal TEXT;
+-- forests.price_region: ALTER TABLE forests ADD COLUMN IF NOT EXISTS price_region TEXT;
 -- timber_prices: ALTER TABLE timber_prices ADD COLUMN IF NOT EXISTS region TEXT;
 -- timber_prices: ALTER TABLE timber_prices ADD COLUMN IF NOT EXISTS valid_from DATE;
 -- timber_prices: ALTER TABLE timber_prices ADD COLUMN IF NOT EXISTS valid_to DATE;
 ```
+
+Note: `forests.municipality` already exists in the schema (from initial migration) — no ALTER needed.
 
 ### T16: Tests & Integration
 **Files:** Various test files
@@ -568,9 +696,10 @@ Create a single migration covering all schema changes:
 | T1 | Remove hardcoded stand references | 2h | — |
 | T2 | Conditional stand splitting (tactic, not default) | 2h | T1 |
 | T3 | Goal parameter + tool definition | 1.5h | — |
-| T4 | Scheduling strategy engine (5 goals) | 6h | T1, T2, T3 |
+| T4 | Year-by-year scheduling engine (5 goals) | 7h | T1, T2, T3 |
 | T5 | System prompt update (goal prompting + guidelines) | 0.5h | T3 |
-| T6 | Real-time price fetcher (Luke PxWeb API) | 3h | — |
+| T5b | Municipality lookup table + import integration | 1.5h | T15 |
+| T6 | Real-time price fetcher (Luke PxWeb API) | 2.5h | T5b, T15 |
 | T7 | Stand wishes DB + API | 3h | — |
 | T8 | Integrate wishes into plan generation | 2h | T4, T7 |
 | T9 | Species name normalization | 1h | — |
@@ -579,10 +708,10 @@ Create a single migration covering all schema changes:
 | T12 | Integrate prices into plan generation | 2h | T6, T11 |
 | T13 | Goal-aware validation | 1.5h | T3, T4 |
 | T14 | Update system prompt guidelines | 0.5h | T3 |
-| T15 | Database migration (stand_wishes + plan_metadata + timber_prices) | 0.5h | — |
+| T15 | Database migration (stand_wishes + plan_metadata + forests.price_region + timber_prices) | 0.5h | — |
 | T16 | Tests & integration | 4h | All |
 
-**Total:** ~32h
+**Total:** ~34.5h
 
 ---
 
@@ -590,15 +719,17 @@ Create a single migration covering all schema changes:
 
 After implementation, a generic property (any forest, not just 989-405-0001-0405) should produce sensible plans for all 5 goals:
 
-1. **maximum_growth_aggressive**: All regeneration-ready stands harvested ASAP (3× growth cap). Thinnings distributed. Regenerations planted immediately.
-2. **maximum_growth_balanced**: Front-loaded regeneration, capped at 125% of annual growth per year — harvests spill into later years when cap is hit. Large stands split where a single harvest would exceed the cap.
-3. **carbon_storage**: Minimal clearcuts (only when 15+ years past optimal max), selection cutting preferred, standing volume higher at period end, no ditch mounding on peatland.
+1. **maximum_growth_aggressive**: All regeneration-ready stands harvested ASAP (3× growth cap). Thinnings distributed. Growth simulated year-by-year — operations chosen from current simulated state, not initial state. Regenerations planted immediately.
+2. **maximum_growth_balanced**: Front-loaded regeneration, capped at 125% of annual growth per year — harvests spill into later years when cap is hit. Thinnings placed first (lower volume/€). Large stands split where a single harvest would exceed the cap. Growth-aware: future volumes used for cap calculations.
+3. **carbon_storage**: Minimal clearcuts (only when 15+ years past optimal max), selection cutting preferred, standing volume higher at period end. Growth builds stock year-over-year; 0.5× cap spreads harvests thinly.
 4. **biodiversity**: Mixed species in regeneration, retention noted, waterside/slope stands skipped, longer rotations.
-5. **balanced**: Matches current output quality, no property-specific artifacts, harvest ≤ growth.
+5. **balanced**: Matches current output quality, no property-specific artifacts, harvest ≤ growth. Round-robin interleaving of thinnings and harvests; growth simulated.
 
 Cross-cutting:
 - All goals store correctly in `plan_metadata.goal` and show in `plan_summary`
-- Prices are fetched from Luke PxWeb API (weekly stumpage prices, all 9 Finnish regions), cached per region, with hardcoded fallback
+- Both import paths populate `forest.municipality` (from kuntanumero lookup) and `forest.price_region` (Luke region code)
+- Prices are fetched from Luke PxWeb API using `forest.price_region` directly — no runtime lookup needed
+- Prices are cached per region, with hardcoded fallback + region multiplier
 - Stand wishes are applied correctly: `no_clearcut` → `selection_cutting`, `delay_harvest` prevents early harvest, `retention_pct` reduces volume
 - `validate_plan` and `check_harvest_sustainability` apply goal-appropriate thresholds
 
