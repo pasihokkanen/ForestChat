@@ -238,7 +238,7 @@ function hideCustomPopup(popupRef: React.MutableRefObject<HTMLElement | null>) {
 export default function StandLayer({ map, compartments, styleVersion = 0, isDark = false }: StandLayerProps) {
   const popupRef = useRef<HTMLElement | null>(null);
   const hasZoomed = useRef(false);
-  const clickedStandRef = useRef<string | null>(null);
+  const suppressZoomRef = useRef(false);
 
   // Compute age brackets once per compartment change
   const ageBrackets = useMemo(
@@ -436,6 +436,7 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
         const current = useForestStore.getState().highlightedStandIds;
 
         if (ctrlKey) {
+          suppressZoomRef.current = true;
           if (current.includes(standId)) {
             const newIds = current.filter((id) => id !== standId);
             setHighlightedStands(newIds);
@@ -455,10 +456,9 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
             setHighlightedStands([]);
             selectStand(null);
             hideCustomPopup(popupRef);
-            clickedStandRef.current = null;
             return;
           }
-          clickedStandRef.current = standId;
+          suppressZoomRef.current = true;
           selectStand(standId);
           setHighlightedStands([standId]);
           showCustomPopup(map, popupRef, props, isDark);
@@ -467,8 +467,10 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
         hideCustomPopup(popupRef);
         selectStand(null);
         setHighlightedStands([]);
-        clickedStandRef.current = null;
       }
+
+      // Reset zoom suppression after all effects from this click have settled
+      setTimeout(() => { suppressZoomRef.current = false; }, 0);
     };
 
     map.on("mouseenter", LAYER_ID, setPointer);
@@ -510,7 +512,7 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
 
   // Zoom to selected/highlighted stands when selection changes via AI or chart click.
   // Handles both single-stand (zoom + popup) and multi-stand (zoom to bounds, no popup).
-  // NOT on direct map click — those are handled separately with clickedStandRef.
+  // Map clicks are suppressed — only highlight, don't zoom.
   // Skip if map tab is not active — popup uses getBoundingClientRect which fails on hidden elements.
   useEffect(() => {
     if (!map || activeMainTab !== "map") return;
@@ -524,9 +526,10 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
 
     if (idsToZoom.length === 0) return;
 
-    // If selection came from map click on the single selected stand, skip zoom
-    if (idsToZoom.length === 1 && clickedStandRef.current === idsToZoom[0]) {
-      clickedStandRef.current = null;
+    // Suppress zoom for all direct map clicks — only highlight, don't move map.
+    // Ref is reset via setTimeout in the click handler so it stays true through
+    // the full effect cascade (zoom + sync effects may both fire from one click).
+    if (suppressZoomRef.current) {
       return;
     }
 
