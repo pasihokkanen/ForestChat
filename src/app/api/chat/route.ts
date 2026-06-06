@@ -544,12 +544,24 @@ export async function POST(request: NextRequest) {
         for (const tr of toolResults) {
           openRouterMessages.push(tr);
         }
+
+        // Inject a newline between iterations so the frontend doesn't
+        // concatenate adjacent-sentence texts like "laatimisella.Nyt".
+        // Skip the last iteration — no separator needed after final text.
+        if (iterationText.trim() && iteration < maxIterations - 1) {
+          finalContent += "\n";
+          send({ event: "chunk", data: { content: "\n" } });
+        }
       }
 
       // Strip any remaining leading whitespace from model output (belt-and-suspenders
       // to the streaming guard above — catches edge cases like whitespace that slips
       // through due to multi-iteration accumulation).
-      finalContent = finalContent.replace(/^\n+/, "");
+      finalContent = finalContent.replace(/^\n+/, "").replace(/\n+$/, "");
+      // Collapse excessive blank lines (3+ consecutive newlines → one blank line).
+      // Models sometimes emit repetitive filler text between failed tool call retries,
+      // leaving multiple empty paragraphs that look unprofessional.
+      finalContent = finalContent.replace(/\n{3,}/g, "\n\n");
 
       // When model returns no text after tool execution (DeepSeek quirk),
       // generate a fallback summary so the user isn't left with empty output.
@@ -605,8 +617,8 @@ export async function POST(request: NextRequest) {
       // the fallback above), append the chart's result text so the user
       // sees a clear confirmation alongside the model's natural response.
       if (createdChart && lastToolResult && finalContent.trim() !== lastToolResult) {
-        finalContent += "\n\n" + lastToolResult;
-        send({ event: "chunk", data: { content: "\n\n" + lastToolResult } });
+        finalContent += "\n" + lastToolResult;
+        send({ event: "chunk", data: { content: "\n" + lastToolResult } });
       }
 
       // Phase 4b: After ALL iterations + fallback — recompute charts once if any mutation happened

@@ -105,57 +105,34 @@ function isYearKey(key: string | null | undefined): boolean {
   return key?.toLowerCase() === "year" || key?.toLowerCase() === "vuosi";
 }
 
-// Custom tooltip that formats currency values with thousand separators
-// Uses CSS variables for dark mode support
-function EuroTooltip({ active, payload, label }: Record<string, unknown>) {
-  if (!active || !payload) return null;
-  return (
-    <div style={{
-      backgroundColor: "var(--background, #ffffff)",
-      border: "1px solid var(--color-border, #e5e7eb)",
-      borderRadius: "6px",
-      padding: "8px 12px",
-      fontSize: "13px",
-      boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-      color: "var(--foreground, #171717)",
-    }}>
-      <div style={{ fontWeight: 600, marginBottom: 4, color: "var(--foreground, #171717)" }}>{String(label)}</div>
-      {(payload as Array<Record<string, unknown>>)
-        .filter((entry) => (entry.dataKey as string) !== "_wfBase")
-        .map((entry, i) => {
-        const val = entry.value as number;
-        const name = entry.name as string;
-        const color = entry.color as string;
-        if (val === undefined || val === null) return null;
-        return (
-          <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <span style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: color, display: "inline-block" }} />
-            <span style={{ color: "var(--foreground, #171717)" }}>{name}:</span>
-            <span style={{ fontWeight: 500, color: "var(--foreground, #171717)" }}>
-              {isEuroKey(name) || isEuroKey(entry.dataKey as string)
-                ? `${formatEuro(val)} €`
-                : isVolumeKey(name) || isVolumeKey(entry.dataKey as string)
-                  ? `${formatNumber(val)} m³`
-                  : isAreaKey(name) || isAreaKey(entry.dataKey as string)
-                    ? `${formatArea(val)} ha`
-                    : isNumericKey(name) || isNumericKey(entry.dataKey as string)
-                      ? formatNumber(val)
-                      : typeof val === "number" && !Number.isInteger(val)
-                        ? val.toFixed(1)
-                        : String(val)}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
+// ── Shared axis helpers used by YAxis/XAxis props (defined here so they're
+// Axis helpers
 const EURO_AXIS_LABEL = { value: "€", position: "insideTopLeft" as const, offset: -4, style: { fontSize: 11, fill: "#6b7280" } };
 function getYearAxisLabel(lang: string) {
   const value = lang === "fi" ? "Vuosi" : "Year";
   return { value, position: "insideBottomRight" as const, offset: -6, style: { fontSize: 11, fill: "#6b7280" } };
 }
+
+// ── Field name translations for tooltips (y_key/y_key2 → Finnish/English display) ──
+const FIELD_DISPLAY: Record<string, Record<string, string>> = {
+  income:    { en: "Income", fi: "Tulot" },
+  cost:      { en: "Cost", fi: "Kulut" },
+  volume:    { en: "Volume", fi: "Tilavuus" },
+  area:      { en: "Area", fi: "Pinta-ala" },
+  count:     { en: "Count", fi: "Lukumäärä" },
+  growth:    { en: "Growth", fi: "Kasvu" },
+  age:       { en: "Age", fi: "Ikä" },
+  height:    { en: "Height", fi: "Pituus" },
+  diameter:  { en: "Diameter", fi: "Läpimitta" },
+  basal_area:{ en: "Basal Area", fi: "Pohjapinta-ala" },
+  net:       { en: "Net", fi: "Netto" },
+  net_cashflow: { en: "Net Cashflow", fi: "Nettokassavirta" },
+  removal:   { en: "Removal", fi: "Poistuma" },
+  removal_m3:{ en: "Removal (m³)", fi: "Poistuma (m³)" },
+  growth_m3: { en: "Growth (m³)", fi: "Kasvu (m³)" },
+  revenue:   { en: "Revenue", fi: "Tuotot" },
+  price:     { en: "Price", fi: "Hinta" },
+};
 
 // Shared YAxis props: formats numbers with thousand separators and shows unit label.
 // Usage: <YAxis {...yAxisProps(tab.y_key)} />
@@ -247,6 +224,100 @@ export default function ChartCard({ tab }: ChartCardProps) {
   const setHighlightedStands = useForestStore((s) => s.setHighlightedStands);
   const language = useForestStore((s) => s.language) ?? "en";
   const yearAxisLabel = getYearAxisLabel(language);
+
+  // ── Custom tooltip (closure inside ChartCard — has access to `tab` and `language`) ──
+  // Formats values with thousand separators + correct unit suffixes. Falls back
+  // to tab.y_key when category names have been translated to Finnish (e.g.,
+  // "Avohakkuu" doesn't contain "income" → check tab.y_key="income" → "€").
+  function EuroTooltip({ active, payload, label }: Record<string, unknown>) {
+    if (!active || !payload) return null;
+
+    // Determine formatting key: prefer the entry's own dataKey/name, but when
+    // those are Finnish display names (single-stack bar, pie/donut), fall back
+    // to tab.y_key / tab.y_key2 to detect euro/volume/area/count.
+    function formatKey(entry: Record<string, unknown>): string | null {
+      const dk = entry.dataKey as string | undefined;
+      const nm = entry.name as string | undefined;
+      // 1) direct match on name or dataKey
+      if (isEuroKey(nm) || isEuroKey(dk)) return "euro";
+      if (isVolumeKey(nm) || isVolumeKey(dk)) return "volume";
+      if (isAreaKey(nm) || isAreaKey(dk)) return "area";
+      if (isCountOrPctKey(nm) || isCountOrPctKey(dk)) return "count";
+      // 2) if dataKey matches y_key2 (composed chart secondary axis), stop —
+      //    don't inherit tab.y_key's formatting into the second series.
+      if (dk && tab.y_key2 && dk === tab.y_key2) return null;
+      // 3) fall back to the chart's primary y_key (handles single-stack bar,
+      //    pie, donut where category names are Finnish display strings).
+      if (isEuroKey(tab.y_key)) return "euro";
+      if (isVolumeKey(tab.y_key)) return "volume";
+      if (isAreaKey(tab.y_key)) return "area";
+      return null;
+    }
+
+    // Translate label for categorical axes (species, dev class, etc.).
+    const displayLabel = React.useMemo(() => {
+      const s = String(label ?? "");
+      // Don't translate purely numeric/date labels (years, stand IDs).
+      if (/^\d+$/.test(s)) return s;
+      return translateChartCategory(s, language);
+    }, [label]);
+
+    // Translate field names (y_key/y_key2 → display name). Category names
+    // (stacked_bar, pie/donut) are already Finnish — leave them untouched.
+    function displayName(name: string, entry: Record<string, unknown>): string {
+      const dk = entry.dataKey as string | undefined;
+      const isYKey = dk === tab.y_key || dk === tab.y_key2;
+      const isXKey = dk === effectiveXKey;
+      if (!isYKey && !isXKey) return name; // already translated category name
+      return FIELD_DISPLAY[name]?.[language] ?? name;
+    }
+
+    return (
+      <div style={{
+        backgroundColor: "var(--background, #ffffff)",
+        border: "1px solid var(--color-border, #e5e7eb)",
+        borderRadius: "6px",
+        padding: "8px 12px",
+        fontSize: "13px",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+        color: "var(--foreground, #171717)",
+      }}>
+        <div style={{ fontWeight: 600, marginBottom: 4, color: "var(--foreground, #171717)" }}>
+          {displayLabel}
+        </div>
+        {(payload as Array<Record<string, unknown>>)
+          .filter((entry) => (entry.dataKey as string) !== "_wfBase")
+          .map((entry, i) => {
+          const val = entry.value as number;
+          const name = entry.name as string;
+          const color = entry.color as string;
+          if (val === undefined || val === null) return null;
+          const fk = formatKey(entry);
+          return (
+            <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <span style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: color, display: "inline-block" }} />
+              <span style={{ color: "var(--foreground, #171717)" }}>{displayName(name, entry)}:</span>
+              <span style={{ fontWeight: 500, color: "var(--foreground, #171717)" }}>
+                {fk === "euro"
+                  ? `${formatEuro(val)} €`
+                  : fk === "volume"
+                    ? `${formatNumber(val)} m³`
+                    : fk === "area"
+                      ? `${formatArea(val)} ha`
+                      : fk === "count"
+                        ? String(val)
+                        : isNumericKey(name) || isNumericKey(entry.dataKey as string)
+                          ? formatNumber(val)
+                          : typeof val === "number" && !Number.isInteger(val)
+                            ? val.toFixed(1)
+                            : String(val)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
 
   // Handle click on chart element — uses _stand_ids for cross-highlighting.
   // Toggle semantics prevent selection loops: clicking a bar whose stands
