@@ -8,6 +8,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Compartment, Operation } from "@/types/database";
 import { serverMsg } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
+import { getGrowthRate } from "./chart-engine";
 
 // ── Module-level constants (reused by searchStands and queryOperations) ──
 
@@ -262,13 +263,29 @@ export async function planSummary(
 
     const { data: compData } = await supabase
       .from("compartments")
-      .select("area_ha, volume_m3, growth_m3_per_ha")
+      .select("area_ha, volume_m3, site_type, soil_type, main_species, age_years, basal_area, development_class")
       .eq("forest_id", forestId);
-    const compartments = (compData as Array<{ area_ha: number | null; volume_m3: number | null; growth_m3_per_ha: number | null }>) ?? [];
+    const compartments = (compData as Array<{
+      area_ha: number | null;
+      volume_m3: number | null;
+      site_type: string | null;
+      soil_type: string | null;
+      main_species: string | null;
+      age_years: number | null;
+      basal_area: number | null;
+      development_class: string | null;
+    }>) ?? [];
 
     const totalArea = compartments.reduce((s, c) => s + (c.area_ha ?? 0), 0);
     const totalVolume = compartments.reduce((s, c) => s + (c.volume_m3 ?? 0), 0);
-    const annualGrowth = compartments.reduce((s, c) => s + ((c.growth_m3_per_ha ?? 0) * (c.area_ha ?? 0)), 0);
+    const annualGrowth = compartments.reduce((s, c) => {
+      const area = c.area_ha ?? 0;
+      if (area <= 0) return s;
+      return s + getGrowthRate(
+        c.site_type ?? "", c.soil_type ?? "", c.main_species ?? "",
+        c.age_years, c.basal_area, c.development_class ?? null,
+      ) * area;
+    }, 0);
 
     const p1Ops = operations.filter((o) => o.year >= 2026 && o.year <= 2035);
     const p2Ops = operations.filter((o) => o.year >= 2036 && o.year <= 2045);

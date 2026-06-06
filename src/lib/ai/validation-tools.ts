@@ -10,6 +10,7 @@ import type { Language } from "@/lib/i18n";
 import {
   getGrowthRate,
 } from "./chart-engine";
+import { estimateForestState, type CompartmentInput, type OperationInput } from "./forest-state";
 
 // ── check_harvest_sustainability ──
 
@@ -20,40 +21,14 @@ export async function checkSustainability(
   language: Language = "en",
 ): Promise<{ success: boolean; result: string; error?: string }> {
   try {
-    // Get compartment attributes needed for growth computation.
-    // Uses getGrowthRate() (VMI13 base × species × age × density multipliers),
-    // the same function the chart engine uses for growth_m3_per_ha.
+    // Query compartments with all fields needed for state estimation
     const { data: compData } = await supabase
       .from("compartments")
-      .select("volume_m3, area_ha, site_type, soil_type, drainage_status, main_species, age_years, basal_area, development_class")
+      .select("id, stand_id, area_ha, volume_m3, site_type, soil_type, main_species, age_years, basal_area, development_class")
       .eq("forest_id", forestId);
-    const compartments = (compData as Array<{
-      volume_m3: number | null;
-      area_ha: number | null;
-      site_type: string | null;
-      soil_type: string | null;
-      drainage_status: string | null;
-      main_species: string | null;
-      age_years: number | null;
-      basal_area: number | null;
-      development_class: string | null;
-    }>) ?? [];
+    const compartments = (compData as CompartmentInput[]) ?? [];
 
-    // Compute annual growth (m³/y) using chart-engine's growth function
-    const growthRate = compartments.reduce((s, c) => {
-      const area = c.area_ha ?? 0;
-      if (area <= 0) return s;
-      const grPerHa = getGrowthRate(
-        c.site_type ?? "",
-        c.soil_type ?? "",
-        c.main_species ?? "",
-        c.age_years,
-        c.basal_area,
-        c.development_class,
-      );
-      return s + grPerHa * area;
-    }, 0);
-
+    // Query operations
     let opsQuery = supabase.from("operations").select("*").eq("forest_id", forestId);
     if (year) opsQuery = opsQuery.eq("year", year);
 
@@ -61,73 +36,112 @@ export async function checkSustainability(
     const operations = (ops as Operation[]) ?? [];
 
     if (operations.length === 0) {
+      // Compute current growth for the "no ops" message
+      const currentGrowth = compartments.reduce((s, c) => {
+        const area = c.area_ha ?? 0;
+        if (area <= 0) return s;
+        return s + getGrowthRate(
+          c.site_type ?? "", c.soil_type ?? "", c.main_species ?? "",
+          c.age_years, c.basal_area, c.development_class ?? null,
+        ) * area;
+      }, 0);
       return {
         success: true,
         result: year
-          ? serverMsg("sustNoOpsYear", language, String(year), String(Math.round(growthRate)))
+          ? serverMsg("sustNoOpsYear", language, String(year), String(Math.round(currentGrowth)))
           : serverMsg("sustNoOps", language),
       };
     }
 
-    const standIds = [...new Set(operations.map((o) => o.compartment_id))];
-    const { data: comps } = await supabase
-      .from("compartments")
-      .select("id, volume_m3, stand_id")
-      .in("id", standIds);
+    // Determine year range for state projection
+    const years = [...new Set(operations.map((o) => o.year))].sort((a, b) => a - b);
+    const minYear = year ?? Math.min(...years);
+    const maxYear = year ?? Math.max(...years);
 
-    const compMap = new Map<string, { volume_m3: number | null; stand_id: string }>();
-    for (const c of (comps ?? []) as Array<{ id: string; volume_m3: number | null; stand_id: string }>) {
-      compMap.set(c.id, c);
+    // Build operation inputs for state estimator (map DB Operation → OperationInput)
+    const opInputs: OperationInput[] = operations.map((o) => ({
+      compartment_id: o.compartment_id,
+      year: o.year,
+      type: o.type,
+      removal_pct: o.removal_pct ?? 0,
+    }));
+
+    // Project forest state year by year
+    const timeline = estimateForestState(compartments, opInputs, minYear, maxYear);
+
+    // Aggregate per-year growth and harvest
+    const yearData = new Map<number, { growthM3: number; harvestM3: number; incomeEur: number }>();
+    for (const snapshots of timeline.values()) {
+      for (const s of snapshots) {
+        const yd = yearData.get(s.year) ?? { growthM3: 0, harvestM3: 0, incomeEur: 0 };
+        yd.growthM3 += s.growthM3;
+        yd.harvestM3 += s.harvestM3;
+        yearData.set(s.year, yd);
+      }
     }
 
-    let totalHarvestM3 = 0;
-    let totalIncome = 0;
+    // Add income from operations (not covered by state estimator)
+    for (const op of operations) {
+      if (["clear_cut", "thinning", "first_thinning", "selection_cutting"].includes(op.type)) {
+        const yd = yearData.get(op.year);
+        if (yd) yd.incomeEur += op.income_eur ?? 0;
+      }
+    }
+
+    // ── Build output ──
+
+    const totalGrowth = [...yearData.values()].reduce((s, d) => s + d.growthM3, 0);
+    const totalHarvestM3 = [...yearData.values()].reduce((s, d) => s + d.harvestM3, 0);
+    const totalIncome = [...yearData.values()].reduce((s, d) => s + d.incomeEur, 0);
+    const planYears = years.length || 1;
+
+    // Use annual averages for full-period comparison
+    const avgAnnualGrowth = year
+      ? yearData.get(year)?.growthM3 ?? 0
+      : planYears > 0 ? totalGrowth / planYears : 0;
+    const avgAnnualHarvest = year
+      ? yearData.get(year)?.harvestM3 ?? 0
+      : planYears > 0 ? totalHarvestM3 / planYears : 0;
+
+    const harvestVsGrowth = avgAnnualGrowth > 0
+      ? ((avgAnnualHarvest / avgAnnualGrowth) * 100).toFixed(1)
+      : "N/A";
+    const isSustainable = avgAnnualGrowth > 0 && avgAnnualHarvest <= avgAnnualGrowth;
+
+    // Find problematic years
+    const badYears: string[] = [];
+    for (const [yr, d] of yearData) {
+      if (d.growthM3 > 0 && d.harvestM3 > d.growthM3) {
+        badYears.push(String(yr));
+      }
+    }
+
     const harvestOps = operations.filter((o) =>
       ["clear_cut", "thinning", "first_thinning", "selection_cutting"].includes(o.type)
     );
-
-    for (const op of harvestOps) {
-      const comp = compMap.get(op.compartment_id);
-      const volume = comp?.volume_m3 ?? 0;
-      totalHarvestM3 += volume * ((op.removal_pct ?? 0) / 100);
-      totalIncome += op.income_eur ?? 0;
-    }
-
-    // When checking over the entire period (no specific year), compare
-    // average annual harvest against annual growth, not total vs annual.
-    let avgAnnualHarvest = totalHarvestM3;
-    if (!year) {
-      const years = [...new Set(operations.map((o) => o.year))];
-      const planYears = years.length || 1;
-      avgAnnualHarvest = totalHarvestM3 / planYears;
-    }
-
-    const harvestVsGrowth = growthRate > 0
-      ? ((avgAnnualHarvest / growthRate) * 100).toFixed(1)
-      : "N/A";
-
-    const growthRounded = Math.round(growthRate).toLocaleString();
-    const harvestRounded = Math.round(totalHarvestM3).toLocaleString();
-    const avgHarvestRounded = Math.round(avgAnnualHarvest).toLocaleString();
-    const incomeRounded = Math.round(totalIncome).toLocaleString();
-    const isSustainable = growthRate > 0 && avgAnnualHarvest <= growthRate;
 
     const lines = [
       serverMsg("sustTitle", language),
       ``,
       year ? serverMsg("sustYear", language, String(year)) : serverMsg("sustPeriod", language),
-      serverMsg("sustGrowth", language, growthRounded),
       year
-        ? serverMsg("sustHarvest", language, harvestRounded, serverMsg("sustHarvestTotal", language))
-        : serverMsg("sustHarvestAvg", language, avgHarvestRounded),
+        ? serverMsg("sustGrowth", language, Math.round(avgAnnualGrowth).toLocaleString())
+        : serverMsg("sustGrowthAvg", language, Math.round(avgAnnualGrowth).toLocaleString()),
+      year
+        ? serverMsg("sustHarvest", language, Math.round(avgAnnualHarvest).toLocaleString(), serverMsg("sustHarvestTotal", language))
+        : serverMsg("sustHarvestAvg", language, Math.round(avgAnnualHarvest).toLocaleString()),
       serverMsg("sustVsGrowth", language, String(harvestVsGrowth)),
       serverMsg("sustOpCount", language, String(harvestOps.length)),
-      serverMsg("sustIncome", language, incomeRounded),
-      ``,
-      isSustainable
-        ? serverMsg("sustSustainable", language)
-        : serverMsg("sustExceeds", language),
+      serverMsg("sustIncome", language, Math.round(totalIncome).toLocaleString()),
     ];
+
+    if (badYears.length > 0 && !year) {
+      lines.push(``, serverMsg("sustBadYears", language, badYears.join(", ")));
+    }
+
+    lines.push(``, isSustainable
+      ? serverMsg("sustSustainable", language)
+      : serverMsg("sustExceeds", language));
 
     return { success: true, result: lines.join("\n") };
   } catch (err) {
@@ -141,10 +155,9 @@ export async function checkSustainability(
 
 // ── validate_plan ──
 
-interface ValidationIssue {
+export interface ValidationIssue {
   severity: "error" | "warning";
   message: string;
-  standId?: string;
   year?: number;
 }
 
@@ -173,26 +186,22 @@ export async function validatePlan(
       return { success: true, result: serverMsg("valNoOps", language) };
     }
 
+    // ── Build lookup maps ──
     const compMap = new Map<string, Compartment>();
     for (const c of compartments) compMap.set(c.id, c);
 
-    const currentYear = new Date().getFullYear();
-
-    // Check 1: No clearcuts on non-regeneration-ready stands (Period 1 only — P2 is forward-looking)
-    const clearcuts = operations.filter((o) => o.type === "clear_cut");
-    for (const op of clearcuts) {
-      const comp = compMap.get(op.compartment_id);
-      // Only flag P1 clearcuts — P2 clearcuts are projected based on future maturity
-      if (comp && comp.development_class !== "regeneration_ready" && op.year <= new Date().getFullYear() + 5) {
+    // Check 1: Operations reference valid compartments
+    for (const op of operations) {
+      if (!compMap.has(op.compartment_id)) {
         issues.push({
           severity: "error",
-          message: serverMsg("valClearcutBadStand", language, comp.stand_id, comp.development_class ?? "?"),
-          standId: comp.stand_id, year: op.year,
+          message: serverMsg("valMissingComp", language, op.compartment_id, String(op.year)),
+          year: op.year,
         });
       }
     }
 
-    // Check 2: No thinnings within 10 years
+    // Check 2: Thinning interval ≥ 10 years per stand
     const thinnings = operations
       .filter((o) => o.type === "thinning" || o.type === "first_thinning")
       .sort((a, b) => a.year - b.year);
@@ -210,6 +219,7 @@ export async function validatePlan(
     }
 
     // Check 3: Regeneration chain follows clearcuts
+    const clearcuts = operations.filter((o) => o.type === "clear_cut");
     const regenTypes = ["site_prep", "ditch_mounding", "scalping", "spruce_planting", "pine_planting"];
     for (const op of clearcuts) {
       const hasFollowUp = operations.some(
@@ -227,31 +237,50 @@ export async function validatePlan(
       }
     }
 
-    // Check 4: Annual harvest vs growth (using chart-engine's VMI13 growth function)
-    const annualGrowth = compartments.reduce((s, c) => {
-      const area = c.area_ha ?? 0;
-      if (area <= 0) return s;
-      const grPerHa = getGrowthRate(
-        c.site_type ?? "",
-        c.soil_type ?? "",
-        c.main_species ?? "",
-        c.age_years,
-        c.basal_area,
-        c.development_class ?? null,
-      );
-      return s + grPerHa * area;
-    }, 0);
-    const harvestByYear = new Map<number, number>();
-    for (const op of operations) {
-      if (["clear_cut", "thinning", "first_thinning"].includes(op.type)) {
-        const vol = (compMap.get(op.compartment_id)?.volume_m3 ?? 0) * ((op.removal_pct ?? 0) / 100);
-        harvestByYear.set(op.year, (harvestByYear.get(op.year) ?? 0) + vol);
+    // Check 4: Annual harvest vs growth using state estimator
+    const years = [...new Set(operations.map((o) => o.year))].sort((a, b) => a - b);
+    if (years.length > 0) {
+      const opInputs: OperationInput[] = operations.map((o) => ({
+        compartment_id: o.compartment_id,
+        year: o.year,
+        type: o.type,
+        removal_pct: o.removal_pct ?? 0,
+      }));
+
+      const compInputs: CompartmentInput[] = compartments.map((c) => ({
+        id: c.id,
+        stand_id: c.stand_id,
+        area_ha: c.area_ha,
+        site_type: c.site_type,
+        soil_type: c.soil_type,
+        main_species: c.main_species,
+        age_years: c.age_years,
+        volume_m3: c.volume_m3,
+        basal_area: c.basal_area,
+        development_class: c.development_class,
+      }));
+
+      const timeline = estimateForestState(compInputs, opInputs, years[0], years[years.length - 1]);
+
+      const yearGrowth = new Map<number, number>();
+      const yearHarvest = new Map<number, number>();
+      for (const snapshots of timeline.values()) {
+        for (const s of snapshots) {
+          yearGrowth.set(s.year, (yearGrowth.get(s.year) ?? 0) + s.growthM3);
+          yearHarvest.set(s.year, (yearHarvest.get(s.year) ?? 0) + s.harvestM3);
+        }
       }
-    }
-    if (annualGrowth > 0) {
-      for (const [yr, harvest] of harvestByYear) {
-        if (harvest > annualGrowth) {
-          issues.push({ severity: "warning", message: serverMsg("valHarvestExceeds", language, String(yr), String(Math.round(harvest)), String(Math.round(annualGrowth))), year: yr });
+
+      for (const yr of years) {
+        const growth = yearGrowth.get(yr) ?? 0;
+        const harvest = yearHarvest.get(yr) ?? 0;
+        if (growth > 0 && harvest > growth) {
+          issues.push({
+            severity: "warning",
+            message: serverMsg("valHarvestExceeds", language, String(yr),
+              String(Math.round(harvest)), String(Math.round(growth))),
+            year: yr,
+          });
         }
       }
     }
@@ -261,39 +290,35 @@ export async function validatePlan(
     for (const op of operations) {
       const key = `${op.compartment_id}:${op.year}:${op.type}`;
       if (seen.has(key)) {
-        issues.push({ severity: "error", message: serverMsg("valDuplicate", language, op.type, compMap.get(op.compartment_id)?.stand_id ?? "", String(op.year)), year: op.year });
+        issues.push({
+          severity: "error",
+          message: serverMsg("valDuplicate", language, op.type, compMap.get(op.compartment_id)?.stand_id ?? "", String(op.year)),
+          year: op.year,
+        });
       }
       seen.add(key);
     }
 
-    // Check 6: Valid years
-    for (const op of operations) {
-      if (op.year < currentYear) {
-        issues.push({ severity: "error", message: serverMsg("valPastYear", language, op.type, compMap.get(op.compartment_id)?.stand_id ?? "", String(op.year)), year: op.year });
-      }
-    }
-
-    const errors = issues.filter((i) => i.severity === "error");
-    const warnings = issues.filter((i) => i.severity === "warning");
-    const planPassed = errors.length === 0;
-
+    // ── Build result ──
     if (issues.length === 0) {
       return { success: true, result: serverMsg("valPassed", language) };
     }
 
-    return {
-      success: true,
-      result: [
-        serverMsg("valTitle", language),
-        serverMsg("valStats", language, String(operations.length), String(compartments.length)),
-        ``,
-        serverMsg("valIssues", language, String(errors.length), String(warnings.length)),
-        ...(errors.length ? [`\n${serverMsg("valErrors", language)}`, ...errors.map((e) => `  • ${e.message}`)] : []),
-        ...(warnings.length ? [`\n${serverMsg("valWarnings", language)}`, ...warnings.map((w) => `  • ${w.message}`)] : []),
-        ``,
-        planPassed ? serverMsg("valValid", language) : serverMsg("valInvalid", language),
-      ].join("\n"),
-    };
+    const errors = issues.filter((i) => i.severity === "error");
+    const warnings = issues.filter((i) => i.severity === "warning");
+
+    const lines = [serverMsg("valTitle", language), ``];
+    if (errors.length > 0) {
+      lines.push(serverMsg("valErrors", language, String(errors.length)));
+      for (const e of errors) lines.push(`  ❌ ${e.message}`);
+      lines.push(``);
+    }
+    if (warnings.length > 0) {
+      lines.push(serverMsg("valWarnings", language, String(warnings.length)));
+      for (const w of warnings) lines.push(`  ⚠️ ${w.message}`);
+    }
+
+    return { success: true, result: lines.join("\n") };
   } catch (err) {
     return {
       success: false,
