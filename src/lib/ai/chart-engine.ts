@@ -231,7 +231,7 @@ function densityFactor(
  *
  * Used by the growth_m3_per_ha computed field — no DB column needed.
  */
-function getGrowthRate(
+export function getGrowthRate(
   siteType: string,
   soilType: string,
   species: string,
@@ -1437,7 +1437,7 @@ export async function recomputeAllCharts(
 ): Promise<void> {
   const { data: tabs, error } = await supabase
     .from("chart_tabs")
-    .select("chart_id, query_config, title")
+    .select("chart_id, query_config, title_en, title_fi")
     .eq("forest_id", forestId)
     .not("query_config", "is", null);
 
@@ -1468,7 +1468,7 @@ export async function recomputeAllCharts(
       recomputedIds.push(tab.chart_id);
     } catch (err) {
       console.error(
-        `recomputeAllCharts: failed for chart "${tab.chart_id}" (${tab.title}):`,
+        `recomputeAllCharts: failed for chart "${tab.chart_id}" (${tab.title_en}):`,
         err
       );
     }
@@ -1477,4 +1477,45 @@ export async function recomputeAllCharts(
   if (recomputedIds.length > 0) {
     sendSse?.("charts_refreshed", { chart_ids: recomputedIds });
   }
+}
+
+// ── Chart Title Fallback Detection ───────────────────────────────────
+// When the AI forgets to provide title_fi, detect it from query_config patterns.
+
+interface TitlePattern {
+  match: (qc: Record<string, unknown>) => boolean;
+  fi: string;
+}
+
+const TITLE_PATTERNS: TitlePattern[] = [
+  { match: (qc) => qc.source === "operations" && hasField(qc, "net_cashflow"), fi: "Nettokassavirta" },
+  { match: (qc) => qc.source === "operations" && hasField(qc, "income_eur") && hasField(qc, "cost_eur"), fi: "Vuotuiset tulot ja kulut" },
+  { match: (qc) => qc.source === "operations" && hasField(qc, "income_eur"), fi: "Vuotuiset hakkuutulot" },
+  { match: (qc) => qc.source === "operations" && hasField(qc, "removal_m3"), fi: "Vuotuinen hakkuumäärä" },
+  { match: (qc) => qc.source === "operations" && hasAggregate(qc, "type") && hasField(qc, "income_eur"), fi: "Tulot toimenpidetyypeittäin" },
+  { match: (qc) => qc.source === "compartment_species" && hasField(qc, "volume_m3"), fi: "Puulajit tilavuuden mukaan" },
+  { match: (qc) => qc.source === "compartment_species" && hasField(qc, "area_ha"), fi: "Puulajit pinta-alan mukaan" },
+  { match: (qc) => qc.source === "compartments" && hasAggregate(qc, "development_class"), fi: "Kehitysluokittain" },
+  { match: (qc) => qc.source === "compartments" && hasAggregate(qc, "main_species"), fi: "Pääpuulajit" },
+  { match: (qc) => qc.source === "compartments" && hasField(qc, "age_years") && hasField(qc, "volume_m3"), fi: "Ikä vs tilavuus" },
+  { match: (qc) => qc.source === "compartments" && hasField(qc, "growth_m3_per_ha"), fi: "Vuotuinen kasvu" },
+];
+
+function hasField(qc: Record<string, unknown>, field: string): boolean {
+  const values = qc.values;
+  if (!Array.isArray(values)) return false;
+  return values.some((v: Record<string, unknown>) => v.field === field);
+}
+
+function hasAggregate(qc: Record<string, unknown>, groupBy: string): boolean {
+  const agg = qc.aggregate;
+  if (!Array.isArray(agg)) return false;
+  return agg.some((g: Record<string, unknown>) => g.group_by === groupBy);
+}
+
+export function detectChartTitleFi(queryConfig: Record<string, unknown>): string | undefined {
+  for (const p of TITLE_PATTERNS) {
+    if (p.match(queryConfig)) return p.fi;
+  }
+  return undefined;
 }

@@ -31,6 +31,12 @@ import type { ChartTab } from "@/lib/store/visualization-slice";
 import { useForestStore } from "@/lib/store";
 import { translateChartCategory } from "@/lib/i18n";
 
+/** Get the language-appropriate display title for a chart tab. */
+export function getChartDisplayTitle(tab: { title_en: string; title_fi?: string | null }, language: string): string {
+  if (language === "fi" && tab.title_fi) return tab.title_fi;
+  return tab.title_en;
+}
+
 // Format number with space as thousand separator (Finnish/SI convention: 10 000)
 function formatNumber(value: number): string {
   return Math.abs(value)
@@ -840,7 +846,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <PolarRadiusAxis {...yAxisProps(tab.y_key)} />
             <Tooltip content={<EuroTooltip />} />
             <Radar
-              name={tab.title}
+              name={getChartDisplayTitle(tab, language)}
               dataKey={tab.y_key}
               stroke="#9C27B0"
               fill="#9C27B0"

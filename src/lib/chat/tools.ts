@@ -349,8 +349,9 @@ For joined fields in aggregate, prefix with "comp." (e.g. "comp.main_species"). 
         parameters: {
           type: "object",
           properties: {
-            chart_id: { type: "string", description: "Unique ID, e.g. 'chart-yearly-income'" },
-            title: { type: "string", description: "Chart title" },
+            chart_id: { type: "string", description: "Auto-generated unique ID (derived from title). Omit — the system generates it for you." },
+            title_en: { type: "string", description: "English chart title (REQUIRED)" },
+            title_fi: { type: "string", description: "Finnish chart title. Always provide both title_en and title_fi." },
             type: { type: "string", enum: ["bar", "pie", "line", "area", "stacked_bar", "scatter", "radar", "donut", "horizontal_bar", "composed", "waterfall"] },
             query_config: { type: "object", description: "Declarative query config for auto-updating charts (preferred). Must specify source, aggregate, and values." },
             data: { type: "array", items: { type: "object" }, description: "Array of data objects (required if no query_config)" },
@@ -361,7 +362,7 @@ For joined fields in aggregate, prefix with "comp." (e.g. "comp.main_species"). 
             color_key: { type: "string", description: "Color grouping key" },
             waterfall_base: { type: "number", description: "Starting base value for waterfall charts" },
           },
-          required: ["chart_id", "title", "type", "y_key"],
+          required: ["title_en", "type", "y_key"],
         },
       },
     },
@@ -443,7 +444,8 @@ The data field (computed cache of chart values) is NOT returned — it's too lar
           type: "object",
           properties: {
             chart_id: { type: "string", description: "Chart ID to update" },
-            title: { type: "string", description: "New chart title" },
+            title_en: { type: "string", description: "New English chart title" },
+            title_fi: { type: "string", description: "New Finnish chart title" },
             type: { type: "string", enum: ["bar","pie","line","area","stacked_bar","scatter","radar","donut","horizontal_bar","composed","waterfall"], description: "New chart type" },
             x_key: { type: "string" },
             y_key: { type: "string" },
@@ -466,7 +468,8 @@ The data field (computed cache of chart values) is NOT returned — it's too lar
           properties: {
             chart_id: { type: "string", description: "Chart ID to recreate" },
             query_config: { type: "object", description: "New declarative query config (must specify source, aggregate, and values)" },
-            title: { type: "string" },
+            title_en: { type: "string" },
+            title_fi: { type: "string" },
             type: { type: "string", enum: ["bar","pie","line","area","stacked_bar","scatter","radar","donut","horizontal_bar","composed","waterfall"] },
             x_key: { type: "string" },
             y_key: { type: "string" },

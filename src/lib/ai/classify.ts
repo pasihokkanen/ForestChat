@@ -7,14 +7,13 @@ import {
   detectPeatland,
   getPrices,
   getOptimalAge,
-  GROWTH_PEATLAND,
-  GROWTH_MINERAL,
   THINNING_BA,
   MIN_AGE_FIRST_THINNING,
   MIN_AGE_THINNING,
   COSTS,
   PRICES,
 } from "./config";
+import { getGrowthRate } from "./chart-engine";
 
 /**
  * Convert a Compartment from the database into the enriched StandData format
@@ -152,10 +151,17 @@ export function classifyAndValueStands(
     const k = compartmentToStandData(c);
     const species = getSpeciesData(c);
 
-    // Select growth rate: peatland or mineral soil
-    const growthDict = k.is_peatland ? GROWTH_PEATLAND : GROWTH_MINERAL;
-    const gr = growthDict[k.site_class] ?? 3.0;
-    k.annual_growth = gr * k.areaHa;
+    // Compute annual growth using chart-engine's VMI13 growth function
+    // (base rate × species × age × density multipliers)
+    const grPerHa = getGrowthRate(
+      c.site_type ?? "",
+      c.soil_type ?? "",
+      c.main_species ?? "",
+      c.age_years,
+      c.basal_area,
+      c.development_class ?? null,
+    );
+    k.annual_growth = grPerHa * k.areaHa;
 
     // Calculate stumpage value
     const { valueEur, logM3, pulpM3 } = calculateValue(k, species);

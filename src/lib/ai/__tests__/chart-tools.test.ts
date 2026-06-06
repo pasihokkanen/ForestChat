@@ -74,7 +74,7 @@ function makeQueryConfigSupabaseMock(
 
 const VALID_BAR_CHART = {
   chart_id: "chart-1",
-  title: "Yearly Income",
+  title_en: "Yearly Income",
   type: "bar",
   data: [
     { year: 2026, income: 100000 },
@@ -86,7 +86,7 @@ const VALID_BAR_CHART = {
 
 const VALID_PIE_CHART = {
   chart_id: "chart-2",
-  title: "Species Distribution",
+  title_en: "Species Distribution",
   type: "pie",
   data: [
     { species: "Pine", count: 45 },
@@ -108,7 +108,7 @@ describe("create_chart tool", () => {
     expect(result.result).toContain("bar");
     expect(sendSse).toHaveBeenCalledWith("create_chart", expect.objectContaining({
       id: "chart-1",
-      title: "Yearly Income",
+      title_en: "Yearly Income",
       type: "bar",
     }));
   });
@@ -135,15 +135,20 @@ describe("create_chart tool", () => {
     expect(result.error).toContain("non-empty array");
   });
 
-  it("rejects missing chart_id", async () => {
-    const ctx = makeCtx();
+  it("auto-generates chart_id when missing", async () => {
+    const sendSse = vi.fn();
+    const ctx = makeCtx({ sendSse });
     const result = await executeTool("create_chart", {
       ...VALID_BAR_CHART,
       chart_id: undefined,
     }, ctx);
 
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("chart_id");
+    expect(result.success).toBe(true);
+    // Verify a chart_id was auto-generated and sent via SSE
+    const chartTab = sendSse.mock.calls.find((c: unknown[]) => c[0] === "create_chart")?.[1] as Record<string, unknown> | undefined;
+    expect(chartTab?.id).toBeDefined();
+    expect(typeof chartTab?.id).toBe("string");
+    expect((chartTab?.id as string).startsWith("chart-")).toBe(true);
   });
 
   it("accepts minimal config (required fields only)", async () => {
@@ -152,7 +157,7 @@ describe("create_chart tool", () => {
 
     const result = await executeTool("create_chart", {
       chart_id: "minimal",
-      title: "Minimal",
+      title_en: "Minimal",
       type: "line",
       data: [{ x: 1, y: 2 }],
       y_key: "y",
@@ -192,7 +197,7 @@ describe("create_chart tool — query_config mode (Phase 4b)", () => {
 
     const result = await executeTool("create_chart", {
       chart_id: "chart-qc-yearly-income",
-      title: "Yearly Income (QC)",
+      title_en: "Yearly Income (QC)",
       type: "bar",
       x_key: "year",
       y_key: "income",
@@ -209,7 +214,7 @@ describe("create_chart tool — query_config mode (Phase 4b)", () => {
     // Verify SSE was emitted with computed data
     expect(sendSse).toHaveBeenCalledWith("create_chart", expect.objectContaining({
       id: "chart-qc-yearly-income",
-      title: "Yearly Income (QC)",
+      title_en: "Yearly Income (QC)",
       type: "bar",
       data: expect.arrayContaining([
         expect.objectContaining({ year: 2026, income: 80000 }),
@@ -236,7 +241,7 @@ describe("create_chart tool — query_config mode (Phase 4b)", () => {
     // Model passes raw field name "cost_eur" but query_config uses "as: cost"
     const result = await executeTool("create_chart", {
       chart_id: "chart-cost",
-      title: "Costs",
+      title_en: "Costs",
       type: "bar",
       x_key: "year",
       y_key: "cost_eur",  // raw field name
@@ -267,7 +272,7 @@ describe("create_chart tool — query_config mode (Phase 4b)", () => {
     // No x_key or name_key provided — should auto-detect from aggregate
     const result = await executeTool("create_chart", {
       chart_id: "chart-donut-species",
-      title: "Species",
+      title_en: "Species",
       type: "donut",
       y_key: "total_ha",
       query_config: {
@@ -287,7 +292,7 @@ describe("create_chart tool — query_config mode (Phase 4b)", () => {
 
     const result = await executeTool("create_chart", {
       chart_id: "chart-bad",
-      title: "Bad",
+      title_en: "Bad",
       type: "bar",
       x_key: "year",
       y_key: "income",
@@ -310,7 +315,7 @@ describe("create_chart tool — query_config mode (Phase 4b)", () => {
     // Some models (Nemotron) send Python dict strings
     const result = await executeTool("create_chart", {
       chart_id: "chart-py",
-      title: "Py Config",
+      title_en: "Py Config",
       type: "bar",
       x_key: "year",
       y_key: "income",

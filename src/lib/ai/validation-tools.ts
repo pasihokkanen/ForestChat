@@ -5,25 +5,54 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Compartment, Operation } from "@/types/database";
+import { serverMsg } from "@/lib/i18n";
+import type { Language } from "@/lib/i18n";
+import {
+  getGrowthRate,
+} from "./chart-engine";
 
 // ── check_harvest_sustainability ──
 
 export async function checkSustainability(
   supabase: SupabaseClient,
   forestId: string,
-  year?: number
+  year?: number,
+  language: Language = "en",
 ): Promise<{ success: boolean; result: string; error?: string }> {
   try {
-    // Get growth rate from compartments
+    // Get compartment attributes needed for growth computation.
+    // Uses getGrowthRate() (VMI13 base × species × age × density multipliers),
+    // the same function the chart engine uses for growth_m3_per_ha.
     const { data: compData } = await supabase
       .from("compartments")
-      .select("volume_m3, area_ha, growth_m3_per_ha")
+      .select("volume_m3, area_ha, site_type, soil_type, drainage_status, main_species, age_years, basal_area, development_class")
       .eq("forest_id", forestId);
-    const compartments = (compData as Array<{ volume_m3: number | null; area_ha: number | null; growth_m3_per_ha: number | null }>) ?? [];
+    const compartments = (compData as Array<{
+      volume_m3: number | null;
+      area_ha: number | null;
+      site_type: string | null;
+      soil_type: string | null;
+      drainage_status: string | null;
+      main_species: string | null;
+      age_years: number | null;
+      basal_area: number | null;
+      development_class: string | null;
+    }>) ?? [];
 
-    const growthRate = compartments.reduce(
-      (s, c) => s + ((c.growth_m3_per_ha ?? 0) * (c.area_ha ?? 0)), 0
-    );
+    // Compute annual growth (m³/y) using chart-engine's growth function
+    const growthRate = compartments.reduce((s, c) => {
+      const area = c.area_ha ?? 0;
+      if (area <= 0) return s;
+      const grPerHa = getGrowthRate(
+        c.site_type ?? "",
+        c.soil_type ?? "",
+        c.main_species ?? "",
+        c.age_years,
+        c.basal_area,
+        c.development_class,
+      );
+      return s + grPerHa * area;
+    }, 0);
 
     let opsQuery = supabase.from("operations").select("*").eq("forest_id", forestId);
     if (year) opsQuery = opsQuery.eq("year", year);
@@ -35,8 +64,8 @@ export async function checkSustainability(
       return {
         success: true,
         result: year
-          ? `No operations planned for ${year}. Harvest volume: 0 m³. Annual growth: ${Math.round(growthRate)} m³/v. No sustainability concerns.`
-          : "No operations in plan. Nothing to check.",
+          ? serverMsg("sustNoOpsYear", language, String(year), String(Math.round(growthRate)))
+          : serverMsg("sustNoOps", language),
       };
     }
 
@@ -64,23 +93,40 @@ export async function checkSustainability(
       totalIncome += op.income_eur ?? 0;
     }
 
+    // When checking over the entire period (no specific year), compare
+    // average annual harvest against annual growth, not total vs annual.
+    let avgAnnualHarvest = totalHarvestM3;
+    if (!year) {
+      const years = [...new Set(operations.map((o) => o.year))];
+      const planYears = years.length || 1;
+      avgAnnualHarvest = totalHarvestM3 / planYears;
+    }
+
     const harvestVsGrowth = growthRate > 0
-      ? ((totalHarvestM3 / growthRate) * 100).toFixed(1)
+      ? ((avgAnnualHarvest / growthRate) * 100).toFixed(1)
       : "N/A";
 
+    const growthRounded = Math.round(growthRate).toLocaleString();
+    const harvestRounded = Math.round(totalHarvestM3).toLocaleString();
+    const avgHarvestRounded = Math.round(avgAnnualHarvest).toLocaleString();
+    const incomeRounded = Math.round(totalIncome).toLocaleString();
+    const isSustainable = growthRate > 0 && avgAnnualHarvest <= growthRate;
+
     const lines = [
-      `📊 Harvest Sustainability Check`,
+      serverMsg("sustTitle", language),
       ``,
-      year ? `Year: ${year}` : `Period: all planned years`,
-      `Annual growth: ${Math.round(growthRate).toLocaleString()} m³/v`,
-      `Total harvest: ${Math.round(totalHarvestM3).toLocaleString()} m³${year ? "" : " (total)"}`,
-      `Harvest vs growth: ${harvestVsGrowth}%`,
-      `Harvest operations: ${harvestOps.length}`,
-      `Total income from harvest: ${Math.round(totalIncome).toLocaleString()} €`,
+      year ? serverMsg("sustYear", language, String(year)) : serverMsg("sustPeriod", language),
+      serverMsg("sustGrowth", language, growthRounded),
+      year
+        ? serverMsg("sustHarvest", language, harvestRounded, serverMsg("sustHarvestTotal", language))
+        : serverMsg("sustHarvestAvg", language, avgHarvestRounded),
+      serverMsg("sustVsGrowth", language, String(harvestVsGrowth)),
+      serverMsg("sustOpCount", language, String(harvestOps.length)),
+      serverMsg("sustIncome", language, incomeRounded),
       ``,
-      growthRate > 0 && totalHarvestM3 <= growthRate
-        ? `✅ Harvest is within sustainable limits (harvest ≤ annual growth).`
-        : `⚠️ Harvest exceeds annual growth! Consider reducing harvest volume.`,
+      isSustainable
+        ? serverMsg("sustSustainable", language)
+        : serverMsg("sustExceeds", language),
     ];
 
     return { success: true, result: lines.join("\n") };
@@ -104,7 +150,8 @@ interface ValidationIssue {
 
 export async function validatePlan(
   supabase: SupabaseClient,
-  forestId: string
+  forestId: string,
+  language: Language = "en",
 ): Promise<{ success: boolean; result: string; error?: string }> {
   try {
     const issues: ValidationIssue[] = [];
@@ -123,7 +170,7 @@ export async function validatePlan(
     const operations = (opsData as Operation[]) ?? [];
 
     if (operations.length === 0) {
-      return { success: true, result: "No operations in plan. Generate a plan first." };
+      return { success: true, result: serverMsg("valNoOps", language) };
     }
 
     const compMap = new Map<string, Compartment>();
@@ -139,7 +186,7 @@ export async function validatePlan(
       if (comp && comp.development_class !== "regeneration_ready" && op.year <= new Date().getFullYear() + 5) {
         issues.push({
           severity: "error",
-          message: `Clearcut on stand ${comp.stand_id} (${comp.development_class}) which is not regeneration-ready.`,
+          message: serverMsg("valClearcutBadStand", language, comp.stand_id, comp.development_class ?? "?"),
           standId: comp.stand_id, year: op.year,
         });
       }
@@ -154,7 +201,9 @@ export async function validatePlan(
           (thinnings[i].year - thinnings[i - 1].year) < 10) {
         issues.push({
           severity: "error",
-          message: `Stand ${compMap.get(thinnings[i].compartment_id)?.stand_id ?? ""} thinned in ${thinnings[i - 1].year} and again in ${thinnings[i].year} (< 10 year interval).`,
+          message: serverMsg("valThinInterval", language,
+            compMap.get(thinnings[i].compartment_id)?.stand_id ?? "",
+            String(thinnings[i - 1].year), String(thinnings[i].year)),
           year: thinnings[i].year,
         });
       }
@@ -171,14 +220,27 @@ export async function validatePlan(
       if (!hasFollowUp) {
         issues.push({
           severity: "warning",
-          message: `Stand ${compMap.get(op.compartment_id)?.stand_id ?? ""} clearcut in ${op.year} but no regeneration chain follows.`,
+          message: serverMsg("valNoRegen", language,
+            compMap.get(op.compartment_id)?.stand_id ?? "", String(op.year)),
           year: op.year,
         });
       }
     }
 
-    // Check 4: Annual harvest vs growth
-    const annualGrowth = compartments.reduce((s, c) => s + ((c.growth_m3_per_ha ?? 0) * (c.area_ha ?? 0)), 0);
+    // Check 4: Annual harvest vs growth (using chart-engine's VMI13 growth function)
+    const annualGrowth = compartments.reduce((s, c) => {
+      const area = c.area_ha ?? 0;
+      if (area <= 0) return s;
+      const grPerHa = getGrowthRate(
+        c.site_type ?? "",
+        c.soil_type ?? "",
+        c.main_species ?? "",
+        c.age_years,
+        c.basal_area,
+        c.development_class ?? null,
+      );
+      return s + grPerHa * area;
+    }, 0);
     const harvestByYear = new Map<number, number>();
     for (const op of operations) {
       if (["clear_cut", "thinning", "first_thinning"].includes(op.type)) {
@@ -189,7 +251,7 @@ export async function validatePlan(
     if (annualGrowth > 0) {
       for (const [yr, harvest] of harvestByYear) {
         if (harvest > annualGrowth) {
-          issues.push({ severity: "warning", message: `Year ${yr}: harvest ${Math.round(harvest)} m³ exceeds growth ${Math.round(annualGrowth)} m³.`, year: yr });
+          issues.push({ severity: "warning", message: serverMsg("valHarvestExceeds", language, String(yr), String(Math.round(harvest)), String(Math.round(annualGrowth))), year: yr });
         }
       }
     }
@@ -199,7 +261,7 @@ export async function validatePlan(
     for (const op of operations) {
       const key = `${op.compartment_id}:${op.year}:${op.type}`;
       if (seen.has(key)) {
-        issues.push({ severity: "error", message: `Duplicate: ${op.type} on stand ${compMap.get(op.compartment_id)?.stand_id ?? ""} in ${op.year}.`, year: op.year });
+        issues.push({ severity: "error", message: serverMsg("valDuplicate", language, op.type, compMap.get(op.compartment_id)?.stand_id ?? "", String(op.year)), year: op.year });
       }
       seen.add(key);
     }
@@ -207,7 +269,7 @@ export async function validatePlan(
     // Check 6: Valid years
     for (const op of operations) {
       if (op.year < currentYear) {
-        issues.push({ severity: "error", message: `${op.type} on stand ${compMap.get(op.compartment_id)?.stand_id ?? ""} in ${op.year} is in the past.`, year: op.year });
+        issues.push({ severity: "error", message: serverMsg("valPastYear", language, op.type, compMap.get(op.compartment_id)?.stand_id ?? "", String(op.year)), year: op.year });
       }
     }
 
@@ -216,20 +278,20 @@ export async function validatePlan(
     const planPassed = errors.length === 0;
 
     if (issues.length === 0) {
-      return { success: true, result: "✅ Plan validation passed! All checks OK." };
+      return { success: true, result: serverMsg("valPassed", language) };
     }
 
     return {
       success: true,
       result: [
-        `📋 Plan Validation Report`,
-        `Operations: ${operations.length} | Compartments: ${compartments.length}`,
+        serverMsg("valTitle", language),
+        serverMsg("valStats", language, String(operations.length), String(compartments.length)),
         ``,
-        `Issues: ${errors.length} error(s), ${warnings.length} warning(s)`,
-        ...(errors.length ? [`\n❌ Errors:`, ...errors.map((e) => `  • ${e.message}`)] : []),
-        ...(warnings.length ? [`\n⚠️ Warnings:`, ...warnings.map((w) => `  • ${w.message}`)] : []),
+        serverMsg("valIssues", language, String(errors.length), String(warnings.length)),
+        ...(errors.length ? [`\n${serverMsg("valErrors", language)}`, ...errors.map((e) => `  • ${e.message}`)] : []),
+        ...(warnings.length ? [`\n${serverMsg("valWarnings", language)}`, ...warnings.map((w) => `  • ${w.message}`)] : []),
         ``,
-        planPassed ? "✅ Plan is valid (no critical errors)." : "❌ Plan has critical errors. Fix before using.",
+        planPassed ? serverMsg("valValid", language) : serverMsg("valInvalid", language),
       ].join("\n"),
     };
   } catch (err) {

@@ -18,16 +18,16 @@ function createTestStore() {
 
 const makeTab = (overrides: Partial<ChartTab> = {}): ChartTab => ({
   id: "chart-1",
-  title: "Test Chart",
+  title_en: "Test Chart",
   type: "bar",
   data: [{ year: 2026, income: 50000 }],
-  xKey: "year",
-  yKey: "income",
-  yKey2: null,
-  nameKey: null,
-  colorKey: null,
+  x_key: "year",
+  y_key: "income",
+  y_key2: null,
+  name_key: null,
+  color_key: null,
   ...overrides,
-});
+} as ChartTab);
 
 describe("VisualizationSlice", () => {
   let store: ReturnType<typeof createTestStore>;
@@ -47,17 +47,17 @@ describe("VisualizationSlice", () => {
     });
 
     it("upserts existing tab with same id", () => {
-      store.getState().addChartTab(makeTab({ id: "chart-1", title: "First" }));
-      store.getState().addChartTab(makeTab({ id: "chart-1", title: "Updated" }));
+      store.getState().addChartTab(makeTab({ id: "chart-1", title_en: "First" }));
+      store.getState().addChartTab(makeTab({ id: "chart-1", title_en: "Updated" }));
       const state = store.getState();
       expect(state.chartTabs).toHaveLength(1);
-      expect(state.chartTabs[0].title).toBe("Updated");
+      expect(state.chartTabs[0].title_en).toBe("Updated");
       expect(state.activeChartTab).toBe("chart-1");
     });
 
     it("adds multiple tabs and selects the latest", () => {
-      store.getState().addChartTab(makeTab({ id: "a", title: "A" }));
-      store.getState().addChartTab(makeTab({ id: "b", title: "B" }));
+      store.getState().addChartTab(makeTab({ id: "a", title_en: "A" }));
+      store.getState().addChartTab(makeTab({ id: "b", title_en: "B" }));
       const state = store.getState();
       expect(state.chartTabs).toHaveLength(2);
       expect(state.activeChartTab).toBe("b");
@@ -75,8 +75,8 @@ describe("VisualizationSlice", () => {
     });
 
     it("switches to the previous (last) tab when removing active", () => {
-      store.getState().addChartTab(makeTab({ id: "a", title: "A" }));
-      store.getState().addChartTab(makeTab({ id: "b", title: "B" }));
+      store.getState().addChartTab(makeTab({ id: "a", title_en: "A" }));
+      store.getState().addChartTab(makeTab({ id: "b", title_en: "B" }));
       // "b" is active; removing it should switch to "a"
       store.getState().removeChartTab("b");
       const state = store.getState();
@@ -115,8 +115,8 @@ describe("VisualizationSlice", () => {
   describe("setChartTabs", () => {
     it("replaces tabs without changing activeChartTab", () => {
       const tabs = [
-        makeTab({ id: "a", title: "A" }),
-        makeTab({ id: "b", title: "B" }),
+        makeTab({ id: "a", title_en: "A" }),
+        makeTab({ id: "b", title_en: "B" }),
       ];
       // setChartTabs replaces data but callers (use-charts, ChatPanel SSE)
       // manage activeChartTab themselves — do NOT auto-select

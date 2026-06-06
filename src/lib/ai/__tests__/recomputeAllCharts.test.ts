@@ -206,8 +206,8 @@ describe("recomputeAllCharts", () => {
 
     mockSupabase = makeMockSupabase({
       chart_tabs: [
-        { chart_id: "chart-legacy-a", query_config: null, title: "Legacy A" },
-        { chart_id: "chart-legacy-b", query_config: null, title: "Legacy B" },
+        { chart_id: "chart-legacy-a", query_config: null, title_en: "Legacy A", title_fi: null },
+        { chart_id: "chart-legacy-b", query_config: null, title_en: "Legacy B", title_fi: null },
       ],
       operations: [
         { year: 2026, income_eur: 10000 },

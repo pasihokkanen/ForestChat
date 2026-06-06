@@ -14,7 +14,8 @@ function mapTabToRow(forestId: string, tab: ChartTab) {
   return {
     forest_id: forestId,
     chart_id: tab.id,
-    title: tab.title,
+    title_en: tab.title_en,
+    title_fi: tab.title_fi ?? null,
     type: tab.type,
     data: tab.data,
     x_key: tab.x_key,
@@ -72,9 +73,9 @@ export async function POST(
 
     // Validate required fields — data is optional when query_config is present
     const hasQueryConfig = !!body.query_config;
-    if (!body.id || !body.title || !body.type || !body.y_key) {
+    if (!body.id || !body.title_en || !body.type || !body.y_key) {
       return NextResponse.json(
-        { error: "Missing required fields: id, title, type, yKey" },
+        { error: "Missing required fields: id, title_en, type, yKey" },
         { status: 400 }
       );
     }

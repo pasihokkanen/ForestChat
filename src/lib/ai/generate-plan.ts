@@ -5,6 +5,8 @@ import type { Compartment } from "@/types/database";
 import { classifyAndValueStands } from "./classify";
 import { schedulePlan } from "./schedule";
 import type { YearPlan } from "./types";
+import { serverMsg } from "@/lib/i18n";
+import type { Language } from "@/lib/i18n";
 
 interface GeneratePlanArgs {
   periodYears?: number;
@@ -15,10 +17,11 @@ export async function generatePlan(
   supabase: SupabaseClient,
   forestId: string,
   userId: string,
-  args: GeneratePlanArgs
+  args: GeneratePlanArgs,
+  language: Language = "en",
 ): Promise<{ success: boolean; result: string; error?: string }> {
   try {
-    // 1. Fetch compartments via passed auth client
+    const periodYears = args.periodYears ?? 20;
     const { data: comps } = await supabase
       .from("compartments")
       .select("*")
@@ -26,7 +29,7 @@ export async function generatePlan(
     const compartments = (comps as Compartment[]) ?? [];
 
     if (compartments.length === 0) {
-      return { success: true, result: "No compartments found for this forest." };
+      return { success: true, result: serverMsg("planEmpty", language) };
     }
 
     // 2. Classify and value
@@ -90,7 +93,6 @@ export async function generatePlan(
     addPlanOps(p2);
 
     // 5. Save plan_metadata (upsert via manual check — avoids DB constraint dependency)
-    const periodYears = args.periodYears ?? 20;
     const startYear = args.startYear ?? new Date().getFullYear();
     const metaPayload = {
       forest_id: forestId,
@@ -122,19 +124,30 @@ export async function generatePlan(
     }
 
     // 7. Return summary
+    const areaStr = totalArea.toFixed(1);
+    const volStr = Math.round(totalVolume).toLocaleString();
+    const growthStr = Math.round(totalGrowth).toLocaleString();
+    const valueStr = Math.round(totalValue).toLocaleString();
+    const startStr = String(startYear);
+    const endStr = String(startYear + 9);
+    const ccCount = p1.reduce((s, y) => s + y.finalHarvests.length, 0);
+    const thinCount = p1.reduce((s, y) => s + y.thinnings.length, 0);
+    const avgStr = Math.round(summary.p1AverageHarvest);
+    const pctStr = Math.round(summary.harvestVsGrowth);
+
     const result = [
-      `✅ Plan generated for ${totalArea.toFixed(1)} ha forest!`,
+      serverMsg("planGenerated", language, areaStr),
       ``,
-      `🌲 Total volume: ${Math.round(totalVolume).toLocaleString()} m³`,
-      `📈 Annual growth: ${Math.round(totalGrowth).toLocaleString()} m³/v`,
-      `💰 Stumpage value: ${Math.round(totalValue).toLocaleString()} €`,
+      serverMsg("planTotalVolume", language, volStr),
+      serverMsg("planAnnualGrowth", language, growthStr),
+      serverMsg("planStumpageValue", language, valueStr),
       ``,
-      `Period 1 (${startYear}-${startYear + 9}):`,
-      `  ${p1.reduce((s, y) => s + y.finalHarvests.length, 0)} clearcuts`,
-      `  ${p1.reduce((s, y) => s + y.thinnings.length, 0)} thinnings`,
-      `  Avg harvest: ${Math.round(summary.p1AverageHarvest)} m³/v (${Math.round(summary.harvestVsGrowth)}% of growth)`,
+      serverMsg("planPeriod1", language, startStr, endStr),
+      serverMsg("planClearcuts", language, String(ccCount)),
+      serverMsg("planThinnings", language, String(thinCount)),
+      serverMsg("planAvgHarvest", language, String(avgStr), String(pctStr)),
       ``,
-      `Period 2 extension also generated. Would you like any changes?`,
+      serverMsg("planPeriod2Footer", language),
     ].join("\n");
 
     return { success: true, result };

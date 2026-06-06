@@ -2,7 +2,8 @@ import type { StateCreator } from "zustand";
 
 export interface ChartTab {
   id: string;
-  title: string;
+  title_en: string;
+  title_fi?: string | null;
   type:
     | "bar"
     | "pie"

@@ -23,7 +23,8 @@ export async function upsertChartTab(
     {
       forest_id: forestId,
       chart_id: tab.id,
-      title: tab.title,
+      title_en: tab.title_en,
+      title_fi: tab.title_fi ?? null,
       type: tab.type,
       data: tab.data,
       x_key: tab.x_key,
@@ -58,7 +59,8 @@ export async function deleteAllChartTabs(forestId: string): Promise<void> {
 function mapRowToChartTab(row: Record<string, unknown>): ChartTab {
   return {
     id: row.chart_id as string,
-    title: row.title as string,
+    title_en: row.title_en as string,
+    title_fi: (row.title_fi as string) ?? null,
     type: row.type as ChartTab["type"],
     data: (row.data as Record<string, unknown>[]) ?? [],
     x_key: (row.x_key as string) ?? null,

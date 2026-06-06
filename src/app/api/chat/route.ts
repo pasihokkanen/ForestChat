@@ -48,7 +48,7 @@ function detectChartIntent(userMsg: string): Record<string, unknown> | null {
   if (hasArea && hasSpecies) {
     return {
       chart_id: "chart-species-area",
-      title: "Total Area by Tree Species",
+      title_en: "Total Area by Tree Species",
       type: chartType,
       query_config: {
         source: "compartment_species",
@@ -64,7 +64,7 @@ function detectChartIntent(userMsg: string): Record<string, unknown> | null {
   if (hasVolume && hasSpecies) {
     return {
       chart_id: "chart-species-volume",
-      title: "Total Volume by Tree Species",
+      title_en: "Total Volume by Tree Species",
       type: chartType,
       query_config: {
         source: "compartment_species",
@@ -83,7 +83,7 @@ function detectChartIntent(userMsg: string): Record<string, unknown> | null {
     const isCumulative = msg.includes("cumulative");
     return {
       chart_id: "chart-yearly-income",
-      title: isCumulative ? "Cumulative Income Over Plan Years" : "Yearly Income",
+      title_en: isCumulative ? "Cumulative Income Over Plan Years" : "Yearly Income",
       type: chartType,
       query_config: {
         source: "operations",
@@ -100,7 +100,7 @@ function detectChartIntent(userMsg: string): Record<string, unknown> | null {
   if (hasIncome && hasType) {
     return {
       chart_id: "chart-income-by-type",
-      title: "Total Income by Operation Type",
+      title_en: "Total Income by Operation Type",
       type: chartType,
       query_config: {
         source: "operations",
@@ -117,7 +117,7 @@ function detectChartIntent(userMsg: string): Record<string, unknown> | null {
   if (hasYear && (hasIncome || hasCost)) {
     return {
       chart_id: "chart-yearly-income-cost",
-      title: "Yearly Income and Costs",
+      title_en: "Yearly Income and Costs",
       type: "stacked_bar",
       query_config: {
         source: "operations",
@@ -140,7 +140,7 @@ function detectChartIntent(userMsg: string): Record<string, unknown> | null {
   if (chartType === "waterfall" && hasNet && (hasIncome || hasCost)) {
     return {
       chart_id: "chart-waterfall-net",
-      title: "Yearly Net Cashflow (Income − Costs)",
+      title_en: "Yearly Net Cashflow (Income − Costs)",
       type: "waterfall",
       query_config: {
         source: "operations",
@@ -164,7 +164,7 @@ function detectChartIntent(userMsg: string): Record<string, unknown> | null {
     if (hasDiameter && hasHeight) {
       return {
         chart_id: "chart-scatter-diameter-height",
-        title: "Diameter vs Height (All Stands)",
+        title_en: "Diameter vs Height (All Stands)",
         type: "scatter",
         query_config: {
           source: "compartments",
@@ -182,7 +182,7 @@ function detectChartIntent(userMsg: string): Record<string, unknown> | null {
     if (hasAge && hasGrowth) {
       return {
         chart_id: "chart-scatter-age-growth",
-        title: "Age vs Growth (All Stands)",
+        title_en: "Age vs Growth (All Stands)",
         type: "scatter",
         query_config: {
           source: "compartments",
@@ -200,7 +200,7 @@ function detectChartIntent(userMsg: string): Record<string, unknown> | null {
     if (hasAge && hasVolume) {
       return {
         chart_id: "chart-scatter-age-volume",
-        title: "Age vs Volume (All Stands)",
+        title_en: "Age vs Volume (All Stands)",
         type: "scatter",
         query_config: {
           source: "compartments",
@@ -218,7 +218,7 @@ function detectChartIntent(userMsg: string): Record<string, unknown> | null {
     if (hasAge && hasBasal) {
       return {
         chart_id: "chart-scatter-age-basal",
-        title: "Age vs Basal Area (All Stands)",
+        title_en: "Age vs Basal Area (All Stands)",
         type: "scatter",
         query_config: {
           source: "compartments",
@@ -236,7 +236,7 @@ function detectChartIntent(userMsg: string): Record<string, unknown> | null {
     // Generic scatter: age vs volume as default
     return {
       chart_id: "chart-scatter-age-volume",
-      title: "Age vs Volume (All Stands)",
+      title_en: "Age vs Volume (All Stands)",
       type: "scatter",
       query_config: {
         source: "compartments",
@@ -253,7 +253,7 @@ function detectChartIntent(userMsg: string): Record<string, unknown> | null {
   if (hasArea || hasVolume) {
     return {
       chart_id: hasArea ? "chart-species-area" : "chart-species-volume",
-      title: hasArea ? "Total Area by Tree Species" : "Total Volume by Tree Species",
+      title_en: hasArea ? "Total Area by Tree Species" : "Total Volume by Tree Species",
       type: chartType,
       query_config: {
         source: "compartment_species",

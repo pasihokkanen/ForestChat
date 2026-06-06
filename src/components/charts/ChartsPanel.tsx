@@ -52,7 +52,7 @@ export default function ChartsPanel() {
       }`}
     >
       <ChartTabBar
-        tabs={chartTabs.map((t) => ({ id: t.id, title: t.title }))}
+        tabs={chartTabs.map((t) => ({ id: t.id, title_en: t.title_en, title_fi: t.title_fi }))}
         activeId={activeChartTab}
         onSelect={(id) => {
           setActiveChartTab(id);
@@ -64,7 +64,7 @@ export default function ChartsPanel() {
       />
       {activeTab && (
         <div className="px-3 py-3 text-sm font-bold text-center text-gray-800 dark:text-gray-200 border-b border-gray-200 dark:border-gray-700 shrink-0 bg-gray-50 dark:bg-gray-800/50">
-          {activeTab.title}
+          {activeTab.title_fi && language === "fi" ? activeTab.title_fi : activeTab.title_en}
         </div>
       )}
       <div className="flex-1 p-2 overflow-hidden" style={{ minHeight: 200 }}>

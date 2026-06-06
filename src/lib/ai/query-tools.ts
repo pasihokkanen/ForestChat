@@ -6,6 +6,8 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Compartment, Operation } from "@/types/database";
+import { serverMsg } from "@/lib/i18n";
+import type { Language } from "@/lib/i18n";
 
 // ── Module-level constants (reused by searchStands and queryOperations) ──
 
@@ -125,7 +127,8 @@ export interface SearchStandsFilter {
 export async function getStand(
   supabase: SupabaseClient,
   forestId: string,
-  standId: string
+  standId: string,
+  language: Language = "en",
 ): Promise<{ success: boolean; result: string; error?: string }> {
   const { data, error } = await supabase
     .from("compartments")
@@ -140,17 +143,17 @@ export async function getStand(
 
   const c = data as Compartment;
   const lines = [
-    `📋 Stand ${c.stand_id}`,
-    `  Area: ${c.area_ha?.toFixed(1)} ha`,
-    `  Development class: ${c.development_class ?? "N/A"}`,
-    `  Main species: ${c.main_species ?? "N/A"}`,
-    `  Site type: ${c.site_type ?? "N/A"}`,
-    `  Age: ${c.age_years ?? "N/A"} years`,
-    `  Volume: ${c.volume_m3?.toFixed(0)} m³`,
-    `  Basal area: ${c.basal_area?.toFixed(1)} m²/ha`,
-    `  Avg height: ${c.avg_height?.toFixed(1)} m`,
-    `  Avg diameter: ${c.avg_diameter?.toFixed(1)} cm`,
-    `  Growth: ${c.growth_m3_per_ha?.toFixed(1)} m³/ha/y`,
+    serverMsg("standDetail", language, c.stand_id),
+    serverMsg("standArea", language, c.area_ha?.toFixed(1) ?? "?"),
+    serverMsg("standDevClass", language, c.development_class ?? "N/A"),
+    serverMsg("standMainSpecies", language, c.main_species ?? "N/A"),
+    serverMsg("standSiteType", language, c.site_type ?? "N/A"),
+    serverMsg("standAge", language, String(c.age_years ?? "?")),
+    serverMsg("standVolume", language, c.volume_m3?.toFixed(0) ?? "?"),
+    serverMsg("standBasalArea", language, c.basal_area?.toFixed(1) ?? "?"),
+    serverMsg("standAvgHeight", language, c.avg_height?.toFixed(1) ?? "?"),
+    serverMsg("standAvgDiameter", language, c.avg_diameter?.toFixed(1) ?? "?"),
+    serverMsg("standGrowth", language, c.growth_m3_per_ha?.toFixed(1) ?? "?"),
   ];
 
   return { success: true, result: lines.join("\n") };
@@ -247,7 +250,8 @@ export async function searchStands(
 
 export async function planSummary(
   supabase: SupabaseClient,
-  forestId: string
+  forestId: string,
+  language: Language = "en",
 ): Promise<{ success: boolean; result: string; error?: string }> {
   try {
     const { data: opsData } = await supabase
@@ -274,27 +278,27 @@ export async function planSummary(
     const p2Cost = p2Ops.reduce((s, o) => s + (o.cost_eur ?? 0), 0);
 
     const lines = [
-      `📊 Plan Summary for ${totalArea.toFixed(1)} ha forest`,
+      serverMsg("summaryTitle", language, totalArea.toFixed(1)),
       ``,
-      `🌲 Total volume: ${Math.round(totalVolume).toLocaleString()} m³`,
-      `📈 Annual growth: ${Math.round(annualGrowth).toLocaleString()} m³/v`,
+      serverMsg("planTotalVolume", language, Math.round(totalVolume).toLocaleString()),
+      serverMsg("planAnnualGrowth", language, Math.round(annualGrowth).toLocaleString()),
       ``,
-      `Period 1 (2026-2035):`,
-      `  Clearcuts: ${p1Ops.filter((o) => o.type === "clear_cut").length}`,
-      `  Thinnings: ${p1Ops.filter((o) => o.type === "thinning" || o.type === "first_thinning").length}`,
-      `  Regeneration: ${p1Ops.filter((o) => o.type === "site_prep" || o.type === "planting").length}`,
-      `  Income: ${Math.round(p1Income).toLocaleString()} €`,
-      `  Costs: ${Math.round(p1Cost).toLocaleString()} €`,
-      `  Net: ${Math.round(p1Income - p1Cost).toLocaleString()} €`,
+      serverMsg("planPeriod1", language, "2026", "2035"),
+      serverMsg("summaryClearcuts", language, String(p1Ops.filter((o) => o.type === "clear_cut").length)),
+      serverMsg("summaryThinnings", language, String(p1Ops.filter((o) => o.type === "thinning" || o.type === "first_thinning").length)),
+      serverMsg("summaryRegen", language, String(p1Ops.filter((o) => o.type === "site_prep" || o.type === "planting").length)),
+      serverMsg("summaryIncome", language, Math.round(p1Income).toLocaleString()),
+      serverMsg("summaryCosts", language, Math.round(p1Cost).toLocaleString()),
+      serverMsg("summaryNet", language, Math.round(p1Income - p1Cost).toLocaleString()),
       ``,
-      `Period 2 (2036-2045):`,
-      `  Clearcuts: ${p2Ops.filter((o) => o.type === "clear_cut").length}`,
-      `  Thinnings: ${p2Ops.filter((o) => o.type === "thinning" || o.type === "first_thinning").length}`,
-      `  Income: ${Math.round(p2Income).toLocaleString()} €`,
-      `  Costs: ${Math.round(p2Cost).toLocaleString()} €`,
-      `  Net: ${Math.round(p2Income - p2Cost).toLocaleString()} €`,
+      serverMsg("planPeriod1", language, "2036", "2045"),
+      serverMsg("summaryClearcuts", language, String(p2Ops.filter((o) => o.type === "clear_cut").length)),
+      serverMsg("summaryThinnings", language, String(p2Ops.filter((o) => o.type === "thinning" || o.type === "first_thinning").length)),
+      serverMsg("summaryIncome", language, Math.round(p2Income).toLocaleString()),
+      serverMsg("summaryCosts", language, Math.round(p2Cost).toLocaleString()),
+      serverMsg("summaryNet", language, Math.round(p2Income - p2Cost).toLocaleString()),
       ``,
-      `Total operations: ${operations.length}`,
+      serverMsg("summaryTotalOps", language, String(operations.length)),
     ];
 
     return { success: true, result: lines.join("\n") };

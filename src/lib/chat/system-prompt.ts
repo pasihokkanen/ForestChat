@@ -68,7 +68,7 @@ export function buildSystemPrompt(
     `OPERATION GROUPS: Harvest (income) = clear_cut|thinning|first_thinning|selection_cutting. Silvicultural (costs) = site_prep|spruce_planting|pine_planting|tending|early_tending.`,
     ``,
     `CHART CREATION — MANDATORY RULES:`,
-    `- chart_id, title, type, and y_key are ALWAYS REQUIRED. Every create_chart call must include all four. Example: create_chart({ chart_id: "chart-yearly-income", title: "Yearly Harvest Income", type: "bar", y_key: "income", query_config: { ... } }). Never omit chart_id.`,
+    `- ALWAYS provide both title_en (English) and title_fi (Finnish) for every chart. This is mandatory — the UI switches between languages dynamically.`,
     `- ONLY create charts when the user EXPLICITLY asks for one: "chart", "graph", "plot", "visualization", "diagram", "show me visually", or "visualisoi" / "kaavio" / "kuvaaja" in Finnish.`,
     `- For factual questions ("what is the volume of spruce?", "how many hectares?", "paljonko kuusta?") answer with TEXT — use search_stands or query_operations, not create_chart.`,
     `- ALWAYS pass query_config. Never use the data field (legacy static mode).`,
