@@ -71,7 +71,7 @@ export function buildSystemPrompt(
     `- ALWAYS provide both title_en (English) and title_fi (Finnish) for every chart. This is mandatory — the UI switches between languages dynamically.`,
     `- ONLY create charts when the user EXPLICITLY asks for one: "chart", "graph", "plot", "visualization", "diagram", "show me visually", or "visualisoi" / "kaavio" / "kuvaaja" in Finnish.`,
     `- For factual questions ("what is the volume of spruce?", "how many hectares?", "paljonko kuusta?") answer with TEXT — use search_stands or query_operations, not create_chart.`,
-    `- ALWAYS pass query_config. Never use the data field (legacy static mode).`,
+    `- ALWAYS pass query_config — it auto-fetches data and stays up to date.`,
     `- Never call search_stands before create_chart — query_config fetches data automatically.`,
     `- Match chart type to data shape: single group_by → bar/line/area/pie/donut. Multiple → stacked_bar.`,
     `- For species distribution: ALWAYS use source:"compartment_species". Only use source:"compartments" with group_by:"main_species" if the user explicitly asks for "main species" or "dominant species".`,
