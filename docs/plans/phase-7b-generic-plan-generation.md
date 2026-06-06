@@ -21,7 +21,7 @@ The `generate_plan` tool gains a required `goal` parameter. If omitted, the AI M
 
 ### Goal 1: `maximum_growth`
 Maximize total volume growth across the property over the plan period.
-- **Rule:** All regeneration-ready stands get clearcut + replanted as soon as possible — front-loaded into the earliest years (capped at 5 clearcuts/year to keep operations realistic). Old slow-growing stock is replaced by fast-growing young trees.
+- **Rule:** All regeneration-ready stands get clearcut + replanted as soon as possible — front-loaded into the earliest years, limited to 15% of total forest area per year (e.g., 15 ha/year on a 100 ha property). Old slow-growing stock is replaced by fast-growing young trees.
 - **Rule:** Thinnings happen on schedule (no delays) to maintain optimal density for growth.
 - **Rule:** Tending operations scheduled as early as biologically feasible.
 - **Success metric:** Highest total cumulative volume grown (net new m³ produced across all stands during the plan period). This rewards replacing slow-growing old stock with fast-growing young trees.
@@ -156,8 +156,10 @@ interface SchedulingStrategy {
   name: string;
   /** Priority score for a final harvest on this stand (higher = sooner). */
   finalHarvestUrgency(stand: StandData, op: PlannedOperation): number;
-  /** Spread pattern: how many slots per year, interleave pattern. */
-  spreadConfig(): { maxPerYear: number; interleave: "even-first" | "round-robin" | "front-loaded" };
+  /** Spread pattern: controls how many hectares of clearcut are allowed per year.
+   *  `maxHaPerYear` is a function of total forest area — the scheduler computes it
+   *  once and uses it to fill year slots until the area budget is exhausted. */
+  spreadConfig(totalForestAreaHa: number): { maxHaPerYear: number; interleave: "even-first" | "round-robin" | "front-loaded" };
   /** Whether to consider splitting a stand when its single-year income would exceed the 
    *  target (stable_income: >150% avg; others: never). Returns max parts (2, 3, or 4) or 0=don't split. */
   shouldSplit(standIncome: number, targetYearlyIncome: number): number;
@@ -182,7 +184,7 @@ interface SchedulingStrategy {
 
 **`maximum_growth`:**
 - `finalHarvestUrgency`: `-(ageYears - optMax)` — standard urgency, higher = sooner
-- `spreadConfig`: `{ maxPerYear: 5, interleave: "front-loaded" }` — up to 5 clearcuts/year, front-loaded so all regeneration-ready stands are done by year ~6 (30 stands ÷ 5/year)
+- `spreadConfig`: `{ maxHaPerYear: totalForestAreaHa * 0.15, interleave: "front-loaded" }` — up to 15% of the property per year, front-loaded. A 100ha property can clearcut 15ha/year; a 500ha property can do 75ha/year.
 - `shouldSplit`: `() => 0` — never split; the goal is to regenerate ASAP
 - `thinningPriority`: `"interleaved"` — thinnings fill gaps between final harvests
 - `regenerationDelay`: `0` — replant same year
@@ -190,7 +192,7 @@ interface SchedulingStrategy {
 
 **`stable_income`:**
 - `finalHarvestUrgency`: inverse age urgency — spread evenly, not rush the most overdue
-- `spreadConfig`: `{ maxPerYear: ceil(totalHarvests / periodYears), interleave: "round-robin" }`
+- `spreadConfig`: `{ maxHaPerYear: totalForestAreaHa / periodYears, interleave: "round-robin" }` — even area distribution across the full period
 - `shouldSplit`: if `standIncome > targetYearlyIncome * 1.5`, return smallest N (2, 3, or 4) that brings per-part income ≤ target; returns 0 if under threshold
 - `thinningPriority`: `"before_harvests"` — if harvest already exceeds growth, thinning generates income with less volume impact
 - `regenerationDelay`: `1` — replant next year to spread costs
@@ -198,7 +200,7 @@ interface SchedulingStrategy {
 
 **`carbon_storage`:**
 - `finalHarvestUrgency`: `-(ageYears - (optMax + 15))` — only harvest when 15 years past optimal max
-- `spreadConfig`: `{ maxPerYear: max(1, ceil(totalHarvests / periodYears / 2)), interleave: "round-robin" }` — half the rate of balanced, minimizing clearcuts
+- `spreadConfig`: `{ maxHaPerYear: (totalForestAreaHa / periodYears) / 2, interleave: "round-robin" }` — half the area rate of balanced, minimizing clearcut footprint
 - `shouldSplit`: `() => 0` — avoid clearcuts entirely where possible
 - `thinningPriority`: `"after_harvests"`
 - `regenerationDelay`: `2` — allow natural seeding
@@ -206,7 +208,7 @@ interface SchedulingStrategy {
 
 **`biodiversity`:**
 - `finalHarvestUrgency`: `-(ageYears - (optMax + 10))` — extended rotation
-- `spreadConfig`: `{ maxPerYear: max(1, ceil(totalHarvests / periodYears / 2)), interleave: "round-robin" }` — same reduced rate as carbon_storage
+- `spreadConfig`: `{ maxHaPerYear: (totalForestAreaHa / periodYears) / 2, interleave: "round-robin" }` — same reduced area rate as carbon_storage
 - `shouldSplit`: `() => 0` — keep stands intact for habitat continuity
 - `thinningPriority`: `"interleaved"`
 - `regenerationDelay`: `2` — favor natural regeneration cues
@@ -214,7 +216,7 @@ interface SchedulingStrategy {
 
 **`balanced`:**
 - `finalHarvestUrgency`: `-(ageYears - optMax)` — standard urgency, most overdue first
-- `spreadConfig`: `{ maxPerYear: ceil(totalHarvests / periodYears), interleave: "round-robin" }` — even distribution across the full period
+- `spreadConfig`: `{ maxHaPerYear: totalForestAreaHa / periodYears, interleave: "round-robin" }` — even distribution across the full period
 - `shouldSplit`: `() => 0` — no splitting in balanced mode
 - `thinningPriority`: `"interleaved"` — thinnings and harvests alternate
 - `regenerationDelay`: `1` — replant next year (matches current behavior)
@@ -386,7 +388,7 @@ Use this in `classify.ts` `getSpeciesData()` to normalize any non-standard speci
 - Select the strategy based on goal
 - Apply strategy methods for urgency sorting, spreading, thinning priority, regeneration
 - Write unit tests for each strategy:
-  - `maximum_growth`: all regeneration-ready stands scheduled within first ~6 years (capped at 5/year)
+  - `maximum_growth`: all regeneration-ready stands scheduled ASAP, capped at 15% of total forest area per year
   - `stable_income`: harvest volume std dev below threshold
   - `carbon_storage`: no clearcuts unless significantly over-mature
   - `biodiversity`: mixed species regeneration
@@ -559,7 +561,7 @@ Create a single migration covering all schema changes:
 
 After implementation, a generic property (any forest, not just 989-405-0001-0405) should produce sensible plans for all 5 goals:
 
-1. **maximum_growth**: All regeneration-ready stands harvested within first 6 years (capped at 5/year), thinnings distributed. Regenerations planted immediately.
+1. **maximum_growth**: All regeneration-ready stands harvested ASAP, capped at 15% of total forest area per year (scales with property size). Thinnings distributed. Regenerations planted immediately.
 2. **stable_income**: Harvest volume ±15% across years, no single year spike. Large harvests split where needed.
 3. **carbon_storage**: Minimal clearcuts (only when 15+ years past optimal max), selection cutting preferred, standing volume higher at period end, no ditch mounding on peatland.
 4. **biodiversity**: Mixed species in regeneration, retention noted, waterside/slope stands skipped, longer rotations.
