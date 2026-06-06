@@ -251,18 +251,23 @@ Format:   JSON ("format": "json")
 | `HAKT` | Operation type | `"0"`=Standing sale, `"8021"`=Regeneration felling, `"8023"`=Thinning, `"8022"`=First thinning |
 | `PTL` | Wood type | `"N1"`=Pine log, `"N2"`=Spruce log, `"N3"`=Birch log, `"N4"`=Pine pulp, `"N5"`=Spruce pulp, `"N6"`=Birch pulp, `"N7"`=Pine small log, `"N8"`=Spruce small log |
 
-**Region mapping from property_id prefix:**
+**Region mapping from municipality:**
 
-| Property prefix | Luke region code | Region name |
-|---|---|---|
-| 1xx, 2xx | `"1"` | Etelä-Suomi |
-| 3xx, 4xx | `"3"` | Keski-Suomi |
-| 5xx | `"5"` | Kymi-Savo |
-| 6xx | `"6"` | Etelä-Pohjanmaa |
-| 7xx | `"71"` | Pohjois-Pohjanmaa |
-| 8xx | `"72"` | Kainuu-Koillismaa |
-| 9xx | `"8"` | Lappi |
-| (fallback) | `"9"` | KOKO MAA |
+Luke divides Finland into 9 pricing regions. The mapping is municipality-based, NOT a simple property-id prefix rule. The `forest.municipality` field (e.g., "Ähtäri", "Helsinki") is used to look up the correct Luke region code.
+
+A hardcoded lookup table in `config.ts` maps Finnish municipality names → Luke region codes. Example:
+
+| Municipality | Luke region |
+|---|---|
+| Helsinki, Espoo, Vantaa, Turku, Tampere... | `"1"` (Etelä-Suomi) |
+| Jyväskylä, Kuopio, Mikkeli... | `"3"` (Keski-Suomi) |
+| Joensuu, Lappeenranta... | `"4"` (Savo-Karjala) |
+| Kouvola, Kotka... | `"5"` (Kymi-Savo) |
+| Seinäjoki, Vaasa, **Ähtäri**... | `"6"` (Etelä-Pohjanmaa) |
+| Oulu, Raahe... | `"71"` (Pohjois-Pohjanmaa) |
+| Kajaani, Kuusamo... | `"72"` (Kainuu-Koillismaa) |
+| Rovaniemi, Inari, Sodankylä... | `"8"` (Lappi) |
+| (unknown / fallback) | `"9"` (KOKO MAA) |
 
 **Price tiers mapping:**
 
@@ -439,7 +444,7 @@ Use this in `classify.ts` `getSpeciesData()` to normalize any non-standard speci
   - Query variables: W (week), MPKH (region), HAKT (operation type), PTL (wood type)
   - Compute current week dynamically (e.g., `2026W22`) — do NOT hardcode. Use `new Date()` to calculate ISO week number and year.
   - Request `"format": "json"` — returns structured price data
-- Region detection from `forest.property_id` prefix using the mapping table in Section 5
+- Region detection from `forest.municipality` using a hardcoded lookup table mapping Finnish municipality names → Luke region codes
 - Parse response: extract tukki (log) and kuitu (pulp) prices per species per operation tier
 - Caching: store full JSON response in `timber_prices` table with `region`, `fetched_at`
 - Fallback chain: fresh cache (≤24h) → stale cache (≤7d) → live fetch (5s timeout) → hardcoded `PRICES` from `config.ts`
