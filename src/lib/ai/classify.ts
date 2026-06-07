@@ -114,7 +114,7 @@ function calculateValue(
     const pulpM3 = k.volumeM3 - logM3;
     totalLog = logM3;
     totalPulp = pulpM3;
-    totalValue = logM3 * prices.tukki + pulpM3 * prices.kuitu;
+    totalValue = logM3 * p.tukki + pulpM3 * p.kuitu;
   }
 
   return {

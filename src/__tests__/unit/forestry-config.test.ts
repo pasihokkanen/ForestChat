@@ -10,6 +10,8 @@ import {
   COSTS,
   GROWTH_MINERAL,
   GROWTH_PEATLAND,
+  GROWTH_REGION_MULTIPLIERS,
+  PRICE_REGION_MULTIPLIERS,
   classifySite,
   detectPeatland,
 } from "@/lib/ai/config";
@@ -47,6 +49,20 @@ describe("Forestry Config", () => {
     expect(max).toBe(90);
   });
 
+  it("getOptimalAge scales by growthMultiplier (Lappi = longer rotations)", () => {
+    const [min1, max1] = getOptimalAge("pine", "kuivahko", 1.0);
+    const [minLappi, maxLappi] = getOptimalAge("pine", "kuivahko", 0.55);
+    expect(minLappi).toBeGreaterThan(min1); // Lappi needs longer rotation
+    expect(minLappi).toBeCloseTo(Math.round(75 / 0.55));
+    expect(maxLappi).toBeCloseTo(Math.round(100 / 0.55));
+  });
+
+  it("getOptimalAge scales by growthMultiplier (Etelä-Suomi = shorter rotations)", () => {
+    const [min1] = getOptimalAge("spruce", "tuore", 1.0);
+    const [minSouth] = getOptimalAge("spruce", "tuore", 1.10);
+    expect(minSouth).toBeLessThan(min1);
+  });
+
   it("THINNING_BA has correct first thinning thresholds", () => {
     expect(THINNING_BA.ensiharvennus.pine).toBe(16);
     expect(THINNING_BA.ensiharvennus.spruce).toBe(24);
@@ -63,10 +79,13 @@ describe("Forestry Config", () => {
     expect(MIN_AGE_THINNING.spruce).toBe(40);
   });
 
-  it("COSTS has all silvicultural operations", () => {
-    expect(COSTS.site_prep).toBe(300);
-    expect(COSTS.spruce_planting).toBe(600);
-    expect(COSTS.tending).toBe(500);
+  it("COSTS has all silvicultural operations (Phase 7b updated rates)", () => {
+    expect(COSTS.site_prep).toBe(540);
+    expect(COSTS.spruce_planting).toBe(1080);
+    expect(COSTS.tending).toBe(900);
+    expect(COSTS.early_tending).toBe(630);
+    expect(COSTS.scalping).toBe(450);
+    expect(COSTS.ditch_mounding).toBe(720);
   });
 
   it("GROWTH_MINERAL has correct rates", () => {
@@ -79,6 +98,18 @@ describe("Forestry Config", () => {
   it("GROWTH_PEATLAND has correct rates", () => {
     expect(GROWTH_PEATLAND.lehtomainen).toBe(6.25);
     expect(GROWTH_PEATLAND.tuore).toBe(5.5);
+  });
+
+  it("GROWTH_REGION_MULTIPLIERS has all 9 regions", () => {
+    expect(Object.keys(GROWTH_REGION_MULTIPLIERS)).toHaveLength(9);
+    expect(GROWTH_REGION_MULTIPLIERS["3"]).toBe(1.0); // baseline
+    expect(GROWTH_REGION_MULTIPLIERS["8"]).toBeLessThan(0.6); // Lappi
+  });
+
+  it("PRICE_REGION_MULTIPLIERS has all 9 regions", () => {
+    expect(Object.keys(PRICE_REGION_MULTIPLIERS)).toHaveLength(9);
+    expect(PRICE_REGION_MULTIPLIERS["1"]).toBeGreaterThan(1.0); // Etelä-Suomi premium
+    expect(PRICE_REGION_MULTIPLIERS["8"]).toBeLessThan(1.0); // Lappi discount
   });
 });
 

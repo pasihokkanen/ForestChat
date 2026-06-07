@@ -49,6 +49,29 @@ interface StandYearState {
   developmentClass: string;
   cleared: boolean;
   growthMultiplier: number;
+  /** Year when the stand was last clear-cut (0 = not cleared). Used for regen delay timing. */
+  regenDelayStarted: number;
+}
+
+function makeMinimalStand(state: StandYearState): StandData {
+  return {
+    standId: state.standId,
+    areaHa: state.areaHa,
+    developmentClass: state.developmentClass,
+    siteType: state.siteType,
+    soilType: state.soilType,
+    drainageStatus: "",
+    mainSpecies: state.species,
+    site_class: state.siteType,
+    is_peatland: state.soilType === "peatland",
+    annual_growth: 0,
+    valueEur: 0,
+    logM3: 0,
+    pulpM3: 0,
+    ageYears: state.ageYears,
+    ba: state.basalArea,
+    volumeM3: state.volumeM3,
+  };
 }
 
 function initStandState(stand: StandData, growthMultiplier = 1.0): StandYearState {
@@ -64,6 +87,7 @@ function initStandState(stand: StandData, growthMultiplier = 1.0): StandYearStat
     developmentClass: stand.developmentClass,
     cleared: false,
     growthMultiplier,
+    regenDelayStarted: 0,
   };
 }
 
@@ -446,59 +470,42 @@ export function runScheduleEngine(input: ScheduleEngineInput): ScheduleEngineOut
   const strategy = getStrategy(goal);
   const volumeCapM3 = strategy.volumeCapMultiplier() * annualGrowthM3;
 
-  // Initialize stand states
-  const states = new Map<string, StandYearState>();
-  for (const s of forestStands) {
-    states.set(s.standId, initStandState(s, growthMultiplier));
-  }
-
-  // Pool: initial operations + dynamically spawned
-  let pool = [...operations];
-
-  // Apply stand wishes (T8)
-  if (input.wishes) {
+  // Helper: apply stand wishes to an operation array (mutates in place)
+  function applyWishes(ops: PlannedOperation[]) {
+    if (!input.wishes) return;
     for (const wish of input.wishes) {
       switch (wish.wish_type) {
-        case "accelerate_harvest": {
-          // Boost priority for this stand's operations
-          for (const op of pool) {
-            if (op.stand.standId === wish.stand_id) {
-              op._priority_boost = 2.0;
-            }
+        case "accelerate_harvest":
+          for (const op of ops) {
+            if (op.stand.standId === wish.stand_id) op._priority_boost = 2.0;
           }
           break;
-        }
         case "delay_harvest": {
-          // Set dueYear to the wish year
           const delayYear = parseInt(wish.wish_value ?? "", 10);
           if (!isNaN(delayYear)) {
-            for (const op of pool) {
-              if (op.stand.standId === wish.stand_id) {
-                op.dueYear = delayYear;
-              }
+            for (const op of ops) {
+              if (op.stand.standId === wish.stand_id) op.dueYear = delayYear;
             }
           }
           break;
         }
-        case "no_clearcut": {
-          // Convert any clear_cut to selection_cutting
-          for (let i = 0; i < pool.length; i++) {
-            if (pool[i].stand.standId === wish.stand_id && pool[i].type === "clear_cut") {
-              pool[i] = {
-                ...pool[i],
+        case "no_clearcut":
+          for (let i = 0; i < ops.length; i++) {
+            if (ops[i].stand.standId === wish.stand_id && ops[i].type === "clear_cut") {
+              ops[i] = {
+                ...ops[i],
                 type: "selection_cutting",
-                removal_m3: Math.round(pool[i].removal_m3 * 0.5),
-                income_eur: Math.round(pool[i].income_eur * 0.5),
-                notes: `${pool[i].notes} (no_clearcut wish)`,
+                removal_m3: Math.round(ops[i].removal_m3 * 0.5),
+                income_eur: Math.round(ops[i].income_eur * 0.5),
+                notes: `${ops[i].notes} (no_clearcut wish)`,
               };
             }
           }
           break;
-        }
         case "retention_pct": {
           const pct = parseInt(wish.wish_value ?? "", 10);
           if (!isNaN(pct) && pct > 0 && pct < 100) {
-            for (const op of pool) {
+            for (const op of ops) {
               if (op.stand.standId === wish.stand_id && op.removal_m3 > 0) {
                 op.removal_m3 = Math.round(op.removal_m3 * (1 - pct / 100));
                 op.income_eur = Math.round(op.income_eur * (1 - pct / 100));
@@ -510,6 +517,19 @@ export function runScheduleEngine(input: ScheduleEngineInput): ScheduleEngineOut
       }
     }
   }
+
+  // Initialize stand states
+  const states = new Map<string, StandYearState>();
+  for (const s of forestStands) {
+    states.set(s.standId, initStandState(s, growthMultiplier));
+  }
+
+  // Pool: initial operations + dynamically spawned
+  let pool = [...operations];
+
+  // Apply stand wishes to initial pool
+  applyWishes(pool);
+
   let carryover: PlannedOperation[] = [];
   const yearPlans = new Map<number, PlannedOperation[]>();
 
@@ -518,7 +538,55 @@ export function runScheduleEngine(input: ScheduleEngineInput): ScheduleEngineOut
     const spawned: PlannedOperation[] = [];
     for (const [id, state] of states) {
       spawned.push(...spawnOperations(state, yr, goal, growthMultiplier));
+
+      // 2b. Spawn regeneration ops for cleared stands
+      if (state.cleared && state.regenDelayStarted > 0) {
+        const delay = strategy.regenDelayYears();
+        const yearsWaiting = yr - state.regenDelayStarted;
+        if (yearsWaiting >= delay) {
+          const regenStand = makeMinimalStand(state);
+          const regenSite = strategy.regenerationSpecies(regenStand);
+          const isPeatland = state.soilType === "peatland";
+          const sitePrepType = isPeatland ? "ditch_mounding"
+            : goal === "carbon_storage" ? "scalping"
+            : "site_prep";
+
+          // Don't spawn if already scheduled in a prior year
+          const allPending = [...pool, ...carryover];
+          const alreadyHasPrep = allPending.some(op =>
+            op.stand.standId === state.standId &&
+            ["site_prep", "scalping", "ditch_mounding"].includes(op.type));
+          if (!alreadyHasPrep) {
+            spawned.push({
+              stand: regenStand,
+              type: sitePrepType,
+              year: yr,
+              income_eur: 0,
+              cost_eur: 0,
+              removal_m3: 0,
+              notes: `Regeneration after clearcut`,
+            });
+          }
+
+          const plantType = `${regenSite}_planting`;
+          const alreadyPlanted = pool.some(op =>
+            op.stand.standId === state.standId &&
+            op.type.includes("planting"));
+          if (!alreadyPlanted) {
+            spawned.push({
+              stand: regenStand,
+              type: plantType,
+              year: yr,
+              income_eur: 0,
+              cost_eur: 0,
+              removal_m3: 0,
+              notes: `${regenSite} planting`,
+            });
+          }
+        }
+      }
     }
+    applyWishes(spawned);
     pool.push(...spawned);
 
     // 2. Merge pool + carryover, sort by priority
@@ -541,18 +609,17 @@ export function runScheduleEngine(input: ScheduleEngineInput): ScheduleEngineOut
         st.basalArea = 0;
         st.ageYears = 0;
         st.cleared = true;
+        st.regenDelayStarted = yr;
       } else if (op.type === "thinning" || op.type === "first_thinning" || op.type === "selection_cutting") {
         const pct = op.removal_m3 / (st.volumeM3 || 1);
         st.volumeM3 -= op.removal_m3;
         st.basalArea = Math.max(0, st.basalArea * (1 - Math.min(pct, 1)));
       }
 
-      // Regeneration ops for carbon_storage: use scalping, otherwise site_prep
-      if (op.type === "site_prep" || op.type === "scalping" || op.type === "ditch_mounding") {
-        // un-clear happens after delay
-      }
+      // Regeneration ops applied
       if (op.type.includes("planting")) {
         st.cleared = false;
+        st.regenDelayStarted = 0;
         if (st.basalArea === 0) st.basalArea = 2;
         if (st.volumeM3 === 0) st.volumeM3 = st.areaHa * 1;
       }

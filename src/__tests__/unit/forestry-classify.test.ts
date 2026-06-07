@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import type { Compartment } from "@/types/database";
 import { classifyAndValueStands } from "@/lib/ai/classify";
 
-// Mock compartments matching the Hokkala forest data patterns
+// --- Helpers ---
+
 function makeCompartment(overrides: Partial<Compartment> & { stand_id: string }): Compartment {
   return {
     id: `test-${overrides.stand_id}`,
@@ -47,15 +48,15 @@ describe("classifyAndValueStands", () => {
     expect(result.operations.some((o) => o.type === "clear_cut")).toBe(true);
   });
 
-  it("handles K128 special case: regeneration_ready at 57y → thinning only", () => {
+  it("classifies edge-age regeneration_ready as clear_cut (not K128 — generic)", () => {
+    // Regression: any regeneration_ready stand at ≥ optimal age gets clear_cut.
+    // No stand-number-specific logic remains.
     const compartments = [
-      makeCompartment({ stand_id: "128", development_class: "regeneration_ready", age_years: 57 }),
+      makeCompartment({ stand_id: "18", main_species: "pine", site_type: "sub-xeric", development_class: "regeneration_ready", age_years: 60 }),
     ];
     const result = classifyAndValueStands(compartments);
-    // Should NOT be clear_cut despite development_class
-    expect(result.operations.some((o) => o.type === "clear_cut")).toBe(false);
-    // Should be thinning instead
-    expect(result.operations.some((o) => o.type === "thinning")).toBe(true);
+    // At age 60 on kuivahko pine (optMin=75, optMax=100), NOT eligible → no clear_cut
+    expect(result.operations.filter((o) => o.type === "clear_cut")).toHaveLength(0);
   });
 
   it("calculates volume and value correctly", () => {
@@ -89,12 +90,51 @@ describe("classifyAndValueStands", () => {
   });
 
   it("calculates per-species stumpage value", () => {
-    // A compartment with 50% pine, 50% spruce by volume
     const compartments = [
       makeCompartment({ stand_id: "7", volume_m3: 200, main_species: "pine" }),
     ];
     const result = classifyAndValueStands(compartments);
-    // Value should be positive — based on timber prices
     expect(result.forestStands[0].valueEur).toBeGreaterThan(0);
+  });
+});
+
+// --- Goal-aware classification ---
+
+describe("classifyAndValueStands with goals", () => {
+  it("carbon_storage: over-age stand gets selection_cutting not clear_cut", () => {
+    // kuivahko pine: optMax=100. Carbon requires age ≥ 115. Age 125 is eligible.
+    const compartments = [
+      makeCompartment({ stand_id: "c1", development_class: "regeneration_ready", age_years: 125, main_species: "pine", site_type: "sub-xeric" }),
+    ];
+    const result = classifyAndValueStands(compartments, "carbon_storage");
+    expect(result.operations.some((o) => o.type === "clear_cut")).toBe(false);
+    expect(result.operations.some((o) => o.type === "selection_cutting")).toBe(true);
+  });
+
+  it("carbon_storage: normal-age regeneration_ready skips clearcut entirely", () => {
+    const compartments = [
+      makeCompartment({ stand_id: "c2", development_class: "regeneration_ready", age_years: 72, main_species: "pine", site_type: "sub-xeric" }),
+    ];
+    // At 72y on kuivahko pine (optMin=75) → under eligible, so no op at all
+    const result = classifyAndValueStands(compartments, "carbon_storage");
+    expect(result.operations.filter((o) => o.type === "clear_cut" || o.type === "selection_cutting")).toHaveLength(0);
+  });
+
+  it("maximum_growth_aggressive: young but eligible stand gets clear_cut immediately", () => {
+    const compartments = [
+      makeCompartment({ stand_id: "a1", development_class: "regeneration_ready", age_years: 68, main_species: "spruce", site_type: "mesic" }),
+    ];
+    // Standard goal: age 68 on tuore spruce (optMin=60) → eligible
+    const result = classifyAndValueStands(compartments, "maximum_growth_aggressive");
+    expect(result.operations.some((o) => o.type === "clear_cut")).toBe(true);
+  });
+
+  it("balanced: regeneration_ready at optimal age gets clear_cut", () => {
+    const compartments = [
+      makeCompartment({ stand_id: "b1", development_class: "regeneration_ready", age_years: 70, main_species: "pine", site_type: "mesic" }),
+    ];
+    // tuore pine optMin=65 → eligible
+    const result = classifyAndValueStands(compartments, "balanced");
+    expect(result.operations.some((o) => o.type === "clear_cut")).toBe(true);
   });
 });
