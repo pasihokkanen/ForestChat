@@ -173,120 +173,92 @@ const balancedGrowthStrategy: SchedulingStrategy = {
     const remaining: PlannedOperation[] = [];
     let usedM3 = 0;
 
-    // Balanced approach: each year gets a mix of tendings, clearcuts,
-    // and thinnings. Clearcuts are scheduled first (up to 2/year) to
-    // ensure they don't get starved by thinnings. Thinnings fill the
-    // remaining cap. All operations share one volume cap (125% growth).
-
+    // Rate limits for non-harvest operations
     let tendingCount = 0;
     let regenCount = 0;
-    let clearcutCount = 0;
     const MAX_TENDINGS_PER_YEAR = 5;
     const MAX_REGEN_PER_YEAR = 3;
-    const MAX_CLEARCUTS_PER_YEAR = 2;
 
     const isTending = (op: PlannedOperation) => op.type === "tending" || op.type === "early_tending";
     const isRegen = (op: PlannedOperation) =>
       op.type.includes("planting") || op.type === "site_prep" ||
       op.type === "ditch_mounding" || op.type === "scalping";
-    const isThinning = (op: PlannedOperation) =>
-      op.type === "thinning" || op.type === "first_thinning" || op.type === "selection_cutting";
+    const isHarvest = (op: PlannedOperation) =>
+      op.type === "thinning" || op.type === "first_thinning" ||
+      op.type === "selection_cutting" || op.type === "clear_cut";
 
-    // Pass 1: tendings and regeneration (rate-limited, no cap consumption)
+    // Pass 1: tendings and regeneration (rate-limited, no cap impact)
     for (const op of candidates) {
       if (!isTending(op) && !isRegen(op)) continue;
-
-      if (isTending(op) && tendingCount >= MAX_TENDINGS_PER_YEAR) {
-        remaining.push(op);
-        continue;
-      }
-      if (isRegen(op) && regenCount >= MAX_REGEN_PER_YEAR) {
-        remaining.push(op);
-        continue;
-      }
-
+      if (isTending(op) && tendingCount >= MAX_TENDINGS_PER_YEAR) { remaining.push(op); continue; }
+      if (isRegen(op) && regenCount >= MAX_REGEN_PER_YEAR) { remaining.push(op); continue; }
       scheduled.push(op);
       if (isTending(op)) tendingCount++;
       if (isRegen(op)) regenCount++;
     }
 
-    // Pass 2: schedule up to 1 clearcut first (reserves room), then
-    // Pass 3: thinnings fill remaining cap, then
-    // Pass 4: if cap still has room, try 1 more clearcut.
-    // This ensures each year gets a mix: 1-2 clearcuts + several thinnings.
+    // Pass 2: harvest operations — round-robin interleaving between
+    // thinnings and clearcuts so each year gets a mix. Same algorithm
+    // as the 'balanced' strategy, proven to distribute evenly.
+    const thinnings = candidates.filter(
+      (op) => op.type === "thinning" || op.type === "first_thinning" || op.type === "selection_cutting",
+    );
+    const clearcuts = candidates.filter((op) => op.type === "clear_cut");
 
-    // Pass 2a: first clearcut
-    for (const op of candidates) {
-      if (op.type !== "clear_cut") continue;
-      if (clearcutCount >= 1) break; // only 1 in this sub-pass
+    let ti = 0;
+    let ci = 0;
+    let pickThinning = true;
 
-      if (usedM3 + op.removal_m3 <= volumeCapM3) {
-        scheduled.push(op);
-        usedM3 += op.removal_m3;
-        clearcutCount++;
-      } else if (this.shouldSplit(op.removal_m3, volumeCapM3) > 0) {
-        const maxParts = this.shouldSplit(op.removal_m3, volumeCapM3);
-        const split = trySplitStand(op.stand, op, volumeCapM3, maxParts);
-        if (split && split.length > 0) {
-          if (usedM3 + split[0].removal_m3 <= volumeCapM3) {
-            scheduled.push(split[0]);
-            usedM3 += split[0].removal_m3;
-            clearcutCount++;
-            for (let i = 1; i < split.length; i++) remaining.push(split[i]);
-          }
-        }
-        // If can't split, skip — thinnings get priority this year
-      }
-      break; // only attempt one clearcut before thinnings
-    }
+    while (ti < thinnings.length || ci < clearcuts.length) {
+      const pool = pickThinning ? thinnings : clearcuts;
+      const idx = pickThinning ? ti : ci;
 
-    // Pass 3: thinnings — fill remaining cap
-    for (const op of candidates) {
-      if (!isThinning(op)) continue;
-
-      if (usedM3 + op.removal_m3 <= volumeCapM3) {
-        scheduled.push(op);
-        usedM3 += op.removal_m3;
-      } else {
-        remaining.push(op);
-      }
-    }
-
-    // Pass 4: second clearcut — only if cap still has room
-    for (const op of candidates) {
-      if (op.type !== "clear_cut") continue;
-      if (clearcutCount >= MAX_CLEARCUTS_PER_YEAR) {
-        remaining.push(op);
-        continue;
-      }
-      // Skip if already scheduled in pass 2a
-      if (scheduled.some(o => o.stand.standId === op.stand.standId && o.type === "clear_cut")) continue;
-
-      if (usedM3 + op.removal_m3 <= volumeCapM3) {
-        scheduled.push(op);
-        usedM3 += op.removal_m3;
-        clearcutCount++;
-      } else if (this.shouldSplit(op.removal_m3, volumeCapM3) > 0) {
-        const maxParts = this.shouldSplit(op.removal_m3, volumeCapM3);
-        const split = trySplitStand(op.stand, op, volumeCapM3, maxParts);
-        if (split) {
-          let taken = 0;
-          for (const subOp of split) {
-            if (clearcutCount >= MAX_CLEARCUTS_PER_YEAR) break;
-            if (usedM3 + subOp.removal_m3 <= volumeCapM3) {
-              scheduled.push(subOp);
-              usedM3 += subOp.removal_m3;
-              taken++;
-              clearcutCount++;
+      if (idx < pool.length) {
+        const op = pool[idx];
+        if (usedM3 + op.removal_m3 <= volumeCapM3) {
+          scheduled.push(op);
+          usedM3 += op.removal_m3;
+        } else if (op.type === "clear_cut" && this.shouldSplit(op.removal_m3, volumeCapM3) > 0) {
+          // Try splitting clearcuts that exceed cap
+          const maxParts = this.shouldSplit(op.removal_m3, volumeCapM3);
+          const split = trySplitStand(op.stand, op, volumeCapM3, maxParts);
+          if (split) {
+            let taken = 0;
+            for (const subOp of split) {
+              if (usedM3 + subOp.removal_m3 <= volumeCapM3) {
+                scheduled.push(subOp);
+                usedM3 += subOp.removal_m3;
+                taken++;
+              }
             }
+            for (let i = taken; i < split.length; i++) {
+              remaining.push(split[i]);
+            }
+            if (pickThinning) ti++;
+            else ci++;
+            pickThinning = !pickThinning;
+            continue;
           }
-          for (let i = taken; i < split.length; i++) {
-            remaining.push(split[i]);
-          }
-          continue;
         }
+        // Doesn't fit and can't split — defer to next year
+        if (usedM3 + op.removal_m3 > volumeCapM3) {
+          remaining.push(op);
+        }
+        if (pickThinning) ti++;
+        else ci++;
       }
-      remaining.push(op);
+
+      // Alternate, or skip empty pool
+      if (pickThinning && ti >= thinnings.length) {
+        pickThinning = false;
+      } else if (!pickThinning && ci >= clearcuts.length) {
+        pickThinning = true;
+      } else {
+        pickThinning = !pickThinning;
+      }
+
+      // Safety: both pools exhausted
+      if (ti >= thinnings.length && ci >= clearcuts.length) break;
     }
 
     return { scheduled, remaining };
