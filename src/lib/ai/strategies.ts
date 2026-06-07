@@ -8,7 +8,7 @@
 import type { StandData, PlannedOperation, PlanGoal } from "./types";
 import { trySplitStand } from "./schedule";
 import { getGrowthRate } from "./chart-engine";
-import { getOptimalAge, THINNING_BA, MIN_AGE_FIRST_THINNING, MIN_AGE_THINNING } from "./config";
+import { getOptimalAge, THINNING_BA, MIN_AGE_FIRST_THINNING, MIN_AGE_THINNING, getPrices, COSTS } from "./config";
 
 // ── Scheduling Strategy Interface ──
 
@@ -51,6 +51,10 @@ interface StandYearState {
   growthMultiplier: number;
   /** Year when the stand was last clear-cut (0 = not cleared). Used for regen delay timing. */
   regenDelayStarted: number;
+  /** Year when the stand was last tended (early_tending or tending). 0 = never tended. */
+  tendedYear: number;
+  /** Current stumpage value (€). Updated as volume changes during simulation. */
+  valueEur: number;
 }
 
 function makeMinimalStand(state: StandYearState): StandData {
@@ -88,6 +92,8 @@ function initStandState(stand: StandData, growthMultiplier = 1.0): StandYearStat
     cleared: false,
     growthMultiplier,
     regenDelayStarted: 0,
+    tendedYear: 0,
+    valueEur: stand.valueEur,
   };
 }
 
@@ -167,45 +173,60 @@ const balancedGrowthStrategy: SchedulingStrategy = {
     const remaining: PlannedOperation[] = [];
     let usedM3 = 0;
 
-    // Priority inversion: if total harvest already exceeds annual growth,
-    // skip clearcuts until all thinnings are placed
-    const totalHarvestPending = candidates.reduce((s, op) => s + op.removal_m3, 0);
-    const skipClearcuts = totalHarvestPending > annualGrowthM3 * 2;
+    // Two-pass approach: treat ALL non-clearcut operations (thinnings,
+    // tendings, regeneration) as priority, processing them first. Only
+    // allow clearcuts if everything else fit within the volume cap.
+    // This ensures silvicultural priority — delaying thinnings permanently
+    // depresses growth trajectory more than delaying clearcuts.
+    const priorityOps = candidates.filter((op) => op.type !== "clear_cut");
+    const clearcutOps = candidates.filter((op) => op.type === "clear_cut");
 
-    for (const op of candidates) {
-      if (skipClearcuts && op.type === "clear_cut") {
-        remaining.push(op);
-        continue;
-      }
+    let prioritySkipped = false;
 
+    // Pass 1: non-clearcut operations (thinnings, tendings, regeneration)
+    for (const op of priorityOps) {
       if (usedM3 + op.removal_m3 <= volumeCapM3) {
         scheduled.push(op);
         usedM3 += op.removal_m3;
       } else {
-        // Try splitting clearcuts that exceed cap
-        if (op.type === "clear_cut" && this.shouldSplit(op.removal_m3, volumeCapM3) > 0) {
-          const maxParts = this.shouldSplit(op.removal_m3, volumeCapM3);
-          const split = trySplitStand(op.stand, op, volumeCapM3, maxParts);
-          if (split) {
-            // Take only as many parts as fit
-            let taken = 0;
-            for (const subOp of split) {
-              if (usedM3 + subOp.removal_m3 <= volumeCapM3) {
-                scheduled.push(subOp);
-                usedM3 += subOp.removal_m3;
-                taken++;
-              }
-            }
-            // Push remaining parts to carryover
-            for (let i = taken; i < split.length; i++) {
-              remaining.push(split[i]);
-            }
-            continue;
-          }
-        }
         remaining.push(op);
+        prioritySkipped = true;
       }
     }
+
+    // Pass 2: clearcuts — only if ALL priority ops fit
+    if (!prioritySkipped) {
+      for (const op of clearcutOps) {
+        if (usedM3 + op.removal_m3 <= volumeCapM3) {
+          scheduled.push(op);
+          usedM3 += op.removal_m3;
+        } else {
+          // Try splitting clearcuts that exceed cap
+          if (this.shouldSplit(op.removal_m3, volumeCapM3) > 0) {
+            const maxParts = this.shouldSplit(op.removal_m3, volumeCapM3);
+            const split = trySplitStand(op.stand, op, volumeCapM3, maxParts);
+            if (split) {
+              let taken = 0;
+              for (const subOp of split) {
+                if (usedM3 + subOp.removal_m3 <= volumeCapM3) {
+                  scheduled.push(subOp);
+                  usedM3 += subOp.removal_m3;
+                  taken++;
+                }
+              }
+              for (let i = taken; i < split.length; i++) {
+                remaining.push(split[i]);
+              }
+              continue;
+            }
+          }
+          remaining.push(op);
+        }
+      }
+    } else {
+      remaining.push(...clearcutOps);
+    }
+
     return { scheduled, remaining };
   },
   shouldSplit: (standVolume: number, volumeCapM3: number) => {
@@ -343,26 +364,14 @@ function spawnOperations(
   if (state.cleared) return spawned;
 
   // Reconstruct a minimal StandData for operation creation
-  const stand: StandData = {
-    standId: state.standId,
-    areaHa: state.areaHa,
-    developmentClass: state.developmentClass,
-    siteType: state.siteType,
-    soilType: state.soilType,
-    drainageStatus: "",
-    mainSpecies: state.species,
-    site_class: state.siteType,
-    is_peatland: state.soilType === "peatland",
-    annual_growth: 0,
-    valueEur: 0,
-    logM3: 0,
-    pulpM3: 0,
-    ageYears: state.ageYears,
-    ba: state.basalArea,
-    volumeM3: state.volumeM3,
-  };
+  const stand: StandData = makeMinimalStand(state);
 
-  // Check clearcut eligibility
+  // --- Helper: price ratio for thinning tier vs clearcut ---
+  const spKey = state.species === "birch" ? "silver_birch" : state.species;
+  const up = getPrices("uudistushakkuu", spKey);
+  const upSum = up.tukki + up.kuitu;
+
+  // --- Check clearcut eligibility ---
   const [optMin, optMax] = getOptimalAge(state.species, state.siteType);
   const isOverAge = goal === "carbon_storage"
     ? state.ageYears >= optMax + 15
@@ -373,7 +382,7 @@ function spawnOperations(
       stand,
       type: goal === "carbon_storage" ? "selection_cutting" : "clear_cut",
       year,
-      income_eur: 0, // will be valued later
+      income_eur: Math.round(state.valueEur * (goal === "carbon_storage" ? 0.5 : 1.0)),
       cost_eur: 0,
       removal_m3: Math.round(state.volumeM3 * (goal === "carbon_storage" ? 0.5 : 1.0)),
       notes: `Spawned at age ${state.ageYears}`,
@@ -381,7 +390,7 @@ function spawnOperations(
     });
   }
 
-  // Check thinning eligibility
+  // --- Check thinning eligibility ---
   const thinThresh = THINNING_BA["harvennus"]?.[state.species] ?? 22;
   const firstThinThresh = THINNING_BA["ensiharvennus"]?.[state.species] ?? 18;
   const minFirstAge = MIN_AGE_FIRST_THINNING?.[state.species] ?? 30;
@@ -389,39 +398,45 @@ function spawnOperations(
 
   if (state.basalArea >= firstThinThresh && state.ageYears >= minFirstAge &&
       !state.developmentClass.includes("mature_thinning")) {
+    const ep = getPrices("ensiharvennus", spKey);
+    const ratio = (ep.tukki + ep.kuitu) / upSum;
+    const removalM3 = Math.round(state.volumeM3 * 0.25);
     spawned.push({
       stand,
       type: "first_thinning",
       year,
-      income_eur: 0,
+      income_eur: Math.round(state.valueEur * 0.25 * ratio),
       cost_eur: 0,
-      removal_m3: Math.round(state.volumeM3 * 0.25),
+      removal_m3: removalM3,
       notes: `Spawned first thinning BA=${state.basalArea.toFixed(0)}`,
       dueYear: year,
     });
   } else if (state.basalArea >= thinThresh && state.ageYears >= minThinAge) {
+    const hp = getPrices("harvennus", spKey);
+    const ratio = (hp.tukki + hp.kuitu) / upSum;
+    const removalM3 = Math.round(state.volumeM3 * 0.28);
     spawned.push({
       stand,
       type: "thinning",
       year,
-      income_eur: 0,
+      income_eur: Math.round(state.valueEur * 0.28 * ratio),
       cost_eur: 0,
-      removal_m3: Math.round(state.volumeM3 * 0.28),
+      removal_m3: removalM3,
       notes: `Spawned thinning BA=${state.basalArea.toFixed(0)}`,
       dueYear: year,
     });
   }
 
-  // Check tending eligibility
-  if (state.developmentClass.includes("seedling")) {
+  // --- Check tending eligibility (spawn once only) ---
+  if (state.tendedYear === 0 && state.developmentClass.includes("seedling")) {
     if (state.ageYears >= 3 && state.ageYears <= 12) {
       spawned.push({
         stand,
         type: "early_tending",
         year,
         income_eur: 0,
-        cost_eur: 0,
-        removal_m3: 0,
+        cost_eur: Math.round(COSTS.early_tending * state.areaHa),
+        removal_m3: Math.round(state.volumeM3 * 0.4),
         notes: `Spawned early tending age=${state.ageYears}`,
         dueYear: year,
       });
@@ -431,8 +446,8 @@ function spawnOperations(
         type: "tending",
         year,
         income_eur: 0,
-        cost_eur: 0,
-        removal_m3: 0,
+        cost_eur: Math.round(COSTS.tending * state.areaHa),
+        removal_m3: Math.round(state.volumeM3 * 0.3),
         notes: `Spawned tending age=${state.ageYears}`,
         dueYear: year,
       });
@@ -557,12 +572,13 @@ export function runScheduleEngine(input: ScheduleEngineInput): ScheduleEngineOut
             op.stand.standId === state.standId &&
             ["site_prep", "scalping", "ditch_mounding"].includes(op.type));
           if (!alreadyHasPrep) {
+            const cost = sitePrepType ? Math.round((COSTS[sitePrepType] ?? 0) * state.areaHa) : 0;
             spawned.push({
               stand: regenStand,
               type: sitePrepType,
               year: yr,
               income_eur: 0,
-              cost_eur: 0,
+              cost_eur: cost,
               removal_m3: 0,
               notes: `Regeneration after clearcut`,
             });
@@ -573,12 +589,13 @@ export function runScheduleEngine(input: ScheduleEngineInput): ScheduleEngineOut
             op.stand.standId === state.standId &&
             op.type.includes("planting"));
           if (!alreadyPlanted) {
+            const plantCost = Math.round((COSTS[plantType] ?? 0) * state.areaHa);
             spawned.push({
               stand: regenStand,
               type: plantType,
               year: yr,
               income_eur: 0,
-              cost_eur: 0,
+              cost_eur: plantCost,
               removal_m3: 0,
               notes: `${regenSite} planting`,
             });
@@ -587,7 +604,21 @@ export function runScheduleEngine(input: ScheduleEngineInput): ScheduleEngineOut
       }
     }
     applyWishes(spawned);
-    pool.push(...spawned);
+
+    // Deduplicate: skip any spawned operation whose stand+type combo
+    // already exists in the pool or carryover (avoids piling up
+    // duplicate thinnings/tendings for the same stand year after year).
+    const existingKeys = new Set<string>();
+    for (const op of [...pool, ...carryover]) {
+      existingKeys.add(`${op.stand.standId}|${op.type}`);
+    }
+    for (const op of spawned) {
+      const key = `${op.stand.standId}|${op.type}`;
+      if (!existingKeys.has(key)) {
+        pool.push(op);
+        existingKeys.add(key);
+      }
+    }
 
     // 2. Merge pool + carryover, sort by priority
     const candidates = sortCandidates([...pool, ...carryover], goal);
@@ -605,6 +636,7 @@ export function runScheduleEngine(input: ScheduleEngineInput): ScheduleEngineOut
       if (!st) continue;
 
       if (op.type === "clear_cut") {
+        st.valueEur = 0;
         st.volumeM3 = 0;
         st.basalArea = 0;
         st.ageYears = 0;
@@ -612,8 +644,14 @@ export function runScheduleEngine(input: ScheduleEngineInput): ScheduleEngineOut
         st.regenDelayStarted = yr;
       } else if (op.type === "thinning" || op.type === "first_thinning" || op.type === "selection_cutting") {
         const pct = op.removal_m3 / (st.volumeM3 || 1);
+        st.valueEur = Math.max(0, st.valueEur - Math.round(st.valueEur * Math.min(pct, 1)));
         st.volumeM3 -= op.removal_m3;
         st.basalArea = Math.max(0, st.basalArea * (1 - Math.min(pct, 1)));
+      }
+
+      // Register tending — prevents re-spawning
+      if (op.type === "tending" || op.type === "early_tending") {
+        st.tendedYear = yr;
       }
 
       // Regeneration ops applied
@@ -622,6 +660,7 @@ export function runScheduleEngine(input: ScheduleEngineInput): ScheduleEngineOut
         st.regenDelayStarted = 0;
         if (st.basalArea === 0) st.basalArea = 2;
         if (st.volumeM3 === 0) st.volumeM3 = st.areaHa * 1;
+        if (st.valueEur === 0) st.valueEur = Math.round(st.areaHa * 50); // nominal seedling value
       }
     }
 
@@ -633,6 +672,11 @@ export function runScheduleEngine(input: ScheduleEngineInput): ScheduleEngineOut
           st.ageYears, st.basalArea, st.developmentClass,
         );
         const growthM3 = growthM3PerHa * st.areaHa;
+        // Proportionally increase stumpage value with volume growth
+        if (st.volumeM3 > 0) {
+          const growthRatio = growthM3 / st.volumeM3;
+          st.valueEur = Math.round(st.valueEur * (1 + growthRatio));
+        }
         st.volumeM3 += growthM3;
       }
       st.ageYears += 1;
