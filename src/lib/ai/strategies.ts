@@ -182,12 +182,35 @@ const balancedGrowthStrategy: SchedulingStrategy = {
     const clearcutOps = candidates.filter((op) => op.type === "clear_cut");
 
     let prioritySkipped = false;
+    let tendingCount = 0;
+    let regenCount = 0;
+    const MAX_TENDINGS_PER_YEAR = 5;
+    const MAX_REGEN_PER_YEAR = 3;
 
     // Pass 1: non-clearcut operations (thinnings, tendings, regeneration)
     for (const op of priorityOps) {
+      // Rate-limit non-harvest operations so year 1 doesn't get flooded
+      // with all tendings and plantings at once.
+      const isTending = op.type === "tending" || op.type === "early_tending";
+      const isRegen = op.type.includes("planting") || op.type === "site_prep" ||
+                      op.type === "ditch_mounding" || op.type === "scalping";
+
+      if (isTending && tendingCount >= MAX_TENDINGS_PER_YEAR) {
+        remaining.push(op);
+        prioritySkipped = true;
+        continue;
+      }
+      if (isRegen && regenCount >= MAX_REGEN_PER_YEAR) {
+        remaining.push(op);
+        prioritySkipped = true;
+        continue;
+      }
+
       if (usedM3 + op.removal_m3 <= volumeCapM3) {
         scheduled.push(op);
         usedM3 += op.removal_m3;
+        if (isTending) tendingCount++;
+        if (isRegen) regenCount++;
       } else {
         remaining.push(op);
         prioritySkipped = true;
@@ -390,14 +413,15 @@ function spawnOperations(
     });
   }
 
-  // --- Check thinning eligibility ---
+  // --- Check thinning eligibility (skip regeneration_ready — those get clearcuts) ---
   const thinThresh = THINNING_BA["harvennus"]?.[state.species] ?? 22;
   const firstThinThresh = THINNING_BA["ensiharvennus"]?.[state.species] ?? 18;
   const minFirstAge = MIN_AGE_FIRST_THINNING?.[state.species] ?? 30;
   const minThinAge = MIN_AGE_THINNING?.[state.species] ?? 40;
+  const canThin = !state.developmentClass.includes("mature_thinning") &&
+                  !state.developmentClass.includes("regeneration_ready");
 
-  if (state.basalArea >= firstThinThresh && state.ageYears >= minFirstAge &&
-      !state.developmentClass.includes("mature_thinning")) {
+  if (state.basalArea >= firstThinThresh && state.ageYears >= minFirstAge && canThin) {
     const ep = getPrices("ensiharvennus", spKey);
     const ratio = (ep.tukki + ep.kuitu) / upSum;
     const removalM3 = Math.round(state.volumeM3 * 0.25);
