@@ -230,6 +230,22 @@ function densityFactor(
  *
  * Used by the growth_m3_per_ha computed field — no DB column needed.
  */
+
+/** Map Finnish/classified site types to the English keys used by
+ *  GROWTH_MINERAL, GROWTH_PEATLAND, EXPECTED_BA, and MAX_YIELD.
+ *  classifySite() may return Finnish terms (tuore, kuivahko, etc.)
+ *  from user-supplied or 3rd-party data. */
+function normalizeSiteType(raw: string): string {
+  const s = raw.toLowerCase();
+  if (s.includes("lehto") || s.includes("lehtomainen") || s.includes("ruoho")) return "herb-rich heath";
+  if (s.includes("tuore") || s.includes("mustikka")) return "mesic";
+  if (s.includes("kuivahko") || s.includes("puolukka")) return "sub-xeric";
+  if (s.includes("kuiva") || s.includes("karu") || s.includes("varpu")) return "xeric";
+  // Already English — pass through
+  if (s === "mesic" || s === "sub-xeric" || s === "xeric" || s === "herb-rich heath" || s.includes("herb-rich")) return s;
+  return s; // unknown, pass through to GROWTH_DEFAULT fallback
+}
+
 export function getGrowthRate(
   siteType: string,
   soilType: string,
@@ -242,11 +258,12 @@ export function getGrowthRate(
    *  the stand approaches the site's carrying capacity. */
   currentVolumeM3PerHa?: number,
 ): number {
+  const engSite = normalizeSiteType(siteType || "");
   const table = soilType === "peatland" ? GROWTH_PEATLAND : GROWTH_MINERAL;
-  const base = table[siteType] ?? GROWTH_DEFAULT;
-  const sf = speciesFactor(species, siteType);
+  const base = table[engSite] ?? GROWTH_DEFAULT;
+  const sf = speciesFactor(species, engSite);
   const af = ageFactor(ageYears);
-  const df = densityFactor(basalArea, siteType, developmentClass);
+  const df = densityFactor(basalArea, engSite, developmentClass);
   let growth = base * sf * af * df * growthMultiplier;
 
   // ── Carrying-capacity cap (Option C) ──
@@ -261,7 +278,7 @@ export function getGrowthRate(
       "sub-xeric": 140,
       xeric: 80,
     };
-    const maxYield = (MAX_YIELD[siteType] ?? 180) * growthMultiplier;
+    const maxYield = (MAX_YIELD[engSite] ?? 180) * growthMultiplier;
     const threshold = 0.75 * maxYield;
     if (currentVolumeM3PerHa > threshold) {
       const excess = (currentVolumeM3PerHa - threshold) / (maxYield - threshold);
