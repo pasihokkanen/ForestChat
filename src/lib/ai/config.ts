@@ -169,9 +169,13 @@ export const COSTS: Record<string, number> = {
 export const GROWTH_MINERAL: Record<string, number> = {
   lehtomainen: 7.0,
   lehto: 7.0,
+  "herb-rich heath": 7.0,
   tuore: 5.5,
+  mesic: 5.5,
   kuivahko: 3.25,
-  kuiva: 1.0,
+  "sub-xeric": 3.25,
+  kuiva: 1.3,
+  xeric: 1.3,
 };
 
 export const GROWTH_PEATLAND: Record<string, number> = {

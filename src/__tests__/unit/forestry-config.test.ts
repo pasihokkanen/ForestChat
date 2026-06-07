@@ -92,7 +92,7 @@ describe("Forestry Config", () => {
     expect(GROWTH_MINERAL.lehtomainen).toBe(7.0);
     expect(GROWTH_MINERAL.tuore).toBe(5.5);
     expect(GROWTH_MINERAL.kuivahko).toBe(3.25);
-    expect(GROWTH_MINERAL.kuiva).toBe(1.0);
+    expect(GROWTH_MINERAL.kuiva).toBe(1.3);
   });
 
   it("GROWTH_PEATLAND has correct rates", () => {

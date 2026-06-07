@@ -102,7 +102,7 @@ const GROWTH_MINERAL: Record<string, number> = {
   "herb-rich heath": 7.0,  // OMT — VMI range 6.0–8.0
   mesic: 5.5,              // MT  — VMI range 4.5–6.5
   "sub-xeric": 3.25,       // VT  — VMI range 2.5–4.0
-  xeric: 1.0,              // CT  — VMI range 0.5–1.5
+  xeric: 1.3,              // CT  — VMI range 0.5–1.5
 };
 const GROWTH_PEATLAND: Record<string, number> = {
   "herb-rich heath": 6.25, // OMT peatland — VMI range 5.0–7.5
@@ -143,7 +143,7 @@ function speciesFactor(species: string, siteType: string): number {
   const sp = (species ?? "").toLowerCase();
   const raw: Record<string, number> = {
     pine: isGood ? 0.95 : 1.05,
-    spruce: isHerbRich ? 1.18 : isGood ? 1.08 : 0.95,
+    spruce: isHerbRich ? 1.24 : isGood ? 1.08 : 0.95,
     silver_birch: isHerbRich ? 0.95 : 0.92,
     downy_birch: isHerbRich ? 0.93 : 0.90,
     larch: 1.02,
@@ -174,7 +174,7 @@ function ageFactor(ageYears: number | null): number {
   if (ageYears == null) return 0.48;
   const a = ageYears;
   let raw: number;
-  if (a < 20)       raw = 0.28 + 0.011 * a;           // 0.28 → 0.50
+  if (a < 20)       raw = 0.28 + 0.010 * a;           // 0.28 → 0.48 (dampened young ramp)
   else if (a < 55)  raw = 0.50 + 0.001 * (a - 20);    // 0.50 → 0.535, gentle rise
   else if (a < 85)  raw = 0.535 - 0.005 * (a - 55);   // 0.535 → 0.385
   else              raw = 0.385 - 0.004 * (a - 85);    // 0.385 → 0.245
@@ -262,7 +262,7 @@ export function getGrowthRate(
       xeric: 80,
     };
     const maxYield = (MAX_YIELD[siteType] ?? 180) * growthMultiplier;
-    const threshold = 0.70 * maxYield;
+    const threshold = 0.75 * maxYield;
     if (currentVolumeM3PerHa > threshold) {
       const excess = (currentVolumeM3PerHa - threshold) / (maxYield - threshold);
       const capFactor = Math.max(0, 1 - excess);
