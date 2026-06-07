@@ -125,14 +125,14 @@ export function normalizeOperationType(input: string): string {
 
 // ─── Silvicultural costs (€/ha) ───
 export const COSTS: Record<string, number> = {
-  site_prep: 300,
-  ditch_mounding: 400,
-  scalping: 250,
-  spruce_planting: 600,
-  pine_planting: 550,
-  early_tending: 350,
-  tending: 500,
-  pre_clearance: 400,
+  site_prep: 540,
+  ditch_mounding: 720,
+  scalping: 450,
+  spruce_planting: 1080,
+  pine_planting: 990,
+  early_tending: 630,
+  tending: 900,
+  pre_clearance: 720,
 };
 
 // ─── Growth rates (m³/ha/y) — Luke VMI13, Väli-Suomi ───
