@@ -184,26 +184,28 @@ const balancedGrowthStrategy: SchedulingStrategy = {
     let prioritySkipped = false;
     let tendingCount = 0;
     let regenCount = 0;
+    let clearcutCount = 0;
     const MAX_TENDINGS_PER_YEAR = 5;
     const MAX_REGEN_PER_YEAR = 3;
+    const MAX_CLEARCUTS_PER_YEAR = 2;
 
     // Pass 1: non-clearcut operations (thinnings, tendings, regeneration)
     for (const op of priorityOps) {
       // Rate-limit non-harvest operations so year 1 doesn't get flooded
-      // with all tendings and plantings at once.
+      // with all tendings and plantings at once. Rate-limiting is an
+      // intentional spread, not a capacity overflow, so it does NOT
+      // set prioritySkipped — clearcuts are still allowed.
       const isTending = op.type === "tending" || op.type === "early_tending";
       const isRegen = op.type.includes("planting") || op.type === "site_prep" ||
                       op.type === "ditch_mounding" || op.type === "scalping";
 
       if (isTending && tendingCount >= MAX_TENDINGS_PER_YEAR) {
         remaining.push(op);
-        prioritySkipped = true;
-        continue;
+        continue; // NOT prioritySkipped — just deferred
       }
       if (isRegen && regenCount >= MAX_REGEN_PER_YEAR) {
         remaining.push(op);
-        prioritySkipped = true;
-        continue;
+        continue; // NOT prioritySkipped — just deferred
       }
 
       if (usedM3 + op.removal_m3 <= volumeCapM3) {
@@ -217,12 +219,21 @@ const balancedGrowthStrategy: SchedulingStrategy = {
       }
     }
 
-    // Pass 2: clearcuts — only if ALL priority ops fit
+    // Pass 2: clearcuts — limited to MAX_CLEARCUTS_PER_YEAR so they
+    // spread across years. Also gated by prioritySkipped (if a harvest
+    // thinning couldn't fit under cap, defer all clearcuts).
     if (!prioritySkipped) {
       for (const op of clearcutOps) {
+        // Spread clearcuts across years — max N per year
+        if (clearcutCount >= MAX_CLEARCUTS_PER_YEAR) {
+          remaining.push(op);
+          continue;
+        }
+
         if (usedM3 + op.removal_m3 <= volumeCapM3) {
           scheduled.push(op);
           usedM3 += op.removal_m3;
+          clearcutCount++;
         } else {
           // Try splitting clearcuts that exceed cap
           if (this.shouldSplit(op.removal_m3, volumeCapM3) > 0) {
@@ -231,10 +242,12 @@ const balancedGrowthStrategy: SchedulingStrategy = {
             if (split) {
               let taken = 0;
               for (const subOp of split) {
+                if (clearcutCount >= MAX_CLEARCUTS_PER_YEAR) break;
                 if (usedM3 + subOp.removal_m3 <= volumeCapM3) {
                   scheduled.push(subOp);
                   usedM3 += subOp.removal_m3;
                   taken++;
+                  clearcutCount++;
                 }
               }
               for (let i = taken; i < split.length; i++) {
