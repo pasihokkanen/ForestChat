@@ -198,6 +198,9 @@ export function classifyAndValueStands(
       c.age_years,
       c.basal_area,
       c.development_class ?? null,
+      1.0,        // growthMultiplier (default)
+      undefined,  // currentVolumeM3PerHa
+      true        // forPlanning
     );
     k.annual_growth = grPerHa * k.areaHa;
 

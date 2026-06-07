@@ -49,6 +49,7 @@ export async function checkSustainability(
         return s + getGrowthRate(
           c.site_type ?? "", c.soil_type ?? "", c.main_species ?? "",
           c.age_years, c.basal_area, c.development_class ?? null,
+          1.0, undefined, true  // growthMultiplier, currentVolumeM3PerHa, forPlanning
         ) * area;
       }, 0);
       return {

@@ -707,6 +707,9 @@ export function runScheduleEngine(input: ScheduleEngineInput): ScheduleEngineOut
         const growthM3PerHa = getGrowthRate(
           st.siteType, st.soilType, st.species,
           st.ageYears, st.basalArea, st.developmentClass,
+          1.0,        // growthMultiplier
+          undefined,  // currentVolumeM3PerHa
+          true        // forPlanning
         );
         const growthM3 = growthM3PerHa * st.areaHa;
         // Proportionally increase stumpage value with volume growth

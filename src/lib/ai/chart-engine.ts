@@ -257,13 +257,21 @@ export function getGrowthRate(
   /** Current standing volume (m³/ha). When provided, growth tapers as
    *  the stand approaches the site's carrying capacity. */
   currentVolumeM3PerHa?: number,
+  /** When true, returns VMI13-anchored growth for plan generation
+   *  (skips Tapio-calibrated age/density factors). Default: false
+   *  (Tapio yield table compatible). */
+  forPlanning = false,
 ): number {
   const engSite = normalizeSiteType(siteType || "");
   const table = soilType === "peatland" ? GROWTH_PEATLAND : GROWTH_MINERAL;
   const base = table[engSite] ?? GROWTH_DEFAULT;
   const sf = speciesFactor(species, engSite);
-  const af = ageFactor(ageYears);
-  const df = densityFactor(basalArea, engSite, developmentClass);
+  // For plan generation: VMI13 base rates already include average age
+  // and density effects across the forest. Only apply species adjustment
+  // (per-stand species differs from VMI13 dominant-species baseline).
+  // For Tapio yield validation: apply full multiplier stack.
+  const af = forPlanning ? 1.0 : ageFactor(ageYears);
+  const df = forPlanning ? 1.0 : densityFactor(basalArea, engSite, developmentClass);
   let growth = base * sf * af * df * growthMultiplier;
 
   // ── Carrying-capacity cap (Option C) ──
@@ -333,7 +341,10 @@ const COMPUTED_FIELDS: Record<string, ComputedFieldDef> = {
         (row.main_species as string) ?? "",
         row.age_years as number | null,
         row.basal_area as number | null,
-        row.development_class as string | null
+        row.development_class as string | null,
+        1.0,        // growthMultiplier (default)
+        undefined,  // currentVolumeM3PerHa
+        true        // forPlanning
       ),
   },
   // Total annual growth per compartment = growth_m3_per_ha × area_ha.
