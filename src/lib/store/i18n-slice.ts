@@ -1,26 +1,29 @@
 import type { StateCreator } from "zustand";
 import type { Language } from "../i18n";
+import { getLanguageCookie, setLanguageCookie } from "../cookie-language";
 
 export interface I18nSlice {
   language: Language;
   setLanguage: (lang: Language) => void;
-}
-
-const STORAGE_KEY = "forestchat-language";
-
-function getStoredLanguage(): Language {
-  if (typeof window === "undefined") return "en";
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored === "fi" || stored === "en") return stored;
-  return "en";
+  /** Called once on mount to sync cookie → Zustand. */
+  syncLanguageFromCookie: () => void;
 }
 
 export const createI18nSlice: StateCreator<I18nSlice> = (set) => ({
-  language: getStoredLanguage(),
+  // Start with "en" — matches the SSR default. LanguageRoot calls
+  // syncLanguageFromCookie() on mount to pick up the user's saved
+  // preference. This eliminates the hydration mismatch.
+  language: "en",
+
   setLanguage: (lang: Language) => {
-    localStorage.setItem(STORAGE_KEY, lang);
+    setLanguageCookie(lang);
     set({ language: lang });
-    // Reload the page so all components pick up the new language
-    window.location.reload();
+  },
+
+  syncLanguageFromCookie: () => {
+    const cookieLang = getLanguageCookie();
+    if (cookieLang !== "en") {
+      set({ language: cookieLang });
+    }
   },
 });
