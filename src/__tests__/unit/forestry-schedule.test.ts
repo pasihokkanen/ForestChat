@@ -143,19 +143,21 @@ describe("trySplitStand", () => {
     expect(result).toBeNull();
   });
 
-  it("splits a large stand into 2 parts", () => {
+  it("splits a large stand into maximum parts (smallest per-part volume)", () => {
     const stand = makeStand({ standId: "s2", areaHa: 4.0, volumeM3: 400, valueEur: 20000 });
     const op = makeOp(stand, "clear_cut", { removal_m3: 400, income_eur: 20000 });
     const result = trySplitStand(stand, op, 250, 4);
     expect(result).not.toBeNull();
-    expect(result!.length).toBe(2);
-    expect(result![0].stand.areaHa).toBeCloseTo(2.0);
-    expect(result![0].removal_m3).toBe(200);
+    // Best split is 4 parts (smallest per-part volume = 100 m³)
+    expect(result!.length).toBe(4);
+    expect(result![0].stand.areaHa).toBeCloseTo(1.0);
+    expect(result![0].removal_m3).toBe(100);
   });
 
-  it("returns null when no split fits", () => {
-    const stand = makeStand({ standId: "s3", areaHa: 2.0, volumeM3: 400, valueEur: 20000 });
+  it("returns null when no split fits (area too small after splitting)", () => {
+    const stand = makeStand({ standId: "s3", areaHa: 0.3, volumeM3: 400, valueEur: 20000 });
     const op = makeOp(stand, "clear_cut", { removal_m3: 400, income_eur: 20000 });
+    // cap=500 allows 400/2=200 per part, but area=0.3/2=0.15 < MIN_SPLIT_AREA_HA
     const result = trySplitStand(stand, op, 500, 4);
     expect(result).toBeNull();
   });

@@ -5,7 +5,7 @@ import { getOptimalAge, COSTS } from "./config";
 import { runScheduleEngine } from "./strategies";
 
 // ── Stand splitting constants ──
-export const MIN_SPLIT_AREA_HA = 1.5;
+export const MIN_SPLIT_AREA_HA = 0.5;
 export const VALID_SPLIT_FRACTIONS = [1 / 2, 1 / 3, 1 / 4] as const;
 export const MAX_SPLIT_PARTS = 4;
 
@@ -25,6 +25,12 @@ export function trySplitStand(
   const totalVolume = op.removal_m3;
   const totalIncome = op.income_eur;
 
+  // Try all valid split counts (2 → maxParts) and use the one with
+  // smallest part volume (most parts). This gives clearcuts minimal
+  // cap footprint, leaving room for thinnings in the same year.
+  let bestSplit: PlannedOperation[] | null = null;
+  let bestPartVol = Infinity;
+
   for (let n = 2; n <= maxParts; n++) {
     const partArea = totalArea / n;
     const partVolume = totalVolume / n;
@@ -32,25 +38,28 @@ export function trySplitStand(
     if (partArea < MIN_SPLIT_AREA_HA) continue;
     if (partVolume > volumeCapM3) continue;
 
-    const subOps: PlannedOperation[] = [];
-    const partIncome = Math.round(totalIncome / n);
-    const sa = Math.round(partArea * 10) / 10;
+    if (partVolume < bestPartVol) {
+      bestPartVol = partVolume;
+      const subOps: PlannedOperation[] = [];
+      const partIncome = Math.round(totalIncome / n);
+      const sa = Math.round(partArea * 10) / 10;
 
-    for (let i = 0; i < n; i++) {
-      const subStand = { ...stand, areaHa: sa };
-      subOps.push({
-        ...op,
-        stand: subStand,
-        income_eur: partIncome,
-        removal_m3: Math.round(partVolume),
-        notes: `${op.notes} (part ${i + 1}/${n})`,
-      });
+      for (let i = 0; i < n; i++) {
+        const subStand = { ...stand, areaHa: sa };
+        subOps.push({
+          ...op,
+          stand: subStand,
+          income_eur: partIncome,
+          removal_m3: Math.round(partVolume),
+          notes: `${op.notes} (part ${i + 1}/${n})`,
+        });
+      }
+
+      bestSplit = subOps;
     }
-
-    return subOps;
   }
 
-  return null;
+  return bestSplit;
 }
 
 /**

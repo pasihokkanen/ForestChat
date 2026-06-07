@@ -173,15 +173,11 @@ const balancedGrowthStrategy: SchedulingStrategy = {
     const remaining: PlannedOperation[] = [];
     let usedM3 = 0;
 
-    // Two-pass approach: treat ALL non-clearcut operations (thinnings,
-    // tendings, regeneration) as priority, processing them first. Only
-    // allow clearcuts if everything else fit within the volume cap.
-    // This ensures silvicultural priority — delaying thinnings permanently
-    // depresses growth trajectory more than delaying clearcuts.
-    const priorityOps = candidates.filter((op) => op.type !== "clear_cut");
-    const clearcutOps = candidates.filter((op) => op.type === "clear_cut");
+    // Balanced approach: each year gets a mix of tendings, clearcuts,
+    // and thinnings. Clearcuts are scheduled first (up to 2/year) to
+    // ensure they don't get starved by thinnings. Thinnings fill the
+    // remaining cap. All operations share one volume cap (125% growth).
 
-    let prioritySkipped = false;
     let tendingCount = 0;
     let regenCount = 0;
     let clearcutCount = 0;
@@ -189,89 +185,121 @@ const balancedGrowthStrategy: SchedulingStrategy = {
     const MAX_REGEN_PER_YEAR = 3;
     const MAX_CLEARCUTS_PER_YEAR = 2;
 
-    // Pass 1: non-clearcut operations (thinnings, tendings, regeneration)
-    for (const op of priorityOps) {
-      // Rate-limit non-harvest operations so year 1 doesn't get flooded
-      // with all tendings and plantings at once. Rate-limiting is an
-      // intentional spread, not a capacity overflow, so it does NOT
-      // set prioritySkipped — clearcuts are still allowed.
-      const isTending = op.type === "tending" || op.type === "early_tending";
-      const isRegen = op.type.includes("planting") || op.type === "site_prep" ||
-                      op.type === "ditch_mounding" || op.type === "scalping";
+    const isTending = (op: PlannedOperation) => op.type === "tending" || op.type === "early_tending";
+    const isRegen = (op: PlannedOperation) =>
+      op.type.includes("planting") || op.type === "site_prep" ||
+      op.type === "ditch_mounding" || op.type === "scalping";
+    const isThinning = (op: PlannedOperation) =>
+      op.type === "thinning" || op.type === "first_thinning" || op.type === "selection_cutting";
 
-      if (isTending && tendingCount >= MAX_TENDINGS_PER_YEAR) {
+    // Pass 1: tendings and regeneration (rate-limited, no cap consumption)
+    for (const op of candidates) {
+      if (!isTending(op) && !isRegen(op)) continue;
+
+      if (isTending(op) && tendingCount >= MAX_TENDINGS_PER_YEAR) {
         remaining.push(op);
-        continue; // NOT prioritySkipped — just deferred
+        continue;
       }
-      if (isRegen && regenCount >= MAX_REGEN_PER_YEAR) {
+      if (isRegen(op) && regenCount >= MAX_REGEN_PER_YEAR) {
         remaining.push(op);
-        continue; // NOT prioritySkipped — just deferred
+        continue;
       }
+
+      scheduled.push(op);
+      if (isTending(op)) tendingCount++;
+      if (isRegen(op)) regenCount++;
+    }
+
+    // Pass 2: schedule up to 1 clearcut first (reserves room), then
+    // Pass 3: thinnings fill remaining cap, then
+    // Pass 4: if cap still has room, try 1 more clearcut.
+    // This ensures each year gets a mix: 1-2 clearcuts + several thinnings.
+
+    // Pass 2a: first clearcut
+    for (const op of candidates) {
+      if (op.type !== "clear_cut") continue;
+      if (clearcutCount >= 1) break; // only 1 in this sub-pass
 
       if (usedM3 + op.removal_m3 <= volumeCapM3) {
         scheduled.push(op);
         usedM3 += op.removal_m3;
-        if (isTending) tendingCount++;
-        if (isRegen) regenCount++;
+        clearcutCount++;
+      } else if (this.shouldSplit(op.removal_m3, volumeCapM3) > 0) {
+        const maxParts = this.shouldSplit(op.removal_m3, volumeCapM3);
+        const split = trySplitStand(op.stand, op, volumeCapM3, maxParts);
+        if (split && split.length > 0) {
+          if (usedM3 + split[0].removal_m3 <= volumeCapM3) {
+            scheduled.push(split[0]);
+            usedM3 += split[0].removal_m3;
+            clearcutCount++;
+            for (let i = 1; i < split.length; i++) remaining.push(split[i]);
+          }
+        }
+        // If can't split, skip — thinnings get priority this year
+      }
+      break; // only attempt one clearcut before thinnings
+    }
+
+    // Pass 3: thinnings — fill remaining cap
+    for (const op of candidates) {
+      if (!isThinning(op)) continue;
+
+      if (usedM3 + op.removal_m3 <= volumeCapM3) {
+        scheduled.push(op);
+        usedM3 += op.removal_m3;
       } else {
         remaining.push(op);
-        prioritySkipped = true;
       }
     }
 
-    // Pass 2: clearcuts — limited to MAX_CLEARCUTS_PER_YEAR so they
-    // spread across years. Also gated by prioritySkipped (if a harvest
-    // thinning couldn't fit under cap, defer all clearcuts).
-    if (!prioritySkipped) {
-      for (const op of clearcutOps) {
-        // Spread clearcuts across years — max N per year
-        if (clearcutCount >= MAX_CLEARCUTS_PER_YEAR) {
-          remaining.push(op);
-          continue;
-        }
+    // Pass 4: second clearcut — only if cap still has room
+    for (const op of candidates) {
+      if (op.type !== "clear_cut") continue;
+      if (clearcutCount >= MAX_CLEARCUTS_PER_YEAR) {
+        remaining.push(op);
+        continue;
+      }
+      // Skip if already scheduled in pass 2a
+      if (scheduled.some(o => o.stand.standId === op.stand.standId && o.type === "clear_cut")) continue;
 
-        if (usedM3 + op.removal_m3 <= volumeCapM3) {
-          scheduled.push(op);
-          usedM3 += op.removal_m3;
-          clearcutCount++;
-        } else {
-          // Try splitting clearcuts that exceed cap
-          if (this.shouldSplit(op.removal_m3, volumeCapM3) > 0) {
-            const maxParts = this.shouldSplit(op.removal_m3, volumeCapM3);
-            const split = trySplitStand(op.stand, op, volumeCapM3, maxParts);
-            if (split) {
-              let taken = 0;
-              for (const subOp of split) {
-                if (clearcutCount >= MAX_CLEARCUTS_PER_YEAR) break;
-                if (usedM3 + subOp.removal_m3 <= volumeCapM3) {
-                  scheduled.push(subOp);
-                  usedM3 += subOp.removal_m3;
-                  taken++;
-                  clearcutCount++;
-                }
-              }
-              for (let i = taken; i < split.length; i++) {
-                remaining.push(split[i]);
-              }
-              continue;
+      if (usedM3 + op.removal_m3 <= volumeCapM3) {
+        scheduled.push(op);
+        usedM3 += op.removal_m3;
+        clearcutCount++;
+      } else if (this.shouldSplit(op.removal_m3, volumeCapM3) > 0) {
+        const maxParts = this.shouldSplit(op.removal_m3, volumeCapM3);
+        const split = trySplitStand(op.stand, op, volumeCapM3, maxParts);
+        if (split) {
+          let taken = 0;
+          for (const subOp of split) {
+            if (clearcutCount >= MAX_CLEARCUTS_PER_YEAR) break;
+            if (usedM3 + subOp.removal_m3 <= volumeCapM3) {
+              scheduled.push(subOp);
+              usedM3 += subOp.removal_m3;
+              taken++;
+              clearcutCount++;
             }
           }
-          remaining.push(op);
+          for (let i = taken; i < split.length; i++) {
+            remaining.push(split[i]);
+          }
+          continue;
         }
       }
-    } else {
-      remaining.push(...clearcutOps);
+      remaining.push(op);
     }
 
     return { scheduled, remaining };
   },
   shouldSplit: (standVolume: number, volumeCapM3: number) => {
     if (standVolume <= volumeCapM3) return 0;
-    // Try smallest N that brings each part under cap
+    // Find the maximum valid split count so clearcuts consume minimal cap
+    // per part, leaving room for thinnings.
+    let best = 0;
     for (const n of [2, 3, 4]) {
-      if (standVolume / n <= volumeCapM3) return n;
+      if (standVolume / n <= volumeCapM3) best = n;
     }
-    return 0;
+    return best;
   },
   regenDelayYears: () => 1, // replant next year
   regenerationSpecies: (stand: StandData) => {
