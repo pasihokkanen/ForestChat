@@ -21,6 +21,8 @@ export interface CompartmentInput {
   volume_m3: number | null;
   basal_area: number | null;
   development_class: string | null;
+  /** Location-specific growth multiplier (0.55 Lappi … 1.10 Etelä-Suomi). Defaults to 1.0. */
+  growth_multiplier?: number;
 }
 
 export interface OperationInput {
@@ -66,6 +68,7 @@ interface MutableStand {
   /** True after a clearcut if no regeneration has been scheduled yet.
    *  While cleared, growth is zero. */
   cleared: boolean;
+  growthMultiplier: number;
 }
 
 // ── Helpers ──
@@ -91,6 +94,7 @@ function toMutable(c: CompartmentInput): MutableStand {
     basalArea: c.basal_area ?? 0,
     developmentClass: c.development_class ?? "",
     cleared: false,
+    growthMultiplier: c.growth_multiplier ?? 1.0,
   };
 }
 
@@ -153,6 +157,7 @@ export function estimateForestState(
           s.ageYears,
           s.basalArea,
           s.developmentClass,
+          s.growthMultiplier,
         );
         growthM3 = growthM3PerHa * s.areaHa;
       }

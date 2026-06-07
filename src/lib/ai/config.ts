@@ -48,10 +48,40 @@ export const OPTIMAL_AGES: Record<string, Record<string, [number, number]>> = {
   silver_birch:{ lehtomainen: [45, 60], tuore: [50, 65] },
 };
 
-export function getOptimalAge(species: string, site: string): [number, number] {
+export function getOptimalAge(species: string, site: string, growthMultiplier = 1.0): [number, number] {
   const sp = species === "birch" ? "silver_birch" : species;
-  return OPTIMAL_AGES[sp]?.[site] ?? [65, 90];
+  const [optMin, optMax] = OPTIMAL_AGES[sp]?.[site] ?? [65, 90];
+  const ageMultiplier = 1 / growthMultiplier;
+  return [Math.round(optMin * ageMultiplier), Math.round(optMax * ageMultiplier)];
 }
+
+// ─── Region multipliers (Luke VMI13 based) ───
+
+/** Growth rate multiplier per Luke price region. 1.00 = Väli-Suomi baseline. */
+export const GROWTH_REGION_MULTIPLIERS: Record<string, number> = {
+  "1": 1.10,   // Etelä-Suomi
+  "3": 1.00,   // Keski-Suomi (baseline)
+  "4": 0.90,   // Savo-Karjala
+  "5": 1.05,   // Kymi-Savo
+  "6": 1.00,   // Etelä-Pohjanmaa (baseline)
+  "71": 0.80,  // Pohjois-Pohjanmaa
+  "72": 0.75,  // Kainuu-Koillismaa
+  "8": 0.55,   // Lappi
+  "9": 1.00,   // KOKO MAA (fallback)
+};
+
+/** Timber price multiplier per Luke price region (fallback when API is unavailable). */
+export const PRICE_REGION_MULTIPLIERS: Record<string, number> = {
+  "1": 1.15,   // Etelä-Suomi — highest prices
+  "3": 1.00,   // Keski-Suomi (reference)
+  "4": 0.90,   // Savo-Karjala
+  "5": 0.95,   // Kymi-Savo
+  "6": 0.92,   // Etelä-Pohjanmaa
+  "71": 0.85,  // Pohjois-Pohjanmaa
+  "72": 0.80,  // Kainuu-Koillismaa
+  "8": 0.75,   // Lappi — lowest prices
+  "9": 1.00,   // KOKO MAA (fallback)
+};
 
 // ─── Thinning thresholds ───
 export const THINNING_BA: Record<string, Record<string, number>> = {

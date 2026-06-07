@@ -121,14 +121,6 @@ const EXPECTED_BA: Record<string, number> = {
   xeric: 14,
 };
 
-// ─── Multiplier normalization constants ─────────────────────────────
-// Each raw multiplier is divided by its area-weighted forest average so
-// the combined product averages ~1.0. Computed once from the 161-compartment
-// forest; update if the forest composition changes significantly.
-const NORM_SPECIES = 1.007;  // speciesFactor avg (nearly 1.0 — species mix)
-const NORM_AGE = 0.931;      // ageFactor avg (seedlings pull this down)
-const NORM_DENSITY = 0.923;  // densityFactor avg (BA=0 stands pull this down)
-
 // ─── Multiplier functions ───────────────────────────────────────────
 
 /**
@@ -155,7 +147,7 @@ function speciesFactor(species: string, siteType: string): number {
     larch: 1.02,
     grey_alder: 0.88,
   };
-  return (raw[sp] ?? 1.0) / NORM_SPECIES;
+  return (raw[sp] ?? 1.0);
 }
 
 /**
@@ -172,15 +164,16 @@ function speciesFactor(species: string, siteType: string): number {
  *   Age 110:  0.82  — over-mature, senescent
  */
 function ageFactor(ageYears: number | null): number {
-  if (ageYears == null) return 1.0 / NORM_AGE;
+  if (ageYears == null) return 1.0;
   const a = ageYears;
   let raw: number;
-  if (a < 15)       raw = 0.65 + 0.02 * a;         // 0.65 → 0.95
-  else if (a < 40)  raw = 0.95 + 0.002 * (a - 15); // 0.95 → 1.00
-  else if (a < 70)  raw = 1.0;                      // plateau
-  else if (a < 100) raw = 1.0 - 0.005 * (a - 70);  // 1.0 → 0.85
-  else              raw = 0.85 - 0.003 * (a - 100); // slow decline
-  return raw / NORM_AGE;
+  // Phase 7b T17: Recalibrated — steeper young ramp, earlier peak, steeper decline
+  if (a < 15)       raw = 0.68 + 0.028 * a;          // 0.68 → 1.10 (was 0.65+0.02a)
+  else if (a < 35)  raw = 1.02 + 0.005 * (a - 15);   // 1.02 → 1.12, peak at ~35
+  else if (a < 50)  raw = 1.12 - 0.004 * (a - 35);   // 1.12 → 1.06
+  else if (a < 85)  raw = 1.06 - 0.008 * (a - 50);   // 1.06 → 0.78
+  else              raw = 0.78 - 0.005 * (a - 85);    // slow terminal decline
+  return raw;
 }
 
 /**
@@ -206,9 +199,9 @@ function densityFactor(
   if (basalArea == null || basalArea === 0) {
     // Zero BA: distinguish seedlings (growing, BA not measured) from
     // open areas (genuinely unstocked).
-    if (developmentClass && developmentClass.includes("seedling")) return 0.65 / NORM_DENSITY;
-    if (developmentClass === "open_area") return 0.30 / NORM_DENSITY;
-    return 0.60 / NORM_DENSITY; // unknown — assume low but growing
+    if (developmentClass && developmentClass.includes("seedling")) return 0.65;
+    if (developmentClass === "open_area") return 0.30;
+    return 0.60; // unknown — assume low but growing
   }
   const expected = EXPECTED_BA[siteType] ?? 20;
   const density = basalArea / expected;
@@ -218,16 +211,16 @@ function densityFactor(
   else if (density < 1.3)  raw = 1.0;
   else if (density < 1.5)  raw = 0.95;
   else                     raw = 0.85;
-  return raw / NORM_DENSITY;
+  return raw;
 }
 
 /**
  * Compute per-hectare annual growth (m³/ha/y) for a single compartment.
  *
  * Starts from the site-type + soil-type VMI13 base rate, then applies
- * species, age, and density multipliers. Each multiplier redistributes
- * growth between compartments without changing the forest-level aggregate
- * (normalization ensures area-weighted mean ≈ 1.0).
+ * species, age, and density multipliers. Each multiplier is a raw factor
+ * (no forest-specific normalization). An optional growthMultiplier applies
+ * location-specific scaling (0.55 Lappi → 1.10 Etelä-Suomi).
  *
  * Used by the growth_m3_per_ha computed field — no DB column needed.
  */
@@ -237,18 +230,15 @@ export function getGrowthRate(
   species: string,
   ageYears: number | null,
   basalArea: number | null,
-  developmentClass: string | null
+  developmentClass: string | null,
+  growthMultiplier = 1.0,
 ): number {
-  // 1. Base rate from Luke VMI13 (site type + mineral/peatland)
   const table = soilType === "peatland" ? GROWTH_PEATLAND : GROWTH_MINERAL;
   const base = table[siteType] ?? GROWTH_DEFAULT;
-
-  // 2. Apply per-stand multipliers (self-normalizing to preserve total)
   const sf = speciesFactor(species, siteType);
   const af = ageFactor(ageYears);
   const df = densityFactor(basalArea, siteType, developmentClass);
-
-  return base * sf * af * df;
+  return base * sf * af * df * growthMultiplier;
 }
 
 const COMPUTED_FIELDS: Record<string, ComputedFieldDef> = {

@@ -200,7 +200,7 @@ Before `selectOperations()` chooses which candidates to execute this year, the c
 | `carbon_storage` | Age descending (oldest first) | Preserve stock; harvest oldest stands if harvest is necessary |
 | `balanced` | Age descending (most overdue first) | Standard silvicultural practice |
 
-4. **Quaternary sort — stand wishes (`_priority_boost`):** Stands with `accelerate_harvest` wish are promoted ahead of same-type, same-dueYear peers. The mechanism: after step 3 sorting, boosted operations are re-inserted at position `floor(originalIndex / 2)` — effectively moved halfway toward the front of their type+dueYear group. Multiple boosted operations maintain their relative goal-metric order after re-insertion. Stands with `delay_harvest` (year cap) are excluded from candidates until the cap year passes — they never appear in the pool before then.
+4. **Quaternary sort — stand wishes (`_priority_boost`):** Stands with `accelerate_harvest` wish are promoted ahead of same-type, same-dueYear peers. The mechanism: after step 3 sorting, any operation on a boosted stand is removed from its current position and re-inserted at `floor(currentIndex / 2)` — effectively moved halfway toward the front of its type+dueYear group. To handle multiple boosted operations correctly, the re-insertions are applied in priority order (sorted by goal-metric descending first, then each re-inserted one at a time), so earlier insertions don't collide with later ones. Stands with `delay_harvest` (year cap) are excluded from candidates until the cap year passes — they never appear in the pool before then.
 
 **Selection within priority order:** After sorting, the strategy's `selectOperations()` walks the sorted list and accepts operations until the volume cap is exhausted. Since thinnings are always sorted before clearcuts, strategies that want interleaved ordering (e.g., `balanced`'s round-robin) must explicitly alternate within `selectOperations()` — the pre-sort provides thinning-first ordering, and the strategy can override this by picking from both groups.
 
@@ -286,11 +286,21 @@ Operations that are NOT yet due (e.g., stand still too young for thinning) stay 
 
 **Important — basal area in simulation:** `getGrowthRate()` uses basal area as a density modifier, but `estimateForestState()` does NOT increase BA during growth (BA is only reduced by harvests). Therefore, the operation deduction check `simulatedBA ≥ THINNING_BA` can only prevent duplicate thinnings on a stand that was already thinned — it cannot detect when a stand crosses the BA threshold through growth. To handle this correctly, **classification (T11) must create thinning operations for ALL stands whose BA is projected to reach the threshold during the plan period**, not only stands currently above it. The projection can use a simple linear BA model based on the stand's current BA and growth rate, or conservatively assume all young stands will need thinning.
 
-**Important — single-pass classification:** Classification runs once at year 0 and produces the initial operation pool. For a 20-year plan, stands can change development classes (e.g., seedling → young thinning). The plan handles this as follows:
-- Harvest and thinning operations are created by the initial classification for ALL stands that will need them during the period (not just those due at year 0)
-- Regeneration operations are chained dynamically from harvest events (step 7 of the core loop — they are not in the initial pool)
-- Tending operations are created by classification if the stand is within tending age now or will enter it during the plan period
-- The `dueYear` field on each operation records when the operation first becomes applicable; the scheduler only selects it when its due condition is met
+**Important — dynamic operation spawning:** Classification at year 0 produces an initial operation pool for stands that are ALREADY near or above thresholds. But the scheduling engine must also spawn NEW operations when a stand's simulated state crosses a threshold mid-period — classification doesn't predict 10+ years of growth.
+
+**Example:** A 15-year-old seedling stand with BA=5 on sub-xeric site. At year 0 it's classified as "too young for thinning." But 10 years into the simulation (age 25), it crosses the thinning BA threshold and needs a thinning operation. This operation cannot be in the year-0 classification pool because it wasn't predictable from year-0 data.
+
+**Mechanism:** After step 5 (simulate one year of growth), the scheduler evaluates every stand against threshold rules. When a stand crosses a threshold, a new `PlannedOperation` is spawned and added to the candidate pool for the current or next year:
+
+| Threshold crossed | Operation spawned |
+|---|---|
+| `simulatedBA ≥ THINNING_BA[species]` AND `simulatedAge ≥ minThinningAge` | `thinning` or `first_thinning` |
+| `simulatedAge ≥ goalAdjustedOptMin` (first time) | `clear_cut` |
+| `simulatedAge` enters tending window (5–25 years) | `tending` or `early_tending` |
+
+Each spawned operation records its spawn year as `dueYear` and participates in candidate priority ordering normally. A stand that was thinned in year N won't re-trigger until its BA recovers (which the current simulator doesn't model — BA only decreases — so duplicate thinnings are naturally prevented).
+
+**Initial pool + dynamic spawning together** ensure complete coverage: the initial pool handles stands known to need operations at year 0, and dynamic spawning catches transitions that happen during the simulation.
 
 #### Volume Cap Granularity
 
@@ -359,17 +369,23 @@ export const KUNTANUMERO_MAP: Record<string, { name: string; priceRegion: string
 
 **Luke region codes:**
 
+Luke divides Finland into price regions for timber trade statistics. The region boundaries follow maakunta (province) borders. Municipality-to-region assignment is sourced from Luke's own metadata (PxWeb API variable `MPKH`) and cross-referenced with the official kuntaluettelo (Tilastokeskus).
+
 | Code | Region | Example municipalities |
 |------|--------|----------------------|
 | `"1"` | Etelä-Suomi | Helsinki, Espoo, Turku, Tampere, Lahti, Lappeenranta, Kotka, Hämeenlinna, Porvoo |
-| `"3"` | Keski-Suomi | Jyväskylä, Kuopio, Mikkeli, Savonlinna, Pieksämäki |
-| `"4"` | Savo-Karjala | Joensuu, Lieksa, Nurmes, Ilomantsi |
+| `"3"` | Keski-Suomi | Jyväskylä, Äänekoski, Jämsä, Keuruu, Saarijärvi, Viitasaari |
+| `"4"` | Savo-Karjala | Joensuu, Lieksa, Nurmes, Ilomantsi, Kuopio, Mikkeli, Savonlinna, Pieksämäki, Iisalmi, Varkaus |
 | `"5"` | Kymi-Savo | Kouvola, Iitti, Heinola, Mäntyharju |
-| `"6"` | Etelä-Pohjanmaa | Seinäjoki, Vaasa, **Ähtäri**, Kokkola, Pietarsaari |
-| `"71"` | Pohjois-Pohjanmaa | Oulu, Raahe, Ylivieska, Nivala |
+| `"6"` | Etelä-Pohjanmaa | Seinäjoki, Vaasa, **Ähtäri**, Alavus, Alajärvi, Lapua, Kauhava, Kurikka |
+| `"71"` | Pohjois-Pohjanmaa | Oulu, Raahe, Ylivieska, Nivala, Kokkola, Pietarsaari |
 | `"72"` | Kainuu-Koillismaa | Kajaani, Kuusamo, Suomussalmi, Kuhmo |
 | `"8"` | Lappi | Rovaniemi, Inari, Sodankylä, Kittilä |
 | `"9"` | KOKO MAA (fallback) | — used when kuntanumero is unknown |
+
+**Corrections from original plan:**
+- Kuopio, Mikkeli, Savonlinna, Pieksämäki moved from region `"3"` (Keski-Suomi) to `"4"` (Savo-Karjala) — these are Savo municipalities, not Central Finland.
+- Kokkola and Pietarsaari moved from region `"6"` (Etelä-Pohjanmaa) to `"71"` (Pohjois-Pohjanmaa) — these are Keski-Pohjanmaa / Pohjois-Pohjanmaa municipalities.
 
 **Price tiers mapping:**
 
@@ -387,7 +403,7 @@ export const KUNTANUMERO_MAP: Record<string, { name: string; priceRegion: string
 | `pine` | `"N1"` (tukki) + `"N4"` (kuitupuu) |
 | `spruce` | `"N2"` (tukki) + `"N5"` (kuitupuu) |
 | `silver_birch` / `birch` | `"N3"` (tukki) + `"N6"` (kuitupuu) |
-| `downy_birch` | `"N3"` + `"N6"` (same as birch) |
+| `downy_birch` | `"N3"` (tukki, ~30% of volume) + `"N6"` (kuitupuu, ~70%) | Lower sawlog yield than silver birch; most downy birch volume sells as pulpwood |
 
 #### Caching
 
@@ -396,7 +412,9 @@ export const KUNTANUMERO_MAP: Record<string, { name: string; priceRegion: string
 - On plan generation: check cache → if stale, fetch from Luke → cache → use
 - Fallback chain: fresh cache (≤24h) → stale cache (≤7d) → live fetch (5s timeout) → hardcoded `PRICES` in `config.ts` × region multiplier
 
-**Region multiplier for fallback prices:** The hardcoded `PRICES` are Central Finland reference values. When the Luke API is unreachable, prices are scaled by a region multiplier reflecting timber price differentials across Finland:
+**Region multiplier for fallback prices:** The hardcoded `PRICES` are Central Finland reference values. When the Luke API is unreachable, prices are scaled by a region multiplier reflecting timber price differentials across Finland.
+
+**Data source:** Luke timber price statistics (Metsätilastollinen vuosikirja, puukauppatilastot), table `0100_metryv` (Kantohinnat hakkuutavoittain ja puutavaralajeittain). Retrieved from `statdb.luke.fi/PxWeb/api/v1/fi/LUKE/met/metryv/0100_metryv.px`. The API's `MPKH` variable defines 9 price regions (1, 3, 4, 5, 6, 71, 72, 8, 9). Multipliers are derived from multi-year average price ratios between regions for pine and spruce sawlogs (tukki), rounded for simplicity.
 
 | Region code | Region | Multiplier | Rationale |
 |-------------|--------|-----------|-----------|
@@ -441,7 +459,9 @@ These multipliers are stored in a static `REGION_MULTIPLIERS` table in `config.t
 CREATE TABLE stand_wishes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   forest_id UUID NOT NULL REFERENCES forests(id) ON DELETE CASCADE,
-  compartment_id UUID NOT NULL REFERENCES compartments(id) ON DELETE CASCADE,
+  stand_id TEXT NOT NULL,  -- denormalized stand ID (e.g. "1", "7", "184")
+                            -- NOT compartment_id UUID — compartments get new UUIDs
+                            -- on reimport, but stand_id is stable
   wish_type TEXT NOT NULL,  -- 'delay_harvest', 'accelerate_harvest', 'no_clearcut', 
                             -- 'species_preference', 'retention_pct', 'custom'
   wish_value TEXT,          -- JSON or string value (e.g., '{"species": "pine"}', '5', '2035')
@@ -452,7 +472,10 @@ CREATE TABLE stand_wishes (
 );
 
 CREATE INDEX idx_stand_wishes_forest ON stand_wishes(forest_id);
+CREATE INDEX idx_stand_wishes_stand ON stand_wishes(forest_id, stand_id);
 ```
+
+**Why `stand_id TEXT` instead of `compartment_id UUID`:** When a forest is re-imported (which in the current system deletes and recreates compartments with new UUIDs), wishes referencing `compartment_id` would be orphaned. The `stand_id` (e.g., "K7", "184") is stable across imports — it's derived from the source data, not a surrogate key. The lookup joins `stand_wishes.stand_id = compartments.stand_id` within the same `forest_id`, which survives reimport naturally.
 
 **Wish types:**
 | Type | Value | Effect |
@@ -511,7 +534,10 @@ Use this in `classify.ts` `getSpeciesData()` to normalize any non-standard speci
 - Delete K180, K128, K71/K72, K5 special cases from `classify.ts` (lines 196–261)
 - Delete K7 3-part, K184 2-part, K180 hand-placement, K5 manual year from `schedule.ts` (lines 74–196)
 - Verify that all remaining classification logic is generic (development_class driven)
-- Run existing tests — expect test breakage, update test fixtures to remove hardcoded expectations
+- Run existing tests — expect test breakage. **Update test fixtures to use generic assertions** rather than Ähtäri-specific operation counts and years:
+  - Instead of `expect(operations).toHaveLength(42)`, assert that classification produces nonzero operations and that no stand-ID-specific branching occurs
+  - Instead of asserting specific years for specific stands, assert that all operations have valid years within the plan period
+  - Add a new test: classify a synthetic 3-stand forest (seedling, thinning, regeneration_ready) and verify generic classification logic applies correctly
 - The old `_manual_year` pattern is replaced by `delay_harvest` stand wishes with `dueYear` tracking — remove it entirely
 
 ### T2: Conditional Stand Splitting (Scheduling Tactic)
@@ -538,21 +564,30 @@ Use this in `classify.ts` `getSpeciesData()` to normalize any non-standard speci
 - Add goal type to `types.ts`: `type PlanGoal = "maximum_growth_aggressive" | "maximum_growth_balanced" | "carbon_storage" | "balanced"`
 - Update `generate_plan` handler to accept and forward the goal parameter
 
-### T4: Year-by-Year Scheduling Engine
+### T4: Year-by-Year Scheduling Engine (core loop + simple strategies)
 **Files:** `schedule.ts` (major rewrite), new file `src/lib/ai/strategies.ts`, uses `src/lib/ai/forest-state.ts`
-**Effort:** ~7h
+**Effort:** ~6h
 
 - Define `SchedulingStrategy` interface with `volumeCapMultiplier()`, `selectOperations()`, `shouldSplit()`, `regenDelayYears()`, `regenerationSpecies()`
-- Implement the core year-by-year loop: deduce → merge → select → apply → simulate → carryover → chain
+- Implement the core year-by-year loop: deduce → merge → select → apply → simulate → carryover → chain, including **dynamic operation spawning** (stands crossing BA/age thresholds mid-simulation get new operations spawned into the candidate pool)
 - Use `getGrowthRate()` from `chart-engine.ts` for per-stand, per-year growth simulation (mutating state in-place between year steps). Pass `forest.growth_multiplier` from DB through `CompartmentInput.growth_multiplier` → `getGrowthRate(growthMultiplier)` for location-aware growth.
+- Use `getOptimalAge()` with `growthMultiplier` for location-adjusted rotation ages.
 - Use `estimateForestState()` for post-scheduling verification — the scheduler builds ops incrementally, then `estimateForestState()` validates the full timeline
-- Implement 4 strategy objects as specified in Section 4
-- Each strategy's `selectOperations()` implements goal-specific priority ordering (greedy, two-phase, selection-first, round-robin)
+- Implement 2 simple strategy objects: `maximum_growth_aggressive` (greedy, 3.0× cap) and `maximum_growth_balanced` (capped 1.25×, with splitting)
+- Each strategy's `selectOperations()` implements goal-specific priority ordering (greedy, two-phase)
 - Integrate stand splitting from T2: `shouldSplit()` decides, `trySplitStand()` splits, both volumes and regeneration chain correctly
-- Stand wishes from T7/T8 influence selection via `_priority_boost` and `no_clearcut` conversion
 - Write unit tests for each strategy:
   - `maximum_growth_aggressive`: all ready stands harvested in year 1 (under 3× cap); thinnings accepted first in pre-sort order
   - `maximum_growth_balanced`: harvests capped at 125% annual growth per year; thinnings first; large stands split when exceeding cap
+
+### T4b: Complex Strategy Implementations
+**Files:** `src/lib/ai/strategies.ts` (continued)
+**Effort:** ~4h
+
+- Implement `carbon_storage` strategy: selection cuttings preferred; clearcuts only when 15+ years past optMax; 0.5× volume cap
+- Implement `balanced` strategy: round-robin interleaving of thinnings and clearcuts; 1.0× volume cap
+- Stand wishes from T7/T8 influence selection via `_priority_boost` and `no_clearcut` conversion
+- Write unit tests for each strategy:
   - `carbon_storage`: selection cuttings first; clearcuts only when 15+ years past optMax; minimal volume removed
   - `balanced`: round-robin interleaving; harvest ≤ growth
 
@@ -568,23 +603,48 @@ Use this in `classify.ts` `getSpeciesData()` to normalize any non-standard speci
 - New: `"Plan behavior depends on the selected goal. Rules like rotation age, harvest limits, and regeneration methods vary. After generating a plan, the goal is visible in plan_summary."`
 
 ### T5b: Municipality Lookup Table + Import Integration
-**Files:** New file `src/lib/import/municipality-lookup.ts`, `src/lib/import/csv-importer.ts`, `src/app/api/import/property/route.ts`
-**Effort:** ~2h (extended: added growthMultiplier field)
+**Files:** New file `src/lib/import/municipality-lookup.ts`, generation script `scripts/generate-kuntanumero-map.ts`, `src/lib/import/csv-importer.ts`, `src/app/api/import/property/route.ts`
+**Effort:** ~2.5h (extended: added growthMultiplier field + generation script)
 
-- Build `KUNTANUMERO_MAP`: hardcoded Record mapping all 309 Finnish kuntanumero → `{ name: string, priceRegion: string, growthMultiplier: number }`
-  - Source data: official kuntaluettelo (Tilastokeskus). Municipality names in Finnish.
-  - Luke region assignment per maakunta boundaries (see region table in Section 5).
-  - Growth multiplier per region (see Section 8).
-  - Unknown/unlisted kuntanumero → `{ name: "Tuntematon", priceRegion: "9", growthMultiplier: 1.0 }` (KOKO MAA fallback)
+- **Do NOT manually type 309 entries.** Instead, write a one-time generation script (`scripts/generate-kuntanumero-map.ts`) that:
+  1. Reads the official kuntaluettelo CSV from Tilastokeskus (municipality codes + names)
+  2. Reads a manually-maintained mapping file `scripts/kuntanumero-to-region.csv` that maps each kuntanumero → `{ priceRegion, growthMultiplier }`. This is the only human-maintained file — ~40 lines (one per maakunta, mapping to Luke regions)
+  3. Merges them and outputs `src/lib/import/municipality-lookup.ts` as a TypeScript file
+  4. The generation script is run once and the output is committed. On municipality mergers, re-run the script.
+- The manual mapping file (`kuntanumero-to-region.csv`) maps maakunta codes to Luke regions:
+  ```csv
+  maakunta_code,maakunta_name,price_region,growth_multiplier
+  01,Uusimaa,1,1.10
+  02,Varsinais-Suomi,1,1.10
+  04,Satakunta,1,1.10
+  05,Kanta-Häme,1,1.10
+  06,Pirkanmaa,1,1.10
+  07,Päijät-Häme,1,1.10
+  08,Kymenlaakso,5,1.05
+  09,Etelä-Karjala,5,1.05
+  10,Etelä-Savo,4,0.90
+  11,Pohjois-Savo,4,0.90
+  12,Pohjois-Karjala,4,0.90
+  13,Keski-Suomi,3,1.00
+  14,Etelä-Pohjanmaa,6,1.00
+  15,Pohjanmaa,6,1.00
+  16,Keski-Pohjanmaa,71,0.80
+  17,Pohjois-Pohjanmaa,71,0.80
+  18,Kainuu,72,0.75
+  19,Lappi,8,0.55
+  21,Ahvenanmaa,1,1.10
+  ```
+- The generated `KUNTANUMERO_MAP` maps all 309 kuntanumero → `{ name: string, priceRegion: string, growthMultiplier: number }`
+- Unknown/unlisted kuntanumero → `{ name: "Tuntematon", priceRegion: "9", growthMultiplier: 1.0 }` (KOKO MAA fallback)
 - In both import paths (CSV and WFS/API), after creating the forest record:
   ```typescript
   const kuntanumero = propertyId.replace(/-/g, "").slice(0, 3);
   const lookup = KUNTANUMERO_MAP[kuntanumero] ?? { name: "Tuntematon", priceRegion: "9", growthMultiplier: 1.0 };
   // UPDATE forests SET municipality = lookup.name, price_region = lookup.priceRegion, growth_multiplier = lookup.growthMultiplier
   ```
-- Existing `forests.municipality` column (already present, currently NULL) gets populated.
-- New `forests.price_region` column stores the Luke region code for downstream use by T6.
-- New `forests.growth_multiplier` column stores the location multiplier for downstream use by T16.
+- Existing `forests.municipality` column gets populated.
+- New `forests.price_region` column stores the Luke region code for T6.
+- New `forests.growth_multiplier` column stores the location multiplier for T16.
 - Write tests: known kuntanumero (989 → "Ähtäri"/"6"/1.00), unknown kuntanumero (fallback), property_id with dashes preserved.
 
 ### T6: Real-Time Price Fetcher (Luke PxWeb API)
@@ -621,7 +681,7 @@ Use this in `classify.ts` `getSpeciesData()` to normalize any non-standard speci
 **Files:** `classify.ts`, `schedule.ts`
 **Effort:** ~2h
 
-- Load stand wishes from DB before classification (join `stand_wishes.compartment_id` → `compartments.id` to resolve `stand_id`)
+- Load stand wishes from DB before classification (join `stand_wishes.stand_id = compartments.stand_id` AND `stand_wishes.forest_id = compartments.forest_id` to resolve the current compartment UUID). This join survives reimport since `stand_id` is stable.
 - Apply `delay_harvest`: skip scheduling if target year < wish year; cap wish year at plan `period_end`
 - Apply `accelerate_harvest`: set `_priority_boost` on the stand so the candidate priority ordering (Section 4, tertiary sort) pushes it ahead of same-dueYear peers
 - Apply `no_clearcut`: convert any `clear_cut` operation to `selection_cutting` with 50% removal
@@ -660,10 +720,17 @@ Use this in `classify.ts` `getSpeciesData()` to normalize any non-standard speci
 **Files:** `classify.ts`, `config.ts`, `generate-plan.ts`
 **Effort:** ~2h
 
-- In `generatePlan()`: before classification, load prices via `price-fetcher.ts` (cache → live fetch → hardcoded fallback)
-- Pass loaded prices into `classifyAndValueStands()` → `calculateValue()`
-- Update `income-calculator.ts` `calculateOperationIncome()` to use the same price loading path
-- The hardcoded `PRICES` in `config.ts` remain as the last-resort fallback
+- In `generatePlan()`: before classification, load prices via `price-fetcher.ts` (cache → live fetch → hardcoded fallback). Price loading is an explicit async step — **not embedded in classification.** This keeps `classifyAndValueStands()` synchronous and testable with mock prices.
+- `classifyAndValueStands()` gains a `prices: PriceData` parameter (the loaded price data), rather than calling the fetcher internally. This separates the concern: price fetching (network, caching, fallback) lives in `price-fetcher.ts`, and classification just uses whatever prices it's given.
+- The hardcoded `PRICES` in `config.ts` remain as the last-resort fallback, used when `price-fetcher.ts` fails after exhausting all cache and live-fetch attempts.
+- Update `calculateOperationIncome()` to accept and use the loaded price data.
+- The flow in `generatePlan()`:
+  ```
+  1. Read forest.price_region, forest.growth_multiplier from DB
+  2. await fetchPricesForRegion(priceRegion) → PriceData (or null if fallback)
+  3. classifyAndValueStands(compartments, goal, prices, growthMultiplier)
+  4. schedulePlan(forestStands, operations, startYear, goal)
+  ```
 
 ### T13: Goal-Aware Validation
 **Files:** `validation-tools.ts`, `tool-executor.ts`
@@ -709,16 +776,22 @@ Note: `forests.municipality` already exists in the schema (from initial migratio
 
 ### T16: Location Effect on Growth Rate
 **Files:** `src/lib/ai/chart-engine.ts`, `src/lib/ai/forest-state.ts`, `src/lib/ai/config.ts`
-**Effort:** ~2h
+**Effort:** ~3h (extended: added normalization removal, rotation age adjustment, missing-data defaults)
 
+- **Remove normalization constants:** Delete `NORM_AGE`, `NORM_DENSITY`, `NORM_SPECIES` from `chart-engine.ts`. Remove the division from `speciesFactor()`, `ageFactor()`, `densityFactor()` — they return raw values directly.
 - Add `growthMultiplier` parameter to `getGrowthRate()` (default 1.0, backward compatible)
 - Add `growth_multiplier?: number` to `CompartmentInput` interface in `forest-state.ts`
 - Thread `growthMultiplier` through `estimateForestState()` simulation loop
-- Add `GROWTH_REGION_MULTIPLIERS` static table to `config.ts` as fallback
+- Add `GROWTH_REGION_MULTIPLIERS` and `OPTIMAL_AGE_MULTIPLIERS` static tables to `config.ts` as fallback
+- Update `getOptimalAge()` to accept `growthMultiplier` and scale rotation ages by `1 / growthMultiplier`
 - In the scheduling engine (T4), read `forest.growth_multiplier` from DB and pass as compartment property
+- Implement missing-data defaults from Section "Handling Stands with Missing Data" — when compartment fields are NULL during import, apply sensible Finnish forest averages
 - Write test: same stand with multiplier 1.10 (south) produces ~10% more volume at year N than baseline
 - Write test: same stand with multiplier 0.55 (Lappi) produces ~45% less volume
 - Write test: multiplier 1.00 (baseline/Väli-Suomi) identical to omitting the parameter
+- Write test: rotation ages for pine/sub-xeric in Lappi (0.55) are ~1.82× baseline [137, 182]
+- Write test: missing `development_class` on a 80-year stand with high BA → classified as `regeneration_ready`
+- Write test: missing `main_species` → defaults to `pine`, plan generates without error
 
 ---
 
@@ -748,7 +821,18 @@ The same 9 Luke price regions (Section 5) are reused as growth regions. Each reg
 | `"8"` | Lappi | **0.55** | Arctic (650–850 dd, 110–130 day season). Lappi forestry centre 0.51, conservatively rounded to 0.55. |
 | `"9"` | KOKO MAA (fallback) | **1.00** | Unknown location → conservative baseline. |
 
-**Data source:** Luke Metsätilastollinen vuosikirja (Forest Statistics Yearbook), average annual increment (m³/ha/y) by forestry centre (metsäkeskus) on productive forest land, all species. Multipliers = forestry_centre_growth / baseline_growth where baseline is avg(Keski-Suomi, Etelä-Pohjanmaa, Pohjois-Savo) = 4.87 m³/ha/y. Values rounded to nearest 0.05 for clean application.
+**Data source:** Luke VMI13 (valtakunnan metsien inventointi 13, 2019–2023), table 1.25 "Puuston keskikasvu metsämaalla" (Average annual increment on forest land). Retrieved from `statdb.luke.fi/PxWeb/api/v1/fi/LUKE/met/zzz_lak/06 Metsavarat/1.25_Puuston_keskikasvu_metsamaalla.px`.
+
+VMI13 data (all species, all site types, inventory 13):
+
+| Luke maakunta code | Region | Growth (m³/ha/y) |
+|---|---|---|
+| 1.1 (Etelä-Suomi) | Southern Finland | 6.5 |
+| 1.2 (Pohjois-Suomi) | Northern Finland | 3.1 |
+| 1.1.1–1.1.12 (Väli-Suomi regions) | Central Finland range | 5.9–7.5 |
+| 1.2.17–1.2.19 (Lappi regions) | Lapland range | 2.5–4.0 |
+
+The growth multipliers are derived from the ratio of each forestry centre (metsäkeskus) to the Väli-Suomi baseline, cross-referenced with VMI13 maakunta-level data and Metsätilastollinen vuosikirja (Forest Statistics Yearbook) forestry centre averages. Values are conservative — the VMI13 data shows a 2.1× spread (6.5/3.1), while our multipliers use a 2.0× spread (1.10/0.55), accounting for the fact that site-type stratification reduces variation (poor sites are overrepresented in the north, dragging the all-sites average down).
 
 **Design note — why same regions as price:** The Luke price regions already partition Finland along climatic and logistically meaningful boundaries that correlate with forestry centre areas. While the multiplier VALUES differ (price vs growth), the underlying geography is the same. Reusing the same region codes means one lookup table (`KUNTANUMERO_MAP`) can supply both `priceRegion` and `growthMultiplier` without maintaining separate region assignments.
 
@@ -779,7 +863,22 @@ ALTER TABLE forests ADD COLUMN IF NOT EXISTS growth_multiplier FLOAT DEFAULT 1.0
 
 Populated at import time from `KUNTANUMERO_MAP[propertyIdFirst3].growthMultiplier`.
 
-**3. Apply in `getGrowthRate()`** (`src/lib/ai/chart-engine.ts`):
+**3. Remove normalization constants** (`src/lib/ai/chart-engine.ts`):
+
+The current `speciesFactor()`, `ageFactor()`, and `densityFactor()` each divide their raw output by a `NORM_*` constant (`NORM_SPECIES = 1.007`, `NORM_AGE = 0.931`, `NORM_DENSITY = 0.923`). These were calibrated once for the 161-compartment Ähtäri forest so that the area-weighted mean of all multipliers ≈ 1.0, preserving the base rate as the true forest average.
+
+For a generic engine processing any property, these forest-specific constants become **wrong** — a young Lappi forest with mostly seedlings would have NORM_AGE closer to 0.65, overstating growth by ~40% if using the Ähtäri calibration.
+
+**Fix: Remove all normalization.** The multiplier functions return raw values directly (no division by NORM constants). Since the scheduling engine computes per-stand growth dynamically rather than relying on a single forest-average number, raw multipliers are correct — the base rate IS the VMI13 average, and multipliers distribute around it naturally.
+
+Delete these constants and remove their divisors:
+- `NORM_AGE = 0.931` → remove; `ageFactor()` returns raw value
+- `NORM_DENSITY = 0.923` → remove; `densityFactor()` returns raw value
+- `NORM_SPECIES = 1.007` → remove; `speciesFactor()` returns raw value
+
+The raw multipliers have these approximate ranges: speciesFactor 0.88–1.08, ageFactor 0.65–1.0 (current) or 0.68–1.025 (tuned), densityFactor 0.30–1.0. With normalization removed, individual stand growth rates increase by ~7–10% from current normalized values — the location multiplier and site-type base rate compensate for this shift.
+
+**4. Apply growth multiplier in `getGrowthRate()`** (`src/lib/ai/chart-engine.ts`):
 
 ```typescript
 export function getGrowthRate(
@@ -793,9 +892,9 @@ export function getGrowthRate(
 ): number {
   const table = soilType === "peatland" ? GROWTH_PEATLAND : GROWTH_MINERAL;
   const base = table[siteType] ?? GROWTH_DEFAULT;
-  const sf = speciesFactor(species, siteType);
-  const af = ageFactor(ageYears);
-  const df = densityFactor(basalArea, siteType, developmentClass);
+  const sf = speciesFactor(species, siteType);    // raw, no normalization
+  const af = ageFactor(ageYears);                 // raw, no normalization
+  const df = densityFactor(basalArea, siteType, developmentClass); // raw
   return base * sf * af * df * growthMultiplier;  // ← location effect applied HERE
 }
 ```
@@ -837,6 +936,48 @@ Used as a fallback if `forest.growth_multiplier` is NULL for legacy forests impo
 - **Helsinki (region 1, multiplier 1.10):** Sub-xeric pine peak growth rises from 3.1 → 3.4 m³/ha/y. Clearcut volume at age 80 rises from 181 → 199 m³/ha.
 - **Rovaniemi (region 8, multiplier 0.55):** Sub-xeric pine peak growth drops from 3.1 → 1.7 m³/ha/y. Clearcut volume at age 80 drops from 181 → 100 m³/ha — rotation age would need to extend to ~110 years.
 
+### Rotation Age Adjustment by Location
+
+The `OPTIMAL_AGES` in `config.ts` are calibrated for Väli-Suomi. In slower-growing regions (e.g., Lappi, 0.55×), applying the same rotation ages would clearcut stands at ~50% of their realistic harvest volume. The fix: scale all optimal ages by `1 / growthMultiplier` — a Lappi stand gets 1.82× longer rotation.
+
+**New config** (`src/lib/ai/config.ts`):
+
+```typescript
+/** Rotation age multiplier per region. Applied to both optMin and optMax.
+ *  Stored here as a static fallback; the authoritative value comes from
+ *  forests.growth_multiplier at runtime. */
+export const OPTIMAL_AGE_MULTIPLIERS: Record<string, number> = {
+  "1": 1 / 1.10,   // 0.91 — Etelä-Suomi: slightly shorter rotations
+  "3": 1.0,         // 1.00 — Keski-Suomi: baseline
+  "4": 1 / 0.90,   // 1.11 — Savo-Karjala
+  "5": 1 / 1.05,   // 0.95 — Kymi-Savo
+  "6": 1.0,         // 1.00 — Etelä-Pohjanmaa: baseline
+  "71": 1 / 0.80,  // 1.25 — Pohjois-Pohjanmaa
+  "72": 1 / 0.75,  // 1.33 — Kainuu-Koillismaa
+  "8": 1 / 0.55,   // 1.82 — Lappi: nearly double rotation
+  "9": 1.0,         // 1.00 — fallback
+};
+```
+
+**Update `getOptimalAge()`:**
+
+```typescript
+export function getOptimalAge(
+  species: string,
+  site: string,
+  growthMultiplier: number = 1.0,  // NEW parameter
+): [number, number] {
+  const sp = species === "birch" ? "silver_birch" : species;
+  const [optMin, optMax] = OPTIMAL_AGES[sp]?.[site] ?? [65, 90];
+  const ageMultiplier = 1 / growthMultiplier;
+  return [Math.round(optMin * ageMultiplier), Math.round(optMax * ageMultiplier)];
+}
+```
+
+**Effect on classification:** When `classifyAndValueStands()` checks clearcut eligibility (`age ≥ optMin`), the rotation ages are already location-adjusted. A 75-year-old pine stand on sub-xeric in Lappi (multiplier 0.55) would have `optMin = round(75 × 1.82) = 137` → NOT yet eligible for clearcut, whereas the same stand in Etelä-Suomi would have `optMin = round(75 × 0.91) = 68` → eligible.
+
+The `forests.growth_multiplier` is read from DB in `generatePlan()` and passed to both `getGrowthRate()` and `getOptimalAge()` — one DB field controls both growth speed and rotation timing.
+
 ### Interaction with Goals
 
 The growth multiplier affects ALL goals since it changes the underlying growth rate:
@@ -852,25 +993,26 @@ The growth multiplier affects ALL goals since it changes the underlying growth r
 | Task | Description | Effort | Dependencies |
 |------|-------------|--------|-------------|
 | T1 | Remove hardcoded stand references | 2h | — |
-| T2 | Conditional stand splitting (tactic, not default) | 2h | T1 |
+| T2 | Conditional stand splitting (tactic, not default) | 2h | — |
 | T3 | Goal parameter + tool definition | 1.5h | — |
-| T4 | Year-by-year scheduling engine (4 goals) | 7h | T1, T2, T3 |
+| T4 | Year-by-year scheduling engine (core loop + simple strategies: aggressive, balanced) | 6h | T1, T2, T3 |
+| T4b | Complex strategy implementations (carbon_storage, balanced round-robin) | 4h | T4 |
 | T5 | System prompt update (goal prompting + guidelines) | 1h | T3 |
-| T5b | Municipality lookup table + import integration | 2h | T14 |
+| T5b | Municipality lookup table + import integration (generation script + maakunta CSV) | 2.5h | T14 |
 | T6 | Real-time price fetcher (Luke PxWeb API) | 2.5h | T5b, T14 |
-| T7 | Stand wishes DB + API | 3h | — |
+| T7 | Stand wishes DB + API (stand_id-based, not compartment UUID) | 3h | — |
 | T8 | Integrate wishes into plan generation | 2h | T4, T7 |
 | T9 | Species name normalization | 1h | — |
 | T10 | Store goal in plan_metadata | 0.5h | T3 |
 | T11 | Goal-aware classification | 2h | T1, T3 |
-| T12 | Integrate prices into plan generation | 2h | T6, T11 |
+| T12 | Integrate prices into plan generation (explicit step, not embedded) | 2h | T6, T11 |
 | T13 | Goal-aware validation | 1.5h | T3, T4 |
 | T14 | Database migration (stand_wishes + plan_metadata + forests.price_region + forests.growth_multiplier + timber_prices) | 0.5h | — |
-| T15 | Tests & integration | 4h | All |
-| T16 | Location effect on growth rate | 2h | T5b, T14 |
+| T15 | Tests & integration (incl. generic property smoke test) | 5h | All |
+| T16 | Location effect on growth rate (incl. normalization removal, rotation age adjustment, missing-data handling) | 3h | T5b, T14 |
 | T17 | Age factor recalibration (young↑ old↓) | 2h | T4 |
 
-**Total:** ~38h
+**Total:** ~42.5h
 
 ---
 
@@ -889,8 +1031,36 @@ Cross-cutting:
 - Prices are fetched from Luke PxWeb API using `forest.price_region` directly — no runtime lookup needed
 - Prices are cached per region, with hardcoded fallback + region multiplier
 - Stand wishes are applied correctly: `no_clearcut` → `selection_cutting`, `delay_harvest` prevents early harvest, `retention_pct` reduces volume
+- Stand wishes survive forest reimport (stand_id-based lookup, not compartment UUID)
 - `validate_plan` and `check_harvest_sustainability` apply goal-appropriate thresholds
-- **Location effect:** Same stand on Helsinki (multiplier 1.10) produces ~10% more growth than Ähtäri (1.00); same stand in Rovaniemi (0.55) produces ~45% less. Plans for northern properties have longer rotation ages and lower harvest volumes.
+- **Location effect:** Same stand on Helsinki (multiplier 1.10) produces ~10% more growth than Ähtäri (1.00); same stand in Rovaniemi (0.55) produces ~45% less. Rotation ages scale inversely. Plans for northern properties have longer rotation ages and lower harvest volumes.
+
+**Smoke test — generic property:** After all tasks complete, import a second test forest (different region, different species mix) and verify:
+1. `forest.municipality`, `forest.price_region`, and `forest.growth_multiplier` are populated correctly from the import
+2. Generate all 4 plans — each completes without errors
+3. Plans produce sensible outputs: not all stands clearcut in year 1, not zero operations, operation years within plan period
+4. `maximum_growth_balanced` plan respects the 125% volume cap (no year exceeds it)
+5. Region-specific prices are used (different from Central Finland defaults)
+6. Rotation ages are location-adjusted (Etelä-Suomi slightly shorter, Lappi significantly longer)
+
+---
+
+## Handling Stands with Missing Data
+
+Generic properties may have incomplete compartment data. The classification and scheduling engine must handle these gracefully:
+
+| Missing field | Default / fallback behavior |
+|---|---|
+| `development_class` | Classify from age + BA heuristically: age ≥ optMin → `regeneration_ready`, BA ≥ THINNING_BA → `mature_thinning`, else `seedling` |
+| `main_species` | Default to `pine` (most common Finnish species). Log a warning in the plan notes. |
+| `age_years` | Default to 50 (mid-rotation). The first few simulation years will self-correct via growth projection. |
+| `basal_area` | Default to 15 m²/ha (Finnish average). Density factor will be near 1.0 (neutral). |
+| `volume_m3` | Compute from area × 100 m³/ha (Finnish average stocking). Mark as "estimated" in plan notes. |
+| `site_type` / `soil_type` | Default to `"sub-xeric"` / mineral. Growth rate defaults to 3.25 m³/ha/y (most common). |
+| `area_ha` | Skip the stand entirely (can't schedule on zero-area). Log a warning. |
+| Stand with ALL fields missing | Skip the stand. Log a warning. Do not crash the plan generation. |
+
+The plan metadata should include a `data_quality_warnings` array noting which stands had defaults applied, so the user can inspect and correct.
 
 ---
 
@@ -975,6 +1145,17 @@ growthRate = base × speciesFactor × ageFactor(tuned) × densityFactor × growt
 ```
 
 The location effect scales the entire curve uniformly. A Lappi stand (0.55) gets proportionally lower growth at ALL ages, but the shape (young ramp, peak, decline) is the same everywhere. Tuning the age curve improves accuracy for all regions simultaneously.
+
+**Cross-check — Lappi stand with tuned curve:** Simulate a sub-xeric pine stand in Lappi (growthMultiplier 0.55) with the tuned age curve and no BA growth (current simulator limitation):
+
+| Age | Expected volume (m³/ha) | Rationale |
+|-----|------------------------|-----------|
+| 20 | 30 | 55 × 0.55 (baseline tuned vol × location) |
+| 40 | 64 | 117 × 0.55 |
+| 80 | 110 | 200 × 0.55 |
+| 100 | 120 | Approaching SITE_MAX_VOLUME(kuivahko)=200 × 0.55 = 110 ceiling; growth slows |
+
+These values are plausible for Lappi sub-xeric pine — Tapio yield tables for northern Finland show 90–130 m³/ha at age 100–120 on comparable sites. The combination of steeper age decline + location multiplier does NOT cause unrealistic double-penalization; the ceiling prevents unbounded accumulation.
 
 ### Interaction with BA Growth
 

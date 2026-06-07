@@ -63,6 +63,7 @@ const toolHandlers: Record<string, ToolHandler> = {
     return generatePlan(ctx.supabase, ctx.forestId, ctx.userId, {
       periodYears: (args.period_years as number) ?? 20,
       startYear: (args.start_year as number) ?? new Date().getFullYear(),
+      goal: args.goal as "maximum_growth_aggressive" | "maximum_growth_balanced" | "carbon_storage" | "balanced" | undefined,
     }, (ctx.language ?? "en") as "en" | "fi");
   },
   get_stand: async (args, ctx) => getStand(ctx.supabase, ctx.forestId, args.stand_id as string, (ctx.language ?? "en") as "en" | "fi"),

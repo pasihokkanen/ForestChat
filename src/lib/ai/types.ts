@@ -19,11 +19,10 @@ export interface StandData {
   ageYears: number;
   ba: number;
   volumeM3: number;
-  _manual_year?: number;
-  _manual_income?: number;
-  _manual_removal?: number;
-  _manual_value?: number;
 }
+
+/** Owner's objective for plan generation */
+export type PlanGoal = "maximum_growth_aggressive" | "maximum_growth_balanced" | "carbon_storage" | "balanced";
 
 export interface PlannedOperation {
   stand: StandData;
@@ -33,6 +32,10 @@ export interface PlannedOperation {
   cost_eur: number;
   removal_m3: number;
   notes: string;
+  /** First year this operation became due (used for priority ordering) */
+  dueYear?: number;
+  /** Priority boost from stand wishes (accelerate_harvest) */
+  _priority_boost?: number;
 }
 
 export interface YearPlan {

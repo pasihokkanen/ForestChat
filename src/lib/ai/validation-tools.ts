@@ -19,7 +19,13 @@ export async function checkSustainability(
   forestId: string,
   year?: number,
   language: Language = "en",
+  goal?: import("./types").PlanGoal,
 ): Promise<{ success: boolean; result: string; error?: string }> {
+  // Goal-specific sustainability threshold multiplier
+  const thresholdMultiplier = goal === "maximum_growth_aggressive" ? 3.0
+    : goal === "maximum_growth_balanced" ? 1.25
+    : goal === "carbon_storage" ? 0.5
+    : 1.0; // balanced or undefined
   try {
     // Query compartments with all fields needed for state estimation
     const { data: compData } = await supabase
@@ -106,12 +112,12 @@ export async function checkSustainability(
     const harvestVsGrowth = avgAnnualGrowth > 0
       ? ((avgAnnualHarvest / avgAnnualGrowth) * 100).toFixed(1)
       : "N/A";
-    const isSustainable = avgAnnualGrowth > 0 && avgAnnualHarvest <= avgAnnualGrowth;
+    const isSustainable = avgAnnualGrowth > 0 && avgAnnualHarvest <= avgAnnualGrowth * thresholdMultiplier;
 
     // Find problematic years
     const badYears: string[] = [];
     for (const [yr, d] of yearData) {
-      if (d.growthM3 > 0 && d.harvestM3 > d.growthM3) {
+      if (d.growthM3 > 0 && d.harvestM3 > d.growthM3 * thresholdMultiplier) {
         badYears.push(String(yr));
       }
     }
@@ -165,9 +171,14 @@ export async function validatePlan(
   supabase: SupabaseClient,
   forestId: string,
   language: Language = "en",
+  goal?: import("./types").PlanGoal,
 ): Promise<{ success: boolean; result: string; error?: string }> {
   try {
     const issues: ValidationIssue[] = [];
+    const thresholdMultiplier = goal === "maximum_growth_aggressive" ? 3.0
+      : goal === "maximum_growth_balanced" ? 1.25
+      : goal === "carbon_storage" ? 0.5
+      : 1.0;
 
     const { data: compData } = await supabase
       .from("compartments")
@@ -274,7 +285,7 @@ export async function validatePlan(
       for (const yr of years) {
         const growth = yearGrowth.get(yr) ?? 0;
         const harvest = yearHarvest.get(yr) ?? 0;
-        if (growth > 0 && harvest > growth) {
+        if (growth > 0 && harvest > growth * thresholdMultiplier) {
           issues.push({
             severity: "warning",
             message: serverMsg("valHarvestExceeds", language, String(yr),

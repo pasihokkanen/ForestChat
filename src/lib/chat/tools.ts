@@ -25,20 +25,30 @@ export function getTools(): ToolDefinition[] {
       function: {
         name: "generate_plan",
         description: `Generate a complete forest management plan for the entire property.
-The algorithm follows Finnish silvicultural recommendations (Central Finland):
-- Optimal rotation ages: Pine 81-100, Spruce 71-90, Birch 61-70
+
+Choose a goal that matches the owner's objectives:
+
+- maximum_growth_aggressive: Maximize total volume. All regenerations done immediately. Fast rotation.
+- maximum_growth_balanced: Capped growth. Front-load regeneration like aggressive but with 125% annual growth volume limit for steady income.
+- carbon_storage: Maximize standing carbon stock. Avoid clearcuts. Extended rotations. Selection cutting preferred.
+- balanced: Equal weight on all objectives. Standard Finnish best practices.
+
+The algorithm uses Finnish silvicultural recommendations with Luke VMI13 growth rates:
 - Thinning thresholds: basal area limits by site type
-- Minimum thinning interval: 10 years
-- Sustainability: annual harvest < annual growth
 - Regeneration chain: clearcut → site preparation → planting (automatic)
-- Growth rates: Luke VMI13 coefficients by site type
 Returns: operations per stand, key metrics.`,
         parameters: {
           type: "object",
           properties: {
             period_years: { type: "number", description: "Duration in years (default 20)" },
             start_year: { type: "number", description: "Start year (default current year)" },
+            goal: {
+              type: "string",
+              enum: ["maximum_growth_aggressive", "maximum_growth_balanced", "carbon_storage", "balanced"],
+              description: "Owner's objective. REQUIRED. AI MUST ask the user before generating if not specified."
+            },
           },
+          required: ["goal"],
         },
       },
     },
