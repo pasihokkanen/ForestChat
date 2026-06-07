@@ -75,6 +75,7 @@ interface MutableStand {
 
 const HARVEST_OPS = new Set([
   "clear_cut", "thinning", "first_thinning", "selection_cutting",
+  "tending", "early_tending",
 ]);
 
 const REGEN_OPS = new Set([

@@ -78,15 +78,16 @@ describe("classifyAndValueStands", () => {
     expect(result.forestStands[0].site_class).toBe("lehtomainen");
   });
 
-  it("classifies seedling as early tending", () => {
+  it("classifies seedling as early tending with biomass removal", () => {
     const compartments = [
-      makeCompartment({ stand_id: "6", development_class: "seedling", age_years: 8 }),
+      makeCompartment({ stand_id: "6", development_class: "seedling", age_years: 8, volume_m3: 20 }),
     ];
     const result = classifyAndValueStands(compartments);
-    const hasTending = result.operations.some(
-      (o) => o.type === "early_tending"
-    );
-    expect(hasTending).toBe(true);
+    const tendingOps = result.operations.filter((o) => o.type === "early_tending");
+    expect(tendingOps.length).toBe(1);
+    // Non-merchantable removal (40% of 20 = 8 m³)
+    expect(tendingOps[0].removal_m3).toBe(8);
+    expect(tendingOps[0].income_eur).toBe(0);
   });
 
   it("calculates per-species stumpage value", () => {

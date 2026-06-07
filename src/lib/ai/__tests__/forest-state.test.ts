@@ -317,21 +317,21 @@ describe("estimateForestState", () => {
 
     const ops: OperationInput[] = [
       // ── Rotation 1: pine, age 5 → 79 ──
-      { compartment_id: "comp-life", year: 7, type: "tending", removal_pct: 0 },
+      { compartment_id: "comp-life", year: 7, type: "tending", removal_pct: 30 },
       { compartment_id: "comp-life", year: 20, type: "first_thinning", removal_pct: 30 },
       { compartment_id: "comp-life", year: 45, type: "thinning", removal_pct: 25 },
       { compartment_id: "comp-life", year: 75, type: "clear_cut", removal_pct: 100 },
       // ── Rotation 2: spruce, age 0 → 79 ──
       { compartment_id: "comp-life", year: 76, type: "spruce_planting", removal_pct: 0 },
-      { compartment_id: "comp-life", year: 79, type: "early_tending", removal_pct: 0 },
-      { compartment_id: "comp-life", year: 87, type: "tending", removal_pct: 0 },
+      { compartment_id: "comp-life", year: 79, type: "early_tending", removal_pct: 40 },
+      { compartment_id: "comp-life", year: 87, type: "tending", removal_pct: 30 },
       { compartment_id: "comp-life", year: 100, type: "first_thinning", removal_pct: 30 },
       { compartment_id: "comp-life", year: 125, type: "thinning", removal_pct: 25 },
       { compartment_id: "comp-life", year: 155, type: "clear_cut", removal_pct: 100 },
       // ── Rotation 3: pine, age 0 → 45 (ongoing) ──
       { compartment_id: "comp-life", year: 156, type: "pine_planting", removal_pct: 0 },
-      { compartment_id: "comp-life", year: 159, type: "early_tending", removal_pct: 0 },
-      { compartment_id: "comp-life", year: 167, type: "tending", removal_pct: 0 },
+      { compartment_id: "comp-life", year: 159, type: "early_tending", removal_pct: 40 },
+      { compartment_id: "comp-life", year: 167, type: "tending", removal_pct: 30 },
       { compartment_id: "comp-life", year: 180, type: "first_thinning", removal_pct: 30 },
     ];
 
@@ -350,11 +350,12 @@ describe("estimateForestState", () => {
       if (i > 0) expect(s[i].volumeM3).toBeGreaterThan(s[i - 1].volumeM3);
     }
 
-    // Year 7: tending (age 12) — cost-only
+    // Year 7: tending (age 12) — removes ~30% of pre-tending volume
     expect(s[6].year).toBe(7);
     expect(s[6].operationType).toBe("tending");
-    expect(s[6].harvestM3).toBe(0);
-    expect(s[6].volumeM3).toBeGreaterThan(s[5].volumeM3);
+    expect(s[6].harvestM3).toBeGreaterThan(0);
+    // Volume still increases if growth exceeds removal (it does at this age)
+    expect(s[6].volumeM3).toBeLessThan(s[5].volumeM3 + s[6].growthM3);
 
     // Growth years 8-19 (age 13→24)
     for (let i = 7; i < 19; i++) {
@@ -411,19 +412,20 @@ describe("estimateForestState", () => {
       expect(s[i].growthM3).toBeGreaterThan(0);
     }
 
-    // Year 79: early tending (age 4)
+    // Year 79: early tending (age 4) — removes ~40% of seedling volume
     expect(s[78].year).toBe(79);
     expect(s[78].operationType).toBe("early_tending");
+    expect(s[78].harvestM3).toBeGreaterThan(0);
 
     // Growth years 80-86 (age 5→11)
     for (let i = 79; i < 86; i++) {
       expect(s[i].growthM3).toBeGreaterThan(0);
     }
 
-    // Year 87: tending (age 12)
+    // Year 87: tending (age 12) — removes ~30%
     expect(s[86].year).toBe(87);
     expect(s[86].operationType).toBe("tending");
-    expect(s[86].harvestM3).toBe(0);
+    expect(s[86].harvestM3).toBeGreaterThan(0);
 
     // Growth years 88-99 (age 13→24)
     for (let i = 87; i < 99; i++) {
@@ -478,18 +480,20 @@ describe("estimateForestState", () => {
       expect(s[i].growthM3).toBeGreaterThan(0);
     }
 
-    // Year 159: early tending (age 4)
+    // Year 159: early tending (age 4) — removes ~40%
     expect(s[158].year).toBe(159);
     expect(s[158].operationType).toBe("early_tending");
+    expect(s[158].harvestM3).toBeGreaterThan(0);
 
     // Growth years 160-166 (age 5→11)
     for (let i = 159; i < 166; i++) {
       expect(s[i].growthM3).toBeGreaterThan(0);
     }
 
-    // Year 167: tending (age 12)
+    // Year 167: tending (age 12) — removes ~30%
     expect(s[166].year).toBe(167);
     expect(s[166].operationType).toBe("tending");
+    expect(s[166].harvestM3).toBeGreaterThan(0);
 
     // Growth years 168-179 (age 13→24)
     for (let i = 167; i < 179; i++) {

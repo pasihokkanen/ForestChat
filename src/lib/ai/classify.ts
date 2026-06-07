@@ -310,13 +310,14 @@ export function classifyAndValueStands(
 
     // === SEEDLING_SMALL (under 1.3m) ===
     if (devClass.includes("seedling") && age >= 3 && age <= 12) {
+        // Metka: ~40-60% stem removal, non-merchantable (<3 cm Ø)
         operations.push({
           stand: k,
           type: "early_tending",
           year: cy,
           income_eur: 0,
           cost_eur: Math.round(COSTS.early_tending * areaHa),
-          removal_m3: 0,
+          removal_m3: Math.round(volumeM3 * 0.4),
           notes: `Age ${age.toFixed(0)}y`,
         });
       continue;
@@ -324,13 +325,14 @@ export function classifyAndValueStands(
 
     // === SEEDLING_LARGE (over 1.3m) ===
     if (devClass.includes("seedling") && age >= 10 && age <= 25) {
+        // Metka: ~30-50% stem removal, energy-wood only (3-7 cm Ø)
         operations.push({
           stand: k,
           type: "tending",
           year: cy,
           income_eur: 0,
-        cost_eur: Math.round(COSTS.tending * areaHa),
-          removal_m3: 0,
+          cost_eur: Math.round(COSTS.tending * areaHa),
+          removal_m3: Math.round(volumeM3 * 0.3),
           notes: `Age ${age.toFixed(0)}y`,
         });
       continue;
