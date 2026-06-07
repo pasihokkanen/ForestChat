@@ -154,25 +154,28 @@ function speciesFactor(species: string, siteType: string): number {
  * Age factor: growth curve over a stand's lifetime.
  *
  * Young stands haven't reached full canopy closure yet; very old stands
- * slow down as trees senesce. Peak growth occurs at 40–70 years.
+ * slow down as trees senesce. Peak growth occurs at 40–60 years.
  *
- *   Age   5:  0.75  — seedling, canopy forming
- *   Age  15:  0.95  — sapling, approaching peak
- *   Age  30:  0.98  — young thinning stand
- *   Age 40–70: 1.00  — PEAK GROWTH, full canopy
- *   Age  90:  0.90  — mature, slowing
- *   Age 110:  0.82  — over-mature, senescent
+ * Scaled so peak ≈ 0.52 — combined with species×density, the full
+ * multiplier stack targets Tapio yield tables (not VMI13 average, which
+ * already bakes in these effects).
+ *
+ *   Age   5:  0.25  — seedling, canopy forming
+ *   Age  20:  0.40  — sapling, rapid growth
+ *   Age  40:  0.50  — approaching peak
+ *   Age  60:  0.48  — peak, full canopy
+ *   Age  80:  0.40  — mature, slowing
+ *   Age 100:  0.30  — over-mature
+ *   Age 120:  0.20  — senescent
  */
 function ageFactor(ageYears: number | null): number {
-  if (ageYears == null) return 1.0;
+  if (ageYears == null) return 0.48;
   const a = ageYears;
   let raw: number;
-  // Phase 7b T17: Recalibrated — steeper young ramp, earlier peak, steeper decline
-  if (a < 15)       raw = 0.68 + 0.028 * a;          // 0.68 → 1.10 (was 0.65+0.02a)
-  else if (a < 35)  raw = 1.02 + 0.005 * (a - 15);   // 1.02 → 1.12, peak at ~35
-  else if (a < 50)  raw = 1.12 - 0.004 * (a - 35);   // 1.12 → 1.06
-  else if (a < 85)  raw = 1.06 - 0.008 * (a - 50);   // 1.06 → 0.78
-  else              raw = 0.78 - 0.005 * (a - 85);    // slow terminal decline
+  if (a < 20)       raw = 0.28 + 0.011 * a;           // 0.28 → 0.50
+  else if (a < 55)  raw = 0.50 + 0.001 * (a - 20);    // 0.50 → 0.535, gentle rise
+  else if (a < 85)  raw = 0.535 - 0.005 * (a - 55);   // 0.535 → 0.385
+  else              raw = 0.385 - 0.004 * (a - 85);    // 0.385 → 0.245
   return raw;
 }
 
@@ -183,13 +186,16 @@ function ageFactor(ageYears: number | null): number {
  * Understocked stands don't use full site potential; overstocked stands
  * experience competition that reduces individual tree growth.
  *
- *   BA = 0  (seedling):  0.65  — growing, just not measured yet
- *   BA = 0  (open_area): 0.30  — genuinely unstocked
- *   <50% of expected:    0.80  — understocked
- *   50-75%:              0.95  — below normal
- *   75-130%:             1.00  — NORMAL, optimal growth
- *   130-150%:            0.95  — dense, slight competition
- *   >150%:               0.85  — overstocked, significant competition
+ * Scaled so fully-stocked stands (75-130%) yield ~0.85 — combined with
+ * species×age, targets Tapio rather than raw VMI13.
+ *
+ *   BA = 0  (seedling):  0.45  — growing, just not measured yet
+ *   BA = 0  (open_area): 0.20  — genuinely unstocked
+ *   <50% of expected:    0.55  — understocked
+ *   50-75%:              0.70  — below normal
+ *   75-130%:             0.85  — NORMAL, fully stocked
+ *   130-150%:            0.78  — dense, slight competition
+ *   >150%:               0.65  — overstocked, significant competition
  */
 function densityFactor(
   basalArea: number | null,
@@ -197,20 +203,18 @@ function densityFactor(
   developmentClass: string | null
 ): number {
   if (basalArea == null || basalArea === 0) {
-    // Zero BA: distinguish seedlings (growing, BA not measured) from
-    // open areas (genuinely unstocked).
-    if (developmentClass && developmentClass.includes("seedling")) return 0.65;
-    if (developmentClass === "open_area") return 0.30;
-    return 0.60; // unknown — assume low but growing
+    if (developmentClass && developmentClass.includes("seedling")) return 0.45;
+    if (developmentClass === "open_area") return 0.20;
+    return 0.40;
   }
   const expected = EXPECTED_BA[siteType] ?? 20;
   const density = basalArea / expected;
   let raw: number;
-  if (density < 0.5)       raw = 0.80;
-  else if (density < 0.75) raw = 0.95;
-  else if (density < 1.3)  raw = 1.0;
-  else if (density < 1.5)  raw = 0.95;
-  else                     raw = 0.85;
+  if (density < 0.5)       raw = 0.55;
+  else if (density < 0.75) raw = 0.70;
+  else if (density < 1.3)  raw = 0.85;
+  else if (density < 1.5)  raw = 0.78;
+  else                     raw = 0.65;
   return raw;
 }
 
@@ -232,13 +236,38 @@ export function getGrowthRate(
   basalArea: number | null,
   developmentClass: string | null,
   growthMultiplier = 1.0,
+  /** Current standing volume (m³/ha). When provided, growth tapers as
+   *  the stand approaches the site's carrying capacity. */
+  currentVolumeM3PerHa?: number,
 ): number {
   const table = soilType === "peatland" ? GROWTH_PEATLAND : GROWTH_MINERAL;
   const base = table[siteType] ?? GROWTH_DEFAULT;
   const sf = speciesFactor(species, siteType);
   const af = ageFactor(ageYears);
   const df = densityFactor(basalArea, siteType, developmentClass);
-  return base * sf * af * df * growthMultiplier;
+  let growth = base * sf * af * df * growthMultiplier;
+
+  // ── Carrying-capacity cap (Option C) ──
+  // Growth tapers linearly when standing volume exceeds 70% of the
+  // site's maximum yield. At maxYield, growth → 0.
+  // Based on Tapio yield table upper bounds by site type (m³/ha).
+  if (currentVolumeM3PerHa != null && currentVolumeM3PerHa > 0) {
+    const MAX_YIELD: Record<string, number> = {
+      "herb-rich heath": 350,
+      mesic: 220,
+      "sub-xeric": 140,
+      xeric: 80,
+    };
+    const maxYield = MAX_YIELD[siteType] ?? 180;
+    const threshold = 0.70 * maxYield;
+    if (currentVolumeM3PerHa > threshold) {
+      const excess = (currentVolumeM3PerHa - threshold) / (maxYield - threshold);
+      const capFactor = Math.max(0, 1 - excess);
+      growth *= capFactor;
+    }
+  }
+
+  return growth;
 }
 
 const COMPUTED_FIELDS: Record<string, ComputedFieldDef> = {

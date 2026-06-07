@@ -159,6 +159,7 @@ export function estimateForestState(
           s.basalArea,
           s.developmentClass,
           s.growthMultiplier,
+          s.volumeM3 / (s.areaHa || 1),
         );
         growthM3 = growthM3PerHa * s.areaHa;
       }

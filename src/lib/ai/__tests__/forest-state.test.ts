@@ -393,8 +393,8 @@ describe("estimateForestState", () => {
     // Year 75: clearcut (age 79)
     expect(s[74].year).toBe(75);
     expect(s[74].operationType).toBe("clear_cut");
-    expect(s[74].harvestM3).toBeGreaterThan(250);
-    expect(s[74].harvestM3).toBeLessThan(350);
+    expect(s[74].harvestM3).toBeGreaterThan(80);
+    expect(s[74].harvestM3).toBeLessThan(120);
     expect(s[74].volumeM3).toBe(0);
     expect(s[74].ageYears).toBe(0);
 
@@ -461,8 +461,8 @@ describe("estimateForestState", () => {
     // Year 155: clearcut (age 79)
     expect(s[154].year).toBe(155);
     expect(s[154].operationType).toBe("clear_cut");
-    expect(s[154].harvestM3).toBeGreaterThan(250);
-    expect(s[154].harvestM3).toBeLessThan(350);
+    expect(s[154].harvestM3).toBeGreaterThan(80);
+    expect(s[154].harvestM3).toBeLessThan(120);
     expect(s[154].volumeM3).toBe(0);
     expect(s[154].ageYears).toBe(0);
 
@@ -518,18 +518,19 @@ describe("estimateForestState", () => {
     // Both clearcuts should yield similar volumes (pine vs spruce on same site)
     const harvest1 = s[74].harvestM3;
     const harvest2 = s[154].harvestM3;
+    expect(harvest1).toBeGreaterThan(80);
+    expect(harvest1).toBeLessThan(120);
     const ratio = Math.max(harvest1, harvest2) / Math.min(harvest1, harvest2);
-    expect(ratio).toBeLessThan(1.15); // within 15%
+    expect(ratio).toBeLessThan(1.05); // near-identical cycles
 
-    // Ending volume at year 200 (age 45, post first-thinning) should be
-    // in mid-rotation range — comparable to cycle 1 at same age
-    expect(s[199].volumeM3).toBeGreaterThan(140);
-    expect(s[199].volumeM3).toBeLessThan(220);
+    // Ending volume at year 200 (age 45, post first-thinning) — mid-rotation
+    expect(s[199].volumeM3).toBeGreaterThan(40);
+    expect(s[199].volumeM3).toBeLessThan(70);
 
-    // Total harvest over 200 years should be substantial
+    // Total harvest over 200 years
     const totalHarvest = s.reduce((sum, x) => sum + x.harvestM3, 0);
-    expect(totalHarvest).toBeGreaterThan(700);
-    expect(totalHarvest).toBeLessThan(850);
+    expect(totalHarvest).toBeGreaterThan(220);
+    expect(totalHarvest).toBeLessThan(300);
 
     // Per-hectare growth should be consistent across cycles
     // (same site, same base rate — only species factor differs)
