@@ -191,9 +191,19 @@ export function estimateForestState(
           }
         }
 
-        // Regeneration: un-clears the stand so growth resumes
+        // Regeneration: un-clears the stand so growth resumes.
+        // Reset development class and seed initial basal area for the new stand.
         if (REGEN_OPS.has(op.type)) {
           s.cleared = false;
+          // Set development class based on planted species
+          if (op.type === "spruce_planting") s.developmentClass = "seedling_spruce";
+          else if (op.type === "pine_planting") s.developmentClass = "seedling_pine";
+          else if (op.type === "birch_planting") s.developmentClass = "seedling_birch";
+          else if (!s.developmentClass || s.developmentClass === "") s.developmentClass = "seedling";
+          // Seed minimum basal area (m²/ha) for newly planted seedlings
+          if (s.basalArea === 0) s.basalArea = 2;
+          // Seed minimum volume (m³) so growth doesn't start from absolute zero
+          if (s.volumeM3 === 0) s.volumeM3 = s.areaHa * 1;
         }
       }
 
