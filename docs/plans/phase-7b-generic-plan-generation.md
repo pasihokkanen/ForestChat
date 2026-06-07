@@ -868,8 +868,9 @@ The growth multiplier affects ALL goals since it changes the underlying growth r
 | T14 | Database migration (stand_wishes + plan_metadata + forests.price_region + forests.growth_multiplier + timber_prices) | 0.5h | — |
 | T15 | Tests & integration | 4h | All |
 | T16 | Location effect on growth rate | 2h | T5b, T14 |
+| T17 | Age factor recalibration (young↑ old↓) | 2h | T4 |
 
-**Total:** ~36h
+**Total:** ~38h
 
 ---
 
@@ -890,6 +891,102 @@ Cross-cutting:
 - Stand wishes are applied correctly: `no_clearcut` → `selection_cutting`, `delay_harvest` prevents early harvest, `retention_pct` reduces volume
 - `validate_plan` and `check_harvest_sustainability` apply goal-appropriate thresholds
 - **Location effect:** Same stand on Helsinki (multiplier 1.10) produces ~10% more growth than Ähtäri (1.00); same stand in Rovaniemi (0.55) produces ~45% less. Plans for northern properties have longer rotation ages and lower harvest volumes.
+
+---
+
+## 9. Growth Rate Tuning — Age Factor Recalibration
+
+### Problem
+
+Validation against Luke VMI13 data (Section "Simulator vs Luke") revealed that the growth simulator's **age factor curve** distributes growth incorrectly across a stand's lifetime:
+
+| Metric | Simulator | Tapio/Luke target | Gap |
+|--------|-----------|-------------------|-----|
+| Age 20 unthinned volume | 47 m³/ha | 50–65 m³/ha (Tapio) | −3 to −18 |
+| Age 25 pre-1st-thinning | 57 m³/ha | 70–85 m³/ha (Tapio) | −13 to −28 |
+| Age 80 pre-clearcut | 232 m³/ha | 170–210 m³/ha (Tapio, sub-xeric pine) | +22 to +62 |
+| Avg growth age 5–80 | 3.05 m³/ha/y | ~3.0–3.25 (VMI13 for sub-xeric) | Slightly low |
+
+**The pattern:** young stands grow too slowly, old stands accumulate too much volume. The total growth over a full rotation is roughly correct (~229 vs ~230 m³/ha expected), but the distribution is wrong — too much growth is happening in ages 50–80 and too little in ages 5–25.
+
+### Root Causes
+
+1. **Conservative seedling age factor:** `ageFactor` starts at 0.65 raw (age 0). For a 5-year-old pine stand, this gives 0.75 raw → 0.806 normalized. Real pine seedlings on sub-xeric sites establish faster.
+
+2. **Too-gentle old-age decline:** The decline after age 70 is only −0.005/year raw. Real old stands lose growth faster due to mortality, wind damage, and senescence not modeled in the simulator.
+
+3. **No BA growth modeling:** This is a separate issue (BA stays at 3 m²/ha forever, densityFactor at 0.867). If BA grew to normal levels, young stands would fill in faster (densityFactor rising from 0.65 to 1.0), which would partially address the young-stand gap. However, it would also make the old-stand overshoot WORSE unless counterbalanced by steeper decline.
+
+### Tuning Strategy
+
+**Redistribute growth from old to young** while keeping total rotation growth approximately constant. The age factor curve is the primary tuning knob — it controls how growth varies with stand age independently of site type, species, or density.
+
+**Target curve shape:**
+
+```
+Current:  _/‾‾‾‾‾‾‾‾‾\__     (long plateau, gentle decline)
+Target:   _/‾‾‾\_______      (steeper ramp, earlier peak, steeper decline)
+```
+
+**Proposed parameter changes to `ageFactor()` in `chart-engine.ts`:**
+
+| Parameter | Current | Proposed | Effect |
+|-----------|---------|----------|--------|
+| Seedling base (`a < 15` slope) | `0.65 + 0.020·a` | `0.68 + 0.028·a` | +15–25% growth for ages 5–15 |
+| Young stand (`15 ≤ a < 40` slope) | `0.95 + 0.002·(a−15)` | `0.90 + 0.005·(a−15) → peak at 1.025` | Faster ramp to peak, peak at age ~35 |
+| Plateau window | 40–70 (30 years) | 30–50 (20 years) | Shorter peak, decline starts earlier |
+| Decline start age | 70 | 50 | 20 years earlier |
+| Decline slope (`a ≥ 70`) | `−0.005·(a−70)` | `−0.008·(a−50)` | 60% steeper decline |
+| Senescence (`a ≥ 85`) | `−0.003·(a−100)` | `−0.005·(a−85)` | Faster terminal decline |
+
+**Expected trajectory (unthinned, current BA limitation):**
+
+| Age | Current vol (m³/ha) | Tuned vol (m³/ha) | Tapio target | Match? |
+|-----|---------------------|--------------------|-------------|--------|
+| 20 | 47 | **55** | 50–65 | ✅ matches lower-mid |
+| 25 | 57 | **68** | 70–85 | ⚠️ slightly low (−2) |
+| 40 | 103 | **117** | 90–115 | ⚠️ slightly high (+2) |
+| 60 | 166 | **167** | 130–165 | ⚠️ slightly high (+2) |
+| 80 | 232 | **200** | 170–210 | ✅ matches upper-mid |
+
+### Volume Ceiling
+
+Additionally, introduce a **site-type maximum volume** (`SITE_MAX_VOLUME` in `config.ts`) to prevent unbounded accumulation in old stands. Even with steeper decline, the growth rate never goes negative — old stands can theoretically accumulate infinite volume. A ceiling caps the standing volume at a biologically realistic maximum:
+
+```typescript
+export const SITE_MAX_VOLUME: Record<string, number> = {
+  lehtomainen: 350,  // m³/ha
+  tuore: 280,
+  kuivahko: 200,      // sub-xeric
+  kuiva: 120,
+};
+```
+
+In `estimateForestState()`, after applying growth: `s.volumeM3 = Math.min(s.volumeM3, s.areaHa * SITE_MAX_VOLUME[siteClass])`.
+
+When a stand hits the ceiling, the growth rate effectively becomes the ceiling minus previous volume (or zero if already at ceiling). This models the biological reality that old stands reach equilibrium where growth ≈ mortality.
+
+### Interaction with Location Effect (Section 8)
+
+The age factor tuning is **orthogonal** to the location multiplier — both multiply the base rate:
+
+```
+growthRate = base × speciesFactor × ageFactor(tuned) × densityFactor × growthMultiplier(location)
+```
+
+The location effect scales the entire curve uniformly. A Lappi stand (0.55) gets proportionally lower growth at ALL ages, but the shape (young ramp, peak, decline) is the same everywhere. Tuning the age curve improves accuracy for all regions simultaneously.
+
+### Interaction with BA Growth
+
+If BA growth is later modeled (allowing densityFactor to reach 1.0), the age curve would need re-tuning — the higher densityFactor at peak ages would further increase old-stand volumes. The steeper decline proposed here partially compensates, but a full BA growth model would require a coordinated recalibration.
+
+### Implementation Notes
+
+- **No new DB migration needed** — purely a code change in `chart-engine.ts` + `config.ts`
+- **Existing lifecycle test will fail** (hardcoded volume assertions at specific ages change)
+- **New calibration test recommended**: verify volumes at ages 20, 40, 60, 80 match Tapio/Yield table ranges
+- **Effort:** ~2h (parameter tuning + test updates)
+- **Risk:** Low — only changes the age factor curve shape; all other subsystems (classification, scheduling, validation) work with whatever growth rates the engine produces
 
 ---
 
