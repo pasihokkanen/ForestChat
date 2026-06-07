@@ -387,7 +387,7 @@ describe("estimateForestState", () => {
     // Growth per ha should decline toward end of rotation (ageFactor after 70)
     const peakGrowth = s[40].growthM3PerHa;   // age ~65, plateau
     const lateGrowth = s[72].growthM3PerHa;   // age ~77, decline
-    expect(lateGrowth).toBeLessThanOrEqual(peakGrowth * 1.05);
+    expect(lateGrowth).toBeLessThanOrEqual(peakGrowth * 0.90);
 
     // ── Year 75: clearcut (age 80) ──
     expect(s[74].year).toBe(75);
@@ -427,17 +427,16 @@ describe("estimateForestState", () => {
     }
 
     // ── Cross-cycle sanity checks ──
-    // Clearcut harvest at age 80 should be substantial (>200 m³ on 1.7 ha)
-    expect(s[74].harvestM3).toBeGreaterThan(200);
+    // Clearcut harvest at age 80: VMI13 sub-xeric pine ~150-190 m³/ha → 255-323 on 1.7ha
+    expect(s[74].harvestM3).toBeGreaterThan(250);
+    expect(s[74].harvestM3).toBeLessThan(350);
 
-    // New stand volume at end (age 15) should be modest
-    expect(s[89].volumeM3).toBeGreaterThan(15);
-    expect(s[89].volumeM3).toBeLessThan(80);
+    // New stand volume at end (age 15): realistic spruce sapling pole stage
+    expect(s[89].volumeM3).toBeGreaterThan(25);
+    expect(s[89].volumeM3).toBeLessThan(65);
 
-    // Young spruce growth rate should be reasonable
-    // Base 3.25 × ageFactor(~0.85) × densityFactor(~0.70 seedling) × speciesFactor(~0.9)
-    // ≈ 1.7-2.5 m³/ha/y
+    // Young spruce growth: base 3.25 × factors → 1.7-2.5 m³/ha/y typical
     expect(s[80].growthM3PerHa).toBeGreaterThan(1.5);
-    expect(s[80].growthM3PerHa).toBeLessThan(3.5);
+    expect(s[80].growthM3PerHa).toBeLessThan(3.0);
   });
 });
