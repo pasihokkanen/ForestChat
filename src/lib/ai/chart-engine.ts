@@ -129,21 +129,23 @@ const EXPECTED_BA: Record<string, number> = {
  * General principle: spruce thrives on fertile sites, pine on poor sites,
  * birch grows slower than conifers on average.
  *
- *   Spruce on mesic/herb-rich:  1.08  (+8% — optimal conditions)
- *   Spruce on sub-xeric/xeric:  0.95  (−5% — struggles on dry/poor soil)
- *   Pine on mesic/herb-rich:    0.95  (−5% — outcompeted by spruce)
- *   Pine on sub-xeric/xeric:    1.05  (+5% — drought-tolerant, dominates)
- *   Birch (any site):           0.88–0.92 (−8-12% — naturally slower)
- *   Others (larch, alder):      1.0   (neutral)
+ *   Spruce on herb-rich:      1.18  (+18% — optimal conditions)
+ *   Spruce on mesic:          1.08  (+8% — good conditions)
+ *   Spruce on sub-xeric/xeric:0.95  (−5% — struggles on dry/poor soil)
+ *   Pine on mesic/herb-rich:  0.95  (−5% — outcompeted by spruce)
+ *   Pine on sub-xeric/xeric:  1.05  (+5% — drought-tolerant, dominates)
+ *   Birch (any site):          0.88–0.92 (−8-12% — naturally slower)
+ *   Others (larch, alder):     1.0   (neutral)
  */
 function speciesFactor(species: string, siteType: string): number {
-  const goodSite = siteType === "herb-rich heath" || siteType === "mesic";
+  const isHerbRich = siteType === "herb-rich heath";
+  const isGood = isHerbRich || siteType === "mesic";
   const sp = (species ?? "").toLowerCase();
   const raw: Record<string, number> = {
-    pine: goodSite ? 0.95 : 1.05,
-    spruce: goodSite ? 1.08 : 0.95,
-    silver_birch: 0.92,
-    downy_birch: 0.90,
+    pine: isGood ? 0.95 : 1.05,
+    spruce: isHerbRich ? 1.18 : isGood ? 1.08 : 0.95,
+    silver_birch: isHerbRich ? 0.95 : 0.92,
+    downy_birch: isHerbRich ? 0.93 : 0.90,
     larch: 1.02,
     grey_alder: 0.88,
   };
@@ -250,15 +252,16 @@ export function getGrowthRate(
   // ── Carrying-capacity cap (Option C) ──
   // Growth tapers linearly when standing volume exceeds 70% of the
   // site's maximum yield. At maxYield, growth → 0.
-  // Based on Tapio yield table upper bounds by site type (m³/ha).
+  // maxYield is scaled by growthMultiplier so Lappi (0.55) gets
+  // proportionally lower carrying capacity.
   if (currentVolumeM3PerHa != null && currentVolumeM3PerHa > 0) {
     const MAX_YIELD: Record<string, number> = {
-      "herb-rich heath": 350,
+      "herb-rich heath": 380,
       mesic: 220,
       "sub-xeric": 140,
       xeric: 80,
     };
-    const maxYield = MAX_YIELD[siteType] ?? 180;
+    const maxYield = (MAX_YIELD[siteType] ?? 180) * growthMultiplier;
     const threshold = 0.70 * maxYield;
     if (currentVolumeM3PerHa > threshold) {
       const excess = (currentVolumeM3PerHa - threshold) / (maxYield - threshold);
