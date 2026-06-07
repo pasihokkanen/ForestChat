@@ -544,7 +544,7 @@ Use this in `classify.ts` `getSpeciesData()` to normalize any non-standard speci
 
 - Define `SchedulingStrategy` interface with `volumeCapMultiplier()`, `selectOperations()`, `shouldSplit()`, `regenDelayYears()`, `regenerationSpecies()`
 - Implement the core year-by-year loop: deduce → merge → select → apply → simulate → carryover → chain
-- Use `getGrowthRate()` from `chart-engine.ts` for per-stand, per-year growth simulation (mutating state in-place between year steps)
+- Use `getGrowthRate()` from `chart-engine.ts` for per-stand, per-year growth simulation (mutating state in-place between year steps). Pass `forest.growth_multiplier` from DB through `CompartmentInput.growth_multiplier` → `getGrowthRate(growthMultiplier)` for location-aware growth.
 - Use `estimateForestState()` for post-scheduling verification — the scheduler builds ops incrementally, then `estimateForestState()` validates the full timeline
 - Implement 4 strategy objects as specified in Section 4
 - Each strategy's `selectOperations()` implements goal-specific priority ordering (greedy, two-phase, selection-first, round-robin)
@@ -569,21 +569,23 @@ Use this in `classify.ts` `getSpeciesData()` to normalize any non-standard speci
 
 ### T5b: Municipality Lookup Table + Import Integration
 **Files:** New file `src/lib/import/municipality-lookup.ts`, `src/lib/import/csv-importer.ts`, `src/app/api/import/property/route.ts`
-**Effort:** ~1.5h
+**Effort:** ~2h (extended: added growthMultiplier field)
 
-- Build `KUNTANUMERO_MAP`: hardcoded Record mapping all 309 Finnish kuntanumero → `{ name: string, priceRegion: string }`
+- Build `KUNTANUMERO_MAP`: hardcoded Record mapping all 309 Finnish kuntanumero → `{ name: string, priceRegion: string, growthMultiplier: number }`
   - Source data: official kuntaluettelo (Tilastokeskus). Municipality names in Finnish.
   - Luke region assignment per maakunta boundaries (see region table in Section 5).
-  - Unknown/unlisted kuntanumero → `{ name: "Tuntematon", priceRegion: "9" }` (KOKO MAA fallback)
+  - Growth multiplier per region (see Section 8).
+  - Unknown/unlisted kuntanumero → `{ name: "Tuntematon", priceRegion: "9", growthMultiplier: 1.0 }` (KOKO MAA fallback)
 - In both import paths (CSV and WFS/API), after creating the forest record:
   ```typescript
   const kuntanumero = propertyId.replace(/-/g, "").slice(0, 3);
-  const lookup = KUNTANUMERO_MAP[kuntanumero] ?? { name: "Tuntematon", priceRegion: "9" };
-  // UPDATE forests SET municipality = lookup.name, price_region = lookup.priceRegion
+  const lookup = KUNTANUMERO_MAP[kuntanumero] ?? { name: "Tuntematon", priceRegion: "9", growthMultiplier: 1.0 };
+  // UPDATE forests SET municipality = lookup.name, price_region = lookup.priceRegion, growth_multiplier = lookup.growthMultiplier
   ```
 - Existing `forests.municipality` column (already present, currently NULL) gets populated.
 - New `forests.price_region` column stores the Luke region code for downstream use by T6.
-- Write tests: known kuntanumero (989 → "Ähtäri"/"6"), unknown kuntanumero (fallback), property_id with dashes preserved.
+- New `forests.growth_multiplier` column stores the location multiplier for downstream use by T16.
+- Write tests: known kuntanumero (989 → "Ähtäri"/"6"/1.00), unknown kuntanumero (fallback), property_id with dashes preserved.
 
 ### T6: Real-Time Price Fetcher (Luke PxWeb API)
 **Files:** New file `src/lib/ai/price-fetcher.ts`
@@ -684,6 +686,7 @@ Create a single migration covering all schema changes:
 -- stand_wishes table (see Section 6 for full DDL)
 -- plan_metadata.goal column: ALTER TABLE plan_metadata ADD COLUMN IF NOT EXISTS goal TEXT;
 -- forests.price_region: ALTER TABLE forests ADD COLUMN IF NOT EXISTS price_region TEXT;
+-- forests.growth_multiplier: ALTER TABLE forests ADD COLUMN IF NOT EXISTS growth_multiplier FLOAT DEFAULT 1.0;
 -- timber_prices: ALTER TABLE timber_prices ADD COLUMN IF NOT EXISTS region TEXT;
 -- timber_prices: ALTER TABLE timber_prices ADD COLUMN IF NOT EXISTS valid_from DATE;
 -- timber_prices: ALTER TABLE timber_prices ADD COLUMN IF NOT EXISTS valid_to DATE;
@@ -702,6 +705,145 @@ Note: `forests.municipality` already exists in the schema (from initial migratio
 - Test wish application: no_clearcut → selection_cutting, delay_harvest with year cap, retention volume reduction
 - Test price fetching with mock HTTP responses, fallback chain
 - Test goal-aware validation: different harvest vs growth thresholds per goal
+- Test growth location effect: different regions produce different growth rates
+
+### T16: Location Effect on Growth Rate
+**Files:** `src/lib/ai/chart-engine.ts`, `src/lib/ai/forest-state.ts`, `src/lib/ai/config.ts`
+**Effort:** ~2h
+
+- Add `growthMultiplier` parameter to `getGrowthRate()` (default 1.0, backward compatible)
+- Add `growth_multiplier?: number` to `CompartmentInput` interface in `forest-state.ts`
+- Thread `growthMultiplier` through `estimateForestState()` simulation loop
+- Add `GROWTH_REGION_MULTIPLIERS` static table to `config.ts` as fallback
+- In the scheduling engine (T4), read `forest.growth_multiplier` from DB and pass as compartment property
+- Write test: same stand with multiplier 1.10 (south) produces ~10% more volume at year N than baseline
+- Write test: same stand with multiplier 0.55 (Lappi) produces ~45% less volume
+- Write test: multiplier 1.00 (baseline/Väli-Suomi) identical to omitting the parameter
+
+---
+
+## 8. Location Effect on Growth Rate
+
+### Problem
+
+The growth simulator (VMI13 base rates: `GROWTH_MINERAL`, `GROWTH_PEATLAND` in `config.ts`) is calibrated for **Väli-Suomi** (central Finland, ~1000–1150 dd temperature sum, ~155–170 day growing season). A sub-xeric pine stand in Etelä-Suomi (south coast, 1200–1350 dd) grows ~10% faster; the same stand in Lappi (650–850 dd) grows ~45% slower. Currently all forests — regardless of geographic location — use the same base rates, making plans inaccurate for properties outside Väli-Suomi.
+
+### Solution
+
+Apply a **growth region multiplier** on top of the existing site-type base rate. Each forest gets a `growth_multiplier` computed once at import time from its municipality's location. The multiplier is stored as a `FLOAT` column on the `forests` table and passed through to `getGrowthRate()` during plan generation.
+
+### Growth Regions
+
+The same 9 Luke price regions (Section 5) are reused as growth regions. Each region gets a growth multiplier derived from **Luke VMI13 forestry centre growth data** (Metsätilastollinen vuosikirja), normalized to the Väli-Suomi baseline (Keski-Suomi + Etelä-Pohjanmaa = 1.00):
+
+| Region code | Region | Growth multiplier | Rationale |
+|-------------|--------|-------------------|-----------|
+| `"1"` | Etelä-Suomi | **1.10** | Highest temp sums (1200–1350 dd), longest growing season. Forestry centres (Rannikko 1.19, Lounais-Suomi 1.09, Häme-Uusimaa 1.11) avg 1.13, conservatively rounded to 1.10. |
+| `"5"` | Kymi-Savo | **1.05** | Transition zone (1150–1250 dd). Kaakkois-Suomi 1.09 + Etelä-Savo 1.01 → avg 1.05. |
+| `"3"` | Keski-Suomi | **1.00** | **Baseline.** Väli-Suomi reference. Keski-Suomi 0.99, Pohjois-Savo 0.99. Temp sums 1050–1150 dd. |
+| `"6"` | Etelä-Pohjanmaa | **1.00** | **Baseline.** Väli-Suomi reference. Etelä-Pohjanmaa 1.03. Temp sums 1000–1100 dd. |
+| `"4"` | Savo-Karjala | **0.90** | Colder continental climate. Pohjois-Karjala 0.86, rounded to 0.90. |
+| `"71"` | Pohjois-Pohjanmaa | **0.80** | Northern, shorter growing season (900–1000 dd). Forestry centre 0.80. |
+| `"72"` | Kainuu-Koillismaa | **0.75** | Remote, cold. Kainuu forestry centre 0.70, raised slightly for Koillismaa area. |
+| `"8"` | Lappi | **0.55** | Arctic (650–850 dd, 110–130 day season). Lappi forestry centre 0.51, conservatively rounded to 0.55. |
+| `"9"` | KOKO MAA (fallback) | **1.00** | Unknown location → conservative baseline. |
+
+**Data source:** Luke Metsätilastollinen vuosikirja (Forest Statistics Yearbook), average annual increment (m³/ha/y) by forestry centre (metsäkeskus) on productive forest land, all species. Multipliers = forestry_centre_growth / baseline_growth where baseline is avg(Keski-Suomi, Etelä-Pohjanmaa, Pohjois-Savo) = 4.87 m³/ha/y. Values rounded to nearest 0.05 for clean application.
+
+**Design note — why same regions as price:** The Luke price regions already partition Finland along climatic and logistically meaningful boundaries that correlate with forestry centre areas. While the multiplier VALUES differ (price vs growth), the underlying geography is the same. Reusing the same region codes means one lookup table (`KUNTANUMERO_MAP`) can supply both `priceRegion` and `growthMultiplier` without maintaining separate region assignments.
+
+### Implementation
+
+**1. Extend `KUNTANUMERO_MAP`** (`src/lib/import/municipality-lookup.ts`):
+
+```typescript
+export const KUNTANUMERO_MAP: Record<string, {
+  name: string;
+  priceRegion: string;
+  growthMultiplier: number;
+}> = {
+  "005": { name: "Alajärvi", priceRegion: "6", growthMultiplier: 1.00 },
+  "009": { name: "Alavieska", priceRegion: "71", growthMultiplier: 0.80 },
+  // …
+  "091": { name: "Helsinki", priceRegion: "1", growthMultiplier: 1.10 },
+  // …
+  "989": { name: "Ähtäri", priceRegion: "6", growthMultiplier: 1.00 },
+};
+```
+
+**2. New DB column** (`forests.growth_multiplier`):
+
+```sql
+ALTER TABLE forests ADD COLUMN IF NOT EXISTS growth_multiplier FLOAT DEFAULT 1.0;
+```
+
+Populated at import time from `KUNTANUMERO_MAP[propertyIdFirst3].growthMultiplier`.
+
+**3. Apply in `getGrowthRate()`** (`src/lib/ai/chart-engine.ts`):
+
+```typescript
+export function getGrowthRate(
+  siteType: string,
+  soilType: string,
+  species: string,
+  ageYears: number | null,
+  basalArea: number | null,
+  developmentClass: string | null,
+  growthMultiplier: number = 1.0  // NEW parameter
+): number {
+  const table = soilType === "peatland" ? GROWTH_PEATLAND : GROWTH_MINERAL;
+  const base = table[siteType] ?? GROWTH_DEFAULT;
+  const sf = speciesFactor(species, siteType);
+  const af = ageFactor(ageYears);
+  const df = densityFactor(basalArea, siteType, developmentClass);
+  return base * sf * af * df * growthMultiplier;  // ← location effect applied HERE
+}
+```
+
+**4. Thread through `estimateForestState()`** (`src/lib/ai/forest-state.ts`):
+
+The `CompartmentInput` interface gains an optional `growthMultiplier` field. The scheduler reads `forest.growth_multiplier` from the DB and passes it as a compartment property:
+
+```typescript
+export interface CompartmentInput {
+  // … existing fields
+  growth_multiplier?: number;  // NEW — defaults to 1.0 if absent
+}
+```
+
+In the simulation loop, `getGrowthRate()` receives `s.growthMultiplier ?? 1.0`.
+
+**5. Static fallback** (`src/lib/ai/config.ts`):
+
+```typescript
+export const GROWTH_REGION_MULTIPLIERS: Record<string, number> = {
+  "1": 1.10,
+  "3": 1.00,
+  "4": 0.90,
+  "5": 1.05,
+  "6": 1.00,
+  "71": 0.80,
+  "72": 0.75,
+  "8": 0.55,
+  "9": 1.00,
+};
+```
+
+Used as a fallback if `forest.growth_multiplier` is NULL for legacy forests imported before this change.
+
+### Effect on Existing Behavior
+
+- **Ähtäri (region 6, multiplier 1.00):** No change — backward compatible. Current lifecycle test unaffected.
+- **Helsinki (region 1, multiplier 1.10):** Sub-xeric pine peak growth rises from 3.1 → 3.4 m³/ha/y. Clearcut volume at age 80 rises from 181 → 199 m³/ha.
+- **Rovaniemi (region 8, multiplier 0.55):** Sub-xeric pine peak growth drops from 3.1 → 1.7 m³/ha/y. Clearcut volume at age 80 drops from 181 → 100 m³/ha — rotation age would need to extend to ~110 years.
+
+### Interaction with Goals
+
+The growth multiplier affects ALL goals since it changes the underlying growth rate:
+- `maximum_growth_aggressive`: Higher growth in south → faster accumulation → more volume to harvest → larger clearcut revenues. Lower growth in north → slower rotation → fewer harvests per period.
+- `maximum_growth_balanced`: Volume caps (125% of annual growth) scale with location — Lappi forests have much lower caps, naturally spacing harvests further apart.
+- `carbon_storage`: Standing volume at period end varies by region — southern forests store more carbon per hectare.
+- `balanced`: Standard Finnish silviculture adapts. Rotation ages in `OPTIMAL_AGES` are already conservative for south and optimistic for north, but the growth multiplier partially compensates.
 
 ---
 
@@ -714,7 +856,7 @@ Note: `forests.municipality` already exists in the schema (from initial migratio
 | T3 | Goal parameter + tool definition | 1.5h | — |
 | T4 | Year-by-year scheduling engine (4 goals) | 7h | T1, T2, T3 |
 | T5 | System prompt update (goal prompting + guidelines) | 1h | T3 |
-| T5b | Municipality lookup table + import integration | 1.5h | T14 |
+| T5b | Municipality lookup table + import integration | 2h | T14 |
 | T6 | Real-time price fetcher (Luke PxWeb API) | 2.5h | T5b, T14 |
 | T7 | Stand wishes DB + API | 3h | — |
 | T8 | Integrate wishes into plan generation | 2h | T4, T7 |
@@ -723,10 +865,11 @@ Note: `forests.municipality` already exists in the schema (from initial migratio
 | T11 | Goal-aware classification | 2h | T1, T3 |
 | T12 | Integrate prices into plan generation | 2h | T6, T11 |
 | T13 | Goal-aware validation | 1.5h | T3, T4 |
-| T14 | Database migration (stand_wishes + plan_metadata + forests.price_region + timber_prices) | 0.5h | — |
+| T14 | Database migration (stand_wishes + plan_metadata + forests.price_region + forests.growth_multiplier + timber_prices) | 0.5h | — |
 | T15 | Tests & integration | 4h | All |
+| T16 | Location effect on growth rate | 2h | T5b, T14 |
 
-**Total:** ~34h
+**Total:** ~36h
 
 ---
 
@@ -741,11 +884,12 @@ After implementation, a generic property (any forest, not just 989-405-0001-0405
 
 Cross-cutting:
 - All goals store correctly in `plan_metadata.goal` and show in `plan_summary`
-- Both import paths populate `forest.municipality` (from kuntanumero lookup) and `forest.price_region` (Luke region code)
+- Both import paths populate `forest.municipality` (from kuntanumero lookup), `forest.price_region` (Luke region code), and `forest.growth_multiplier`
 - Prices are fetched from Luke PxWeb API using `forest.price_region` directly — no runtime lookup needed
 - Prices are cached per region, with hardcoded fallback + region multiplier
 - Stand wishes are applied correctly: `no_clearcut` → `selection_cutting`, `delay_harvest` prevents early harvest, `retention_pct` reduces volume
 - `validate_plan` and `check_harvest_sustainability` apply goal-appropriate thresholds
+- **Location effect:** Same stand on Helsinki (multiplier 1.10) produces ~10% more growth than Ähtäri (1.00); same stand in Rovaniemi (0.55) produces ~45% less. Plans for northern properties have longer rotation ages and lower harvest volumes.
 
 ---
 
