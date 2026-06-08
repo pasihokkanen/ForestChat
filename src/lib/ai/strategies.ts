@@ -159,7 +159,7 @@ const aggressiveStrategy: SchedulingStrategy = {
   regenDelayYears: () => 0, // replant same year
   regenerationSpecies: (stand: StandData) => {
     const site = stand.site_class;
-    return site.includes("tuore") || site.includes("lehto") ? "spruce" : "pine";
+    return site.includes("mesic") || site.includes("herb-rich") ? "spruce" : "pine";
   },
 };
 
@@ -276,7 +276,7 @@ const balancedGrowthStrategy: SchedulingStrategy = {
   regenDelayYears: () => 1, // replant next year
   regenerationSpecies: (stand: StandData) => {
     const site = stand.site_class;
-    return site.includes("tuore") || site.includes("lehto") ? "spruce" : "pine";
+    return site.includes("mesic") || site.includes("herb-rich") ? "spruce" : "pine";
   },
 };
 
@@ -369,7 +369,7 @@ const balancedStrategy: SchedulingStrategy = {
   regenDelayYears: () => 1,
   regenerationSpecies: (stand: StandData) => {
     const site = stand.site_class;
-    return site.includes("tuore") || site.includes("lehto") ? "spruce" : "pine";
+    return site.includes("mesic") || site.includes("herb-rich") ? "spruce" : "pine";
   },
 };
 

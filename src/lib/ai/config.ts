@@ -42,10 +42,10 @@ export function getPrices(tier: string, species: string): { tukki: number; kuitu
 // ─── Optimal rotation ages (Väli-Suomi, ~62-63°N) ───
 // [min, max]
 export const OPTIMAL_AGES: Record<string, Record<string, [number, number]>> = {
-  pine:        { lehtomainen: [55, 70], tuore: [65, 90], kuivahko: [75, 100], kuiva: [90, 120] },
-  spruce:      { lehtomainen: [50, 65], tuore: [60, 80], kuivahko: [65, 85] },
-  downy_birch: { tuore: [45, 65], kuivahko: [50, 70] },
-  silver_birch:{ lehtomainen: [45, 60], tuore: [50, 65] },
+  pine:        { "herb-rich heath": [55, 70], mesic: [65, 90], "sub-xeric": [75, 100], xeric: [90, 120] },
+  spruce:      { "herb-rich heath": [50, 65], mesic: [60, 80], "sub-xeric": [65, 85] },
+  downy_birch: { mesic: [45, 65], "sub-xeric": [50, 70] },
+  silver_birch:{ "herb-rich heath": [45, 60], mesic: [50, 65] },
 };
 
 export function getOptimalAge(species: string, site: string, growthMultiplier = 1.0): [number, number] {
@@ -168,7 +168,6 @@ export const COSTS: Record<string, number> = {
 // ─── Growth rates (m³/ha/y) — Luke VMI13, Väli-Suomi ───
 export const GROWTH_MINERAL: Record<string, number> = {
   lehtomainen: 7.0,
-  lehto: 7.0,
   "herb-rich heath": 7.0,
   tuore: 5.5,
   mesic: 5.5,
@@ -180,20 +179,23 @@ export const GROWTH_MINERAL: Record<string, number> = {
 
 export const GROWTH_PEATLAND: Record<string, number> = {
   lehtomainen: 6.25,
-  lehto: 6.25,
+  "herb-rich heath": 6.25,
   tuore: 5.5,
+  mesic: 5.5,
   kuivahko: 3.25,
+  "sub-xeric": 3.25,
   kuiva: 1.5,
+  xeric: 1.5,
 };
 
 // ─── Site classification mapping ───
 export function classifySite(siteType: string): string {
   const kp = siteType.toLowerCase();
-  if (kp.includes("herb-rich") || kp.includes("lehto") || kp.includes("lehtomainen") || kp.includes("ruoho")) return "lehtomainen";
-  if (kp.includes("mesic") || kp.includes("tuore") || kp.includes("mustikka")) return "tuore";
-  if (kp.includes("sub-xeric") || kp.includes("kuivahko") || kp.includes("puolukka")) return "kuivahko";
-  if (kp.includes("xeric") || kp.includes("kuiva") || kp.includes("varpu") || kp.includes("karu")) return "kuiva";
-  return "kuivahko";
+  if (kp.includes("herb-rich") || kp.includes("lehto") || kp.includes("lehtomainen") || kp.includes("ruoho")) return "herb-rich heath";
+  if (kp.includes("mesic") || kp.includes("tuore") || kp.includes("mustikka")) return "mesic";
+  if (kp.includes("sub-xeric") || kp.includes("kuivahko") || kp.includes("puolukka")) return "sub-xeric";
+  if (kp.includes("xeric") || kp.includes("kuiva") || kp.includes("varpu") || kp.includes("karu")) return "xeric";
+  return "sub-xeric";
 }
 
 export function detectPeatland(

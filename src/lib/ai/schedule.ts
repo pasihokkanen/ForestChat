@@ -349,7 +349,7 @@ const aggressiveStrategy: SchedulingStrategy = {
   },
   regenDelayYears: () => 0,
   regenerationSpecies: (stand) =>
-    stand.site_class.includes("tuore") || stand.site_class.includes("lehto") ? "spruce" : "pine",
+    stand.site_class.includes("mesic") || stand.site_class.includes("herb-rich") ? "spruce" : "pine",
 };
 
 const balancedGrowthStrategy: SchedulingStrategy = {
@@ -375,7 +375,7 @@ const balancedGrowthStrategy: SchedulingStrategy = {
   },
   regenDelayYears: () => 1,
   regenerationSpecies: (stand) =>
-    stand.site_class.includes("tuore") || stand.site_class.includes("lehto") ? "spruce" : "pine",
+    stand.site_class.includes("mesic") || stand.site_class.includes("herb-rich") ? "spruce" : "pine",
 };
 
 const carbonStorageStrategy: SchedulingStrategy = {
@@ -458,7 +458,7 @@ const balancedStrategy: SchedulingStrategy = {
   },
   regenDelayYears: () => 1,
   regenerationSpecies: (stand) =>
-    stand.site_class.includes("tuore") || stand.site_class.includes("lehto") ? "spruce" : "pine",
+    stand.site_class.includes("mesic") || stand.site_class.includes("herb-rich") ? "spruce" : "pine",
 };
 
 // ═══════════════════════════════════════════════════════════════════════

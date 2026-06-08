@@ -183,7 +183,7 @@ export async function generatePlan(
     }
 
     // ── 3. Enrich compartments to StandData ──
-    const skipClasses = ["Muu maa", "Maatalousmaa", "Tontti"];
+    const skipClasses = ["other_land", "agricultural_land", "plot"];
     const forestStands: StandData[] = [];
     let totalArea = 0;
     let totalVolume = 0;

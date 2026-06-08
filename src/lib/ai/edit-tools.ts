@@ -42,10 +42,10 @@ const SPECIES_MAP: Record<string, string> = {
 };
 
 const SITE_MAP: Record<string, string> = {
-  tuore: "tuore", mesic: "tuore",
-  lehtomainen: "lehtomainen", "herb-rich": "lehtomainen", "herb-rich heath": "lehtomainen",
-  kuivahko: "kuivahko", "sub-xeric": "kuivahko",
-  kuiva: "kuiva", xeric: "kuiva",
+  mesic: "mesic", tuore: "mesic",
+  "herb-rich heath": "herb-rich heath", "herb-rich": "herb-rich heath", lehtomainen: "herb-rich heath",
+  "sub-xeric": "sub-xeric", kuivahko: "sub-xeric",
+  xeric: "xeric", kuiva: "xeric",
 };
 
 export async function addOperation(

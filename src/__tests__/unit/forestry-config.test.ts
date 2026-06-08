@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  PRICES,
   getPrices,
+  PRICES,
   OPTIMAL_AGES,
   getOptimalAge,
   THINNING_BA,
@@ -38,28 +38,28 @@ describe("Forestry Config", () => {
   });
 
   it("OPTIMAL_AGES has valid ranges for all species", () => {
-    expect(OPTIMAL_AGES.pine.lehtomainen[0]).toBeLessThanOrEqual(OPTIMAL_AGES.pine.lehtomainen[1]);
-    expect(OPTIMAL_AGES.spruce.tuore[0]).toBeLessThanOrEqual(OPTIMAL_AGES.spruce.tuore[1]);
-    expect(OPTIMAL_AGES.silver_birch.lehtomainen[1]).toBeLessThanOrEqual(70);
+    expect(OPTIMAL_AGES.pine["herb-rich heath"][0]).toBeLessThanOrEqual(OPTIMAL_AGES.pine["herb-rich heath"][1]);
+    expect(OPTIMAL_AGES.spruce.mesic[0]).toBeLessThanOrEqual(OPTIMAL_AGES.spruce.mesic[1]);
+    expect(OPTIMAL_AGES.silver_birch["herb-rich heath"][1]).toBeLessThanOrEqual(70);
   });
 
   it("getOptimalAge returns default for unknown species", () => {
-    const [min, max] = getOptimalAge("Unknown", "tuore");
+    const [min, max] = getOptimalAge("Unknown", "mesic");
     expect(min).toBe(65);
     expect(max).toBe(90);
   });
 
   it("getOptimalAge scales by growthMultiplier (Lappi = longer rotations)", () => {
-    const [min1, max1] = getOptimalAge("pine", "kuivahko", 1.0);
-    const [minLappi, maxLappi] = getOptimalAge("pine", "kuivahko", 0.55);
-    expect(minLappi).toBeGreaterThan(min1); // Lappi needs longer rotation
+    const [min1, max1] = getOptimalAge("pine", "sub-xeric", 1.0);
+    const [minLappi, maxLappi] = getOptimalAge("pine", "sub-xeric", 0.55);
+    expect(minLappi).toBeGreaterThan(min1);
     expect(minLappi).toBeCloseTo(Math.round(75 / 0.55));
     expect(maxLappi).toBeCloseTo(Math.round(100 / 0.55));
   });
 
   it("getOptimalAge scales by growthMultiplier (Etelä-Suomi = shorter rotations)", () => {
-    const [min1] = getOptimalAge("spruce", "tuore", 1.0);
-    const [minSouth] = getOptimalAge("spruce", "tuore", 1.10);
+    const [min1] = getOptimalAge("spruce", "mesic", 1.0);
+    const [minSouth] = getOptimalAge("spruce", "mesic", 1.10);
     expect(minSouth).toBeLessThan(min1);
   });
 
@@ -89,61 +89,68 @@ describe("Forestry Config", () => {
   });
 
   it("GROWTH_MINERAL has correct rates", () => {
-    expect(GROWTH_MINERAL.lehtomainen).toBe(7.0);
-    expect(GROWTH_MINERAL.tuore).toBe(5.5);
-    expect(GROWTH_MINERAL.kuivahko).toBe(3.25);
-    expect(GROWTH_MINERAL.kuiva).toBe(1.3);
+    expect(GROWTH_MINERAL["herb-rich heath"]).toBe(7.0);
+    expect(GROWTH_MINERAL.mesic).toBe(5.5);
+    expect(GROWTH_MINERAL["sub-xeric"]).toBe(3.25);
+    expect(GROWTH_MINERAL.xeric).toBe(1.3);
   });
 
   it("GROWTH_PEATLAND has correct rates", () => {
-    expect(GROWTH_PEATLAND.lehtomainen).toBe(6.25);
-    expect(GROWTH_PEATLAND.tuore).toBe(5.5);
+    expect(GROWTH_PEATLAND["herb-rich heath"]).toBe(6.25);
+    expect(GROWTH_PEATLAND.mesic).toBe(5.5);
   });
 
   it("GROWTH_REGION_MULTIPLIERS has all 9 regions", () => {
     expect(Object.keys(GROWTH_REGION_MULTIPLIERS)).toHaveLength(9);
-    expect(GROWTH_REGION_MULTIPLIERS["3"]).toBe(1.0); // baseline
-    expect(GROWTH_REGION_MULTIPLIERS["8"]).toBeLessThan(0.6); // Lappi
+    expect(GROWTH_REGION_MULTIPLIERS["3"]).toBe(1.0);
+    expect(GROWTH_REGION_MULTIPLIERS["8"]).toBeLessThan(0.6);
   });
 
   it("PRICE_REGION_MULTIPLIERS has all 9 regions", () => {
     expect(Object.keys(PRICE_REGION_MULTIPLIERS)).toHaveLength(9);
-    expect(PRICE_REGION_MULTIPLIERS["1"]).toBeGreaterThan(1.0); // Etelä-Suomi premium
-    expect(PRICE_REGION_MULTIPLIERS["8"]).toBeLessThan(1.0); // Lappi discount
+    expect(PRICE_REGION_MULTIPLIERS["1"]).toBeGreaterThan(1.0);
+    expect(PRICE_REGION_MULTIPLIERS["8"]).toBeLessThan(1.0);
   });
 });
 
 describe("classifySite", () => {
-  it('classifies "Lehtomainen" correctly', () => {
-    expect(classifySite("Lehtomainen")).toBe("lehtomainen");
-    expect(classifySite("Lehto")).toBe("lehtomainen");
-    expect(classifySite("Ruoho")).toBe("lehtomainen");
+  it('classifies Finnish "Lehtomainen" to English', () => {
+    expect(classifySite("Lehtomainen")).toBe("herb-rich heath");
+    expect(classifySite("Lehto")).toBe("herb-rich heath");
+    expect(classifySite("Ruoho")).toBe("herb-rich heath");
   });
 
-  it('classifies "Tuore" correctly', () => {
-    expect(classifySite("Tuore")).toBe("tuore");
-    expect(classifySite("Mustikkatyyppi")).toBe("tuore");
+  it('classifies Finnish "Tuore" to English', () => {
+    expect(classifySite("Tuore")).toBe("mesic");
+    expect(classifySite("Mustikkatyyppi")).toBe("mesic");
   });
 
-  it('classifies "Kuivahko" correctly', () => {
-    expect(classifySite("Kuivahko")).toBe("kuivahko");
-    expect(classifySite("Puolukkatyyppi")).toBe("kuivahko");
+  it('classifies Finnish "Kuivahko" to English', () => {
+    expect(classifySite("Kuivahko")).toBe("sub-xeric");
+    expect(classifySite("Puolukkatyyppi")).toBe("sub-xeric");
   });
 
-  it('classifies "Kuiva" correctly', () => {
-    expect(classifySite("Kuiva")).toBe("kuiva");
-    expect(classifySite("Varpu")).toBe("kuiva");
-    expect(classifySite("Karu")).toBe("kuiva");
+  it('classifies Finnish "Kuiva" to English', () => {
+    expect(classifySite("Kuiva")).toBe("xeric");
+    expect(classifySite("Varpu")).toBe("xeric");
+    expect(classifySite("Karu")).toBe("xeric");
   });
 
-  it("falls back to kuivahko for unknown", () => {
-    expect(classifySite("Unknown")).toBe("kuivahko");
+  it("falls back to sub-xeric for unknown", () => {
+    expect(classifySite("Unknown")).toBe("sub-xeric");
+  });
+
+  it("passes English values through unchanged", () => {
+    expect(classifySite("mesic")).toBe("mesic");
+    expect(classifySite("sub-xeric")).toBe("sub-xeric");
+    expect(classifySite("xeric")).toBe("xeric");
+    expect(classifySite("herb-rich heath")).toBe("herb-rich heath");
   });
 });
 
 describe("detectPeatland", () => {
   it("detects drained peatland from maalaji", () => {
-    expect(detectPeatland("turve", "tuore", "", "ojitettu")).toBe(true);
+    expect(detectPeatland("turve", "mesic", "", "ojitettu")).toBe(true);
   });
 
   it("detects drained peatland from kasvupaikka", () => {
@@ -151,7 +158,7 @@ describe("detectPeatland", () => {
   });
 
   it("returns false for mineral soil", () => {
-    expect(detectPeatland("mineral soil", "tuore", "", "ei ojia")).toBe(false);
+    expect(detectPeatland("mineral soil", "mesic", "", "ei ojia")).toBe(false);
   });
 
   it("returns false for undrained peatland", () => {
