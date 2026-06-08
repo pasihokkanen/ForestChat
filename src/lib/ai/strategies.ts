@@ -373,6 +373,27 @@ const balancedStrategy: SchedulingStrategy = {
   },
 };
 
+const noCapStrategy: SchedulingStrategy = {
+  name: "maximum_growth_no_cap",
+  volumeCapMultiplier: () => Infinity,
+  selectOperations(
+    _year: number,
+    _state: Map<string, unknown>,
+    candidates: PlannedOperation[],
+    _volumeCapM3: number,
+    _annualGrowthM3: number,
+  ): { scheduled: PlannedOperation[]; remaining: PlannedOperation[] } {
+    // No cap — accept ALL candidates immediately
+    return { scheduled: [...candidates], remaining: [] };
+  },
+  shouldSplit: () => 0,
+  regenDelayYears: () => 0,
+  regenerationSpecies: (stand: StandData) => {
+    const site = stand.site_class;
+    return site.includes("mesic") || site.includes("herb-rich") ? "spruce" : "pine";
+  },
+};
+
 // ── Strategy Factory ──
 
 export function getStrategy(goal: PlanGoal): SchedulingStrategy {
@@ -381,6 +402,7 @@ export function getStrategy(goal: PlanGoal): SchedulingStrategy {
     case "maximum_growth_balanced": return balancedGrowthStrategy;
     case "carbon_storage": return carbonStorageStrategy;
     case "balanced": return balancedStrategy;
+    case "maximum_growth_no_cap": return noCapStrategy;
   }
 }
 

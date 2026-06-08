@@ -32,6 +32,7 @@ Choose a goal that matches the owner's objectives:
 - maximum_growth_balanced: Capped growth. Front-load regeneration like aggressive but with 125% annual growth volume limit for steady income.
 - carbon_storage: Maximize standing carbon stock. Avoid clearcuts. Extended rotations. Selection cutting preferred.
 - balanced: Equal weight on all objectives. Standard Finnish best practices.
+- maximum_growth_no_cap: No volume cap at all. All operations scheduled immediately when spawned — best for seeing what the engine spawns without scheduling constraints.
 
 The algorithm uses Finnish silvicultural recommendations with Luke VMI13 growth rates:
 - Thinning thresholds: basal area limits by site type
@@ -44,7 +45,7 @@ Returns: operations per stand, key metrics.`,
             start_year: { type: "number", description: "Start year (default current year)" },
             goal: {
               type: "string",
-              enum: ["maximum_growth_aggressive", "maximum_growth_balanced", "carbon_storage", "balanced"],
+              enum: ["maximum_growth_aggressive", "maximum_growth_balanced", "carbon_storage", "balanced", "maximum_growth_no_cap"],
               description: "Owner's objective. REQUIRED. AI MUST ask the user before generating if not specified."
             },
           },

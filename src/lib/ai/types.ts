@@ -22,7 +22,7 @@ export interface StandData {
 }
 
 /** Owner's objective for plan generation */
-export type PlanGoal = "maximum_growth_aggressive" | "maximum_growth_balanced" | "carbon_storage" | "balanced";
+export type PlanGoal = "maximum_growth_aggressive" | "maximum_growth_balanced" | "carbon_storage" | "balanced" | "maximum_growth_no_cap";
 
 export interface PlannedOperation {
   stand: StandData;

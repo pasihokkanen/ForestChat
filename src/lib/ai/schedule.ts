@@ -352,6 +352,18 @@ const aggressiveStrategy: SchedulingStrategy = {
     stand.site_class.includes("mesic") || stand.site_class.includes("herb-rich") ? "spruce" : "pine",
 };
 
+const noCapStrategy: SchedulingStrategy = {
+  name: "maximum_growth_no_cap",
+  volumeCapMultiplier: () => Infinity,
+  selectOperations(_year, _stands, candidates, _volumeCapM3, _annualGrowthM3) {
+    // No cap — accept ALL candidates immediately
+    return { scheduled: [...candidates], remaining: [] };
+  },
+  regenDelayYears: () => 0,
+  regenerationSpecies: (stand) =>
+    stand.site_class.includes("mesic") || stand.site_class.includes("herb-rich") ? "spruce" : "pine",
+};
+
 const balancedGrowthStrategy: SchedulingStrategy = {
   name: "maximum_growth_balanced",
   volumeCapMultiplier: () => 1.25,
@@ -471,6 +483,7 @@ function getStrategy(goal: PlanGoal): SchedulingStrategy {
     case "maximum_growth_balanced": return balancedGrowthStrategy;
     case "carbon_storage": return carbonStorageStrategy;
     case "balanced": return balancedStrategy;
+    case "maximum_growth_no_cap": return noCapStrategy;
   }
 }
 
