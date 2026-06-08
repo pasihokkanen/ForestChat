@@ -47,14 +47,22 @@ export interface YearPlan {
 }
 
 export interface PlanSummary {
+  /** Initial total standing volume (m³) across all stands */
   totalVolume: number;
+  /** Average annual growth (m³/y) across the plan period, computed year-by-year */
   annualGrowth: number;
+  /** Initial total stumpage value (€) across all stands */
   stumpageValue: number;
-  p1AverageHarvest: number;
-  p2AverageHarvest: number;
-  harvestVsGrowth: number; // percentage
-  p1TotalIncome: number;
-  p1TotalCosts: number;
-  p2TotalIncome: number;
-  p2TotalCosts: number;
+  /** Average harvest volume per year (m³/y) */
+  averageHarvestPerYear: number;
+  /** Harvest as percentage of growth (100 = sustainable, >100 = drawing down stock) */
+  harvestVsGrowth: number;
+  /** Total income (€) across all years */
+  totalIncome: number;
+  /** Total costs (€) across all years */
+  totalCosts: number;
+  /** Number of operations that could not be scheduled within the period */
+  overspillOps: number;
+  /** Total removal m³ of overspill operations */
+  overspillM3: number;
 }

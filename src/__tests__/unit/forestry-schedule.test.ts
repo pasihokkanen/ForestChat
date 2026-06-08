@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { StandData, PlannedOperation } from "@/lib/ai/types";
+import type { StandData } from "@/lib/ai/types";
 import { schedulePlan, trySplitStand } from "@/lib/ai/schedule";
 
 function makeStand(overrides: Partial<StandData> & { standId: string }): StandData {
@@ -23,142 +23,172 @@ function makeStand(overrides: Partial<StandData> & { standId: string }): StandDa
   };
 }
 
-function makeOp(
-  stand: StandData,
-  type: string,
-  overrides?: Partial<PlannedOperation>
-): PlannedOperation {
-  return {
-    stand,
-    type,
-    year: overrides?.year ?? 0,
-    income_eur: overrides?.income_eur ?? 0,
-    cost_eur: overrides?.cost_eur ?? 0,
-    removal_m3: overrides?.removal_m3 ?? 0,
-    notes: overrides?.notes ?? "",
-    dueYear: overrides?.dueYear ?? 2026,
-  };
-}
-
-describe("schedulePlan (Phase 7b engine)", () => {
-  it("returns empty periods with no operations", () => {
-    const result = schedulePlan([], [], 2026);
-    expect(result.p1.length).toBe(10);
-    expect(result.p2.length).toBe(10);
-    expect(result.summary.totalVolume).toBe(0);
+describe("schedulePlan (Phase 7b rewrite — dynamic spawning)", () => {
+  it("returns empty years with no stands", () => {
+    const { years, summary } = schedulePlan([], 2026, 20);
+    expect(years.length).toBe(20);
+    expect(summary.totalVolume).toBe(0);
+    expect(summary.averageHarvestPerYear).toBe(0);
   });
 
-  it("schedules a single clear_cut in period 1", () => {
-    const stand = makeStand({ standId: "1", volumeM3: 300, valueEur: 15000, ageYears: 80, developmentClass: "regeneration_ready" });
-    const ops = [makeOp(stand, "clear_cut", { removal_m3: 300, income_eur: 15000 })];
-    // Use aggressive strategy with high cap so operation fits
-    const result = schedulePlan([stand], ops, 2026, "maximum_growth_aggressive", 300, 1.0);
-    const totalFinalP1 = result.p1.reduce((s, y) => s + y.finalHarvests.length, 0);
-    const totalFinalP2 = result.p2.reduce((s, y) => s + y.finalHarvests.length, 0);
-    expect(totalFinalP1 + totalFinalP2).toBeGreaterThanOrEqual(1);
+  it("returns correct number of years for custom period", () => {
+    const { years } = schedulePlan([], 2026, 10);
+    expect(years.length).toBe(10);
+    expect(years[0].year).toBe(2026);
+    expect(years[9].year).toBe(2035);
   });
 
-  it("schedules regeneration after clearcut with delay", () => {
-    const stand = makeStand({ standId: "2", volumeM3: 300, valueEur: 15000, areaHa: 2.0, ageYears: 80, developmentClass: "regeneration_ready" });
-    const ops = [makeOp(stand, "clear_cut", { removal_m3: 300, income_eur: 15000 })];
-    // Aggressive: delay=0, high cap
-    const result = schedulePlan([stand], ops, 2026, "maximum_growth_aggressive", 300, 1.0);
-    const totalRegen = result.p1.reduce((s, y) => s + y.regenerationOps.length, 0) +
-      result.p2.reduce((s, y) => s + y.regenerationOps.length, 0);
-    expect(totalRegen).toBeGreaterThan(0);
+  it("spawns a clear_cut for an over-age stand", () => {
+    // mesic ceiling=220, volPerHa=10 → well under. Large area → cap fits 100 m³ removal.
+    const stand = makeStand({
+      standId: "1",
+      volumeM3: 100, valueEur: 5000, areaHa: 10,
+      ageYears: 100, ba: 25,
+      siteType: "mesic", site_class: "tuore",
+      annual_growth: 5.5,
+    });
+    const { years } = schedulePlan([stand], 2026, 20, "maximum_growth_aggressive", 1.0);
+    const allClearcuts = years.flatMap((y) => y.finalHarvests);
+    expect(allClearcuts.length).toBeGreaterThanOrEqual(1);
+    expect(allClearcuts[0].type).toBe("clear_cut");
   });
 
-  it("distributes operations across years evenly", () => {
-    const stands = Array.from({ length: 10 }, (_, i) =>
-      makeStand({ standId: String(i + 10), volumeM3: 200 + i * 50, valueEur: 10000 + i * 1000, ageYears: 80, developmentClass: "regeneration_ready" })
-    );
-    const ops = stands.map((s) => makeOp(s, "clear_cut", { removal_m3: s.volumeM3, income_eur: s.valueEur }));
-    const result = schedulePlan(stands, ops, 2026, "balanced", 3000, 1.0);
-    // No single year should have extreme concentration
-    for (const year of result.p1) {
-      const total = year.finalHarvests.reduce((s, o) => s + o.removal_m3, 0);
-      expect(total).toBeLessThanOrEqual(3000);
-    }
+  it("spawns a thinning for a stand with high BA", () => {
+    // mesic ceiling=220, volPerHa=5 → well under. Large area → cap fits 28 m³ removal.
+    const stand = makeStand({
+      standId: "2",
+      volumeM3: 100, valueEur: 5000, areaHa: 20,
+      ageYears: 50, ba: 25,
+      siteType: "mesic", site_class: "tuore",
+      annual_growth: 5.5,
+    });
+    const { years } = schedulePlan([stand], 2026, 20, "balanced", 1.0);
+    const allThinnings = years.flatMap((y) => y.thinnings);
+    expect(allThinnings.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("produces valid PlanSummary with non-negative values", () => {
-    const stand = makeStand({ standId: "3", volumeM3: 500, valueEur: 25000, ageYears: 80, developmentClass: "regeneration_ready" });
-    const ops = [makeOp(stand, "clear_cut", { removal_m3: 500, income_eur: 25000 })];
-    const result = schedulePlan([stand], ops, 2026, "maximum_growth_aggressive", 500, 1.0);
-    expect(result.summary.totalVolume).toBeGreaterThanOrEqual(0);
-    expect(result.summary.annualGrowth).toBeGreaterThanOrEqual(0);
-    expect(result.summary.stumpageValue).toBeGreaterThanOrEqual(0);
+  it("spawns regeneration ops after clearcut", () => {
+    const stand = makeStand({
+      standId: "3",
+      volumeM3: 100, valueEur: 5000, areaHa: 10,
+      ageYears: 100, ba: 25,
+      siteType: "mesic", site_class: "tuore",
+      annual_growth: 5.5,
+    });
+    const { years } = schedulePlan([stand], 2026, 20, "maximum_growth_aggressive", 1.0);
+    const allRegen = years.flatMap((y) => y.regenerationOps);
+    expect(allRegen.length).toBeGreaterThan(0);
+  });
+
+  it("carbon_storage spawns selection_cutting instead of clear_cut", () => {
+    // pine on sub-xeric: optMin=75, optMax=100 → optMax+15=115.
+    // age 130 > 115. Large area so annual growth exceeds volume cap.
+    const stand = makeStand({
+      standId: "cs1",
+      volumeM3: 50,
+      valueEur: 3000,
+      areaHa: 40,
+      ageYears: 130,
+      ba: 30,
+      siteType: "sub-xeric",
+      site_class: "kuivahko",
+      annual_growth: 2.5,
+    });
+    const { years } = schedulePlan([stand], 2026, 20, "carbon_storage", 1.0);
+    const allHarvests = years.flatMap((y) => [...y.finalHarvests, ...y.thinnings]);
+    const selectionCuts = allHarvests.filter((o) => o.type === "selection_cutting");
+    const clearCuts = allHarvests.filter((o) => o.type === "clear_cut");
+    expect(selectionCuts.length).toBeGreaterThanOrEqual(1);
+    expect(clearCuts.length).toBe(0);
+  });
+
+  it("produces valid PlanSummary with live annual growth", () => {
+    const stand = makeStand({
+      standId: "s5", volumeM3: 500, valueEur: 25000,
+      ageYears: 100, ba: 30, siteType: "sub-xeric", site_class: "kuivahko",
+      annual_growth: 3.0,
+    });
+    const { summary } = schedulePlan([stand], 2026, 20, "maximum_growth_aggressive", 1.0);
+    expect(summary.totalVolume).toBeGreaterThanOrEqual(0);
+    expect(summary.annualGrowth).toBeGreaterThanOrEqual(0);
+    expect(summary.stumpageValue).toBeGreaterThanOrEqual(0);
+    expect(summary.averageHarvestPerYear).toBeGreaterThanOrEqual(0);
+    expect(summary.totalIncome).toBeGreaterThanOrEqual(0);
+    expect(summary.totalCosts).toBeGreaterThanOrEqual(0);
+  });
+
+  it("Lappi growth multiplier (0.55) affects scheduling output", () => {
+    // volume under ceiling: maxYield(sub-xeric)*0.55*0.75 = 140*0.55*0.75 ≈ 57.75 m³/ha
+    // 50 m³ on 2 ha = 25 m³/ha → well under cap
+    const stand = makeStand({
+      standId: "lap1", volumeM3: 50, valueEur: 2500,
+      ageYears: 80, ba: 22, siteType: "sub-xeric", site_class: "kuivahko",
+      annual_growth: 3.0,
+    });
+    const { years, summary } = schedulePlan([stand], 2026, 20, "balanced", 0.55);
+    expect(years.length).toBe(20);
+    expect(summary.annualGrowth).toBeGreaterThan(0);
+  });
+
+  it("young stand does NOT trigger clearcut or thinning", () => {
+    const stand = makeStand({
+      standId: "young1", volumeM3: 50, valueEur: 2000,
+      ageYears: 15, ba: 8, siteType: "mesic", site_class: "tuore",
+      annual_growth: 3.0,
+    });
+    const { years } = schedulePlan([stand], 2026, 20, "maximum_growth_aggressive", 1.0);
+    const allHarvests = years.flatMap((y) => [...y.finalHarvests, ...y.thinnings]);
+    expect(allHarvests.length).toBe(0);
+  });
+
+  it("10-year plan returns exactly 10 years", () => {
+    const stand = makeStand({
+      standId: "10yr", volumeM3: 300, valueEur: 15000,
+      ageYears: 100, ba: 25, siteType: "sub-xeric", site_class: "kuivahko",
+      annual_growth: 3.0,
+    });
+    const { years } = schedulePlan([stand], 2026, 10, "maximum_growth_aggressive", 1.0);
+    expect(years.length).toBe(10);
+  });
+
+  it("35-year plan returns exactly 35 years", () => {
+    const stand = makeStand({
+      standId: "35yr", volumeM3: 300, valueEur: 15000,
+      ageYears: 100, ba: 25, siteType: "sub-xeric", site_class: "kuivahko",
+      annual_growth: 3.0,
+    });
+    const { years } = schedulePlan([stand], 2026, 35, "maximum_growth_aggressive", 1.0);
+    expect(years.length).toBe(35);
+  });
+
+  it("year plans are continuous and sequential", () => {
+    const stand = makeStand({
+      standId: "seq", volumeM3: 300, valueEur: 15000,
+      ageYears: 100, ba: 25, siteType: "sub-xeric", site_class: "kuivahko",
+      annual_growth: 3.0,
+    });
+    const { years } = schedulePlan([stand], 2030, 15, "maximum_growth_aggressive", 1.0);
+    expect(years.length).toBe(15);
+    expect(years[0].year).toBe(2030);
+    expect(years[14].year).toBe(2044);
   });
 });
 
-// --- Goal-aware scheduling ---
+// --- trySplitStand stub (always returns null) ---
 
-describe("schedulePlan with goals", () => {
-  it("carbon_storage: pre-made selection_cutting gets scheduled", () => {
-    const stand = makeStand({ standId: "cs1", volumeM3: 400, valueEur: 20000, ageYears: 115, developmentClass: "regeneration_ready", siteType: "sub-xeric" });
-    const ops = [makeOp(stand, "selection_cutting", { removal_m3: 200, income_eur: 10000 })];
-    // carbon cap = 0.5 × 400 = 200, fits the 200 m³ removal
-    const result = schedulePlan([stand], ops, 2026, "carbon_storage", 400, 1.0);
-    const allOps = [...result.p1, ...result.p2].flatMap((y) => [
-      ...y.finalHarvests, ...y.thinnings,
-    ]);
-    expect(allOps.some((o) => o.type === "selection_cutting")).toBe(true);
-  });
-
-  it("balanced goal schedules thinnings interleaved with clearcuts", () => {
-    const stands = Array.from({ length: 5 }, (_, i) =>
-      makeStand({ standId: `b${i}`, volumeM3: 200 + i * 100, valueEur: 10000 + i * 5000, ageYears: 80, developmentClass: "regeneration_ready" })
-    );
-    const ops = [
-      ...stands.slice(0, 3).map((s) => makeOp(s, "clear_cut", { removal_m3: s.volumeM3, income_eur: s.valueEur })),
-      ...stands.slice(3).map((s) => makeOp(s, "thinning", { removal_m3: s.volumeM3 * 0.3, income_eur: s.valueEur * 0.3 })),
-    ];
-    const result = schedulePlan(stands, ops, 2026, "balanced", 3000, 1.0);
-    const allOps = [...result.p1, ...result.p2].flatMap((y) => [
-      ...y.finalHarvests, ...y.thinnings, ...y.tendingOps, ...y.regenerationOps,
-    ]);
-    expect(allOps.length).toBeGreaterThanOrEqual(5);
-  });
-});
-
-// --- Growth multiplier ---
-
-describe("schedulePlan with growthMultiplier", () => {
-  it("Lappi growth multiplier (0.55) reflects in scheduling", () => {
-    const stand = makeStand({ standId: "lap1", volumeM3: 300, valueEur: 15000, ageYears: 80, developmentClass: "regeneration_ready" });
-    const ops = [makeOp(stand, "clear_cut", { removal_m3: 300, income_eur: 15000 })];
-    const result = schedulePlan([stand], ops, 2026, "balanced", 300, 0.55);
-    expect(result.p1.length).toBe(10);
-    expect(result.summary.annualGrowth).toBeGreaterThan(0);
-  });
-});
-
-// --- Stand splitting ---
-
-describe("trySplitStand", () => {
-  it("returns null for stand below minimum split area", () => {
-    const stand = makeStand({ standId: "s1", areaHa: 0.5, volumeM3: 200, valueEur: 10000 });
-    const op = makeOp(stand, "clear_cut", { removal_m3: 200, income_eur: 10000 });
-    const result = trySplitStand(stand, op, 50, 4);
-    expect(result).toBeNull();
-  });
-
-  it("splits a large stand into maximum parts (smallest per-part volume)", () => {
-    const stand = makeStand({ standId: "s2", areaHa: 4.0, volumeM3: 400, valueEur: 20000 });
-    const op = makeOp(stand, "clear_cut", { removal_m3: 400, income_eur: 20000 });
+describe("trySplitStand (stub — splitting disabled)", () => {
+  it("returns null", () => {
+    const stand = makeStand({ standId: "s1", areaHa: 4.0, volumeM3: 400, valueEur: 20000 });
+    const op = {
+      stand,
+      type: "clear_cut",
+      year: 0,
+      income_eur: 20000,
+      cost_eur: 0,
+      removal_m3: 400,
+      notes: "",
+    };
     const result = trySplitStand(stand, op, 250, 4);
-    expect(result).not.toBeNull();
-    // Best split is 4 parts (smallest per-part volume = 100 m³)
-    expect(result!.length).toBe(4);
-    expect(result![0].stand.areaHa).toBeCloseTo(1.0);
-    expect(result![0].removal_m3).toBe(100);
-  });
-
-  it("returns null when no split fits (area too small after splitting)", () => {
-    const stand = makeStand({ standId: "s3", areaHa: 0.3, volumeM3: 400, valueEur: 20000 });
-    const op = makeOp(stand, "clear_cut", { removal_m3: 400, income_eur: 20000 });
-    // cap=500 allows 400/2=200 per part, but area=0.3/2=0.15 < MIN_SPLIT_AREA_HA
-    const result = trySplitStand(stand, op, 500, 4);
     expect(result).toBeNull();
   });
 });

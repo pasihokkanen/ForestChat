@@ -531,7 +531,7 @@ describe("estimateForestState", () => {
     // Total harvest over 200 years
     const totalHarvest = s.reduce((sum, x) => sum + x.harvestM3, 0);
     expect(totalHarvest).toBeGreaterThan(500);
-    expect(totalHarvest).toBeLessThan(900);
+    expect(totalHarvest).toBeLessThan(1100); // uncapped VMI13 growth (no carrying-capacity cap for forPlanning=true)
 
     // Per-hectare growth should be consistent across cycles
     // (same site, same base rate — only species factor differs)

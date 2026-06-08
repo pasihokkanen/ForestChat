@@ -274,12 +274,12 @@ export function getGrowthRate(
   const df = forPlanning ? 1.0 : densityFactor(basalArea, engSite, developmentClass);
   let growth = base * sf * af * df * growthMultiplier;
 
-  // ── Carrying-capacity cap (Option C) ──
-  // Growth tapers linearly when standing volume exceeds 70% of the
-  // site's maximum yield. At maxYield, growth → 0.
-  // maxYield is scaled by growthMultiplier so Lappi (0.55) gets
-  // proportionally lower carrying capacity.
-  if (currentVolumeM3PerHa != null && currentVolumeM3PerHa > 0) {
+  // ── Carrying-capacity cap ──
+  // Growth tapers when standing volume approaches the site's maximum yield.
+  // Skipped for forPlanning=true: VMI13 base rates already represent Finnish
+  // averages across all stocking levels — an additional cap double-penalizes
+  // normal stands (e.g. sub-xeric at 141 m³/ha would have zero growth).
+  if (!forPlanning && currentVolumeM3PerHa != null && currentVolumeM3PerHa > 0) {
     const MAX_YIELD: Record<string, number> = {
       "herb-rich heath": 380,
       mesic: 220,
