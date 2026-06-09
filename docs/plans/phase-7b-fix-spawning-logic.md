@@ -107,13 +107,63 @@ Based on the no-cap validation, five issues remain:
 
 **3a. Young stands (age 0-7, volume 0): 10 stands still missing.** The tending window (age 3–12) is too narrow. These stands reach age 2-3 by year 3-4 but may not trigger. **Fix:** Widen early_tending to age 2–15 and tending to age 8–30.
 
-**3b. Stand 83.0: FC clearcuts, reference thins only.** The stand is spawning clearcut when it should only get thinning. This could be a site_class/age issue — `getOptimalAge()` may return a lower optMin than expected, or the stand's age is inflated. **Fix:** Investigate stand 83.0's DB state and optMin calculation.
+**3b. Stand 83.0: FC clearcuts, reference thins only.** 
 
-**3c. Stands 181.0, 183.0: FC clearcuts seed_tree stands.** The reference plan does NOT clearcut these — it only does soil prep + planting + tending. These are seed_tree stands where seed trees should be left or removed gradually, not clearcut. **Fix:** Do NOT spawn clearcut on `seed_tree` development class stands. Instead, spawn selection_cutting (50% removal) or skip cutting entirely and go straight to soil prep + planting if the stand is ready for regeneration.
+**Debug findings (2026-06-08):**
+| Field | Value |
+|-------|-------|
+| age | 69y |
+| vol | 646 m³ |
+| BA | 25.0 |
+| devClass | `mature_thinning` |
+| species | pine |
+| siteClass | **mesic** |
+| optMin (from getOptimalAge) | **65** |
+| ccEligible | age 69 ≥ 65 → **true** |
+
+The stand is `mature_thinning` with BA=25 — it's barely into clearcut territory (optMin+4). The reference plan thins it, but our engine clearcuts because `age ≥ optMin`. `getOptimalAge("pine", "mesic")` returns `[65, 90]` — this is correct per Tapio, but the threshold is too aggressive for mature_thinning stands that are borderline.
+
+**Fix:** Do NOT spawn clearcut on `mature_thinning` stands unless they're significantly past optMin. Add a buffer: `ccEligible = age ≥ optMin + 10` for stands with `developmentClass === "mature_thinning"`. This prevents borderline mature_thinning stands from getting clearcut when they should still be thinned. **Also add** `hasOverstory` check before clearcut, so seed_tree/shelterwood stands are handled first.
+
+**3c. Stands 181.0, 183.0: FC clearcuts seed_tree stands.**
+
+**Debug findings (2026-06-08):**
+| Field | 181.0 | 183.0 |
+|-------|-------|-------|
+| age | 109y | 93y |
+| vol | 34 m³ | 21 m³ |
+| BA | 3.0 | 3.0 |
+| devClass | **seed_tree** | **seed_tree** |
+| siteClass | sub-xeric | sub-xeric |
+| soilType | peatland | fine sorted soil |
+| optMin | 75 | 75 |
+| ccEligible | true | true |
+
+Both stands have very low volume (34/21 m³) and low BA (3.0). The reference plan does NO cutting — only soil prep + planting + tending. Our engine spawns clearcut because there is no seed_tree guard before the clearcut eligibility check.
+
+**Fix:** Move the `hasOverstory` check (currently for `overstory_removal`) to BEFORE the clearcut eligibility block. For `seed_tree` / `shelterwood` stands:
+1. If volume is very low (< 30 m³) → skip all harvest, the stand should go to regeneration directly (soil prep + planting). The seed trees have done their job.
+2. If volume warrants (> 30 m³) → spawn `overstory_removal` after a delay (existing logic, delay per strategy). Do NOT spawn clearcut.
+
+This means the existing `overstory_removal` logic stays, but it must come BEFORE the clearcut check, and stands with trivial volume skip even overstory_removal.
 
 ### 4. Wrong species on stand 138.0
 
-**Evidence:** Reference plants pine on stand 138.0; FC plants spruce. Stand 138.0 has `site_class` = sub-xeric — FC's `regenerationSpecies()` should pick pine for sub-xeric, but it's picking spruce. **Fix:** Investigate the `regenerationSpecies` logic — the `includes("mesic")` check may be matching something unexpected, or the stand's site_class is wrong.
+**Evidence:** Reference plants pine on stand 138.0; FC plants spruce.
+
+**Debug findings (2026-06-08):**
+| Field | Value |
+|-------|-------|
+| siteClass | **mesic** |
+| siteType | (maps to mesic) |
+| soilType | peatland |
+| regenerationSpecies | siteClass="mesic" → **spruce** |
+
+The code is correct: `regenerationSpecies()` returns "spruce" for mesic sites, which matches standard Finnish silviculture (mesic = spruce territory). The reference plan's pine choice for a mesic site is the anomaly — possibly the reference planner had site-specific reasons, or the DB `site_type` classification is wrong.
+
+**Fix:** No code change needed. The `regenerationSpecies` logic is correct per silvicultural norms. If the user wants pine on this stand, it's a data fix (change site_type classification) or a stand wish (`species_preference: pine`), not an engine fix.
+
+**Fallback improvement:** Add default to pine when `site_class` is empty/null, as a safety measure.
 
 ### 5. Regeneration chain missing post-planting tending
 
@@ -229,38 +279,57 @@ if (s.ageYears >= 2 && s.ageYears <= 15) { ... }
 else if (s.ageYears >= 8 && s.ageYears <= 30) { ... }
 ```
 
-### Step 2b: Investigate stand 83.0 (schedule.ts, `spawnOperations`)
+### Step 2b: mature_thinning clearcut threshold — add +10 year buffer (schedule.ts, `spawnOperations`)
 
-Add debug logging for stand 83.0 to trace why it spawns clearcut:
-- Log: age, species, site_class, optMin from `getOptimalAge()`
-- If optMin is unexpectedly low, fix `getOptimalAge()` fallback (Step 6)
+**Debug confirmed (2026-06-08):** Stand 83.0 is mature_thinning, age 69, optMin=65, BA=25. Gets clearcut but should get thinning only.
 
-### Step 2c: No clearcut on seed_tree (schedule.ts, `spawnOperations`)
-
-Add `developmentClass` to `SimStand`. Before the clearcut eligibility check:
+After computing `ccEligible`, add a buffer for mature_thinning stands:
 
 ```typescript
-if (s.developmentClass === "seed_tree") {
-  // Seed trees should not be clearcut. Spawn selection_cutting if volume warrants,
-  // or go straight to regeneration (soil prep + planting) with the seed trees left standing.
-  if (s.volumeM3 > 30 && !s.spawnedTypes.has("selection_cutting")) {
-    s.spawnedTypes.add("selection_cutting");
-    spawned.push({ type: "selection_cutting", removal_m3: Math.round(s.volumeM3 * 0.5), ... });
+const ccEligible = goal === "carbon_storage"
+  ? s.ageYears >= optMax + 15
+  : s.developmentClass === "mature_thinning"
+    ? s.ageYears >= optMin + 10   // buffer: don't clearcut borderline mature_thinning
+    : s.ageYears >= optMin;
+```
+
+### Step 2c: Move overstory check BEFORE clearcut eligibility (schedule.ts, `spawnOperations`)
+
+**Debug confirmed (2026-06-08):** Stands 181.0 (age 109, vol 34, seed_tree) and 183.0 (age 93, vol 21, seed_tree) both get clearcut. Reference plan does no cutting.
+
+The `hasOverstory` block currently lives AFTER the clearcut block (line 260). Move it BEFORE the clearcut eligibility check (before line 194). For seed_tree/shelterwood stands:
+
+```typescript
+// Check seed_tree/shelterwood BEFORE clearcut eligibility
+const hasOverstory = s.developmentClass?.includes("seed_tree") ||
+                     s.developmentClass?.includes("shelterwood");
+if (hasOverstory) {
+  if (s.volumeM3 < 30) {
+    // Volume too low — seed trees have done their job.
+    // Transition to regeneration: mark as cleared so the regen chain
+    // at the top of spawnOperations picks it up next year.
+    s.cleared = true;
+    s.regenDelayStarted = year;
+    continue; // skip clearcut AND overstory_removal AND thinning
   }
-  // Also spawn soil prep + planting (seed trees have done their job, regenerate under them)
-  // Continue to regeneration chain...
-  continue; // skip clearcut and thinning checks
+  // ... existing overstory_removal logic ...
+  continue; // skip clearcut
 }
 ```
 
-### Step 3: Fix species selection (schedule.ts, `regenerationSpecies`)
+### Step 3: Fix species selection — code is correct, add safety fallback (schedule.ts, `regenerationSpecies`)
 
-Debug stand 138.0's `site_class` value. The current logic:
+**Debug confirmed (2026-06-08):** Stand 138.0 has siteClass=mesic, `regenerationSpecies` correctly returns "spruce". The code is correct per silvicultural norms. No engine change needed for stand 138.0 specifically.
+
+Add a safety fallback for empty/null site_class:
+
 ```typescript
-stand.site_class.includes("mesic") || stand.site_class.includes("herb-rich") ? "spruce" : "pine"
+regenerationSpecies: (stand) =>
+  (!stand.site_class || stand.site_class === "")
+    ? "pine"  // safety default
+    : stand.site_class.includes("mesic") || stand.site_class.includes("herb-rich")
+      ? "spruce" : "pine",
 ```
-
-If `site_class` is `"sub-xeric"`, this correctly returns `"pine"`. But if `site_class` is empty/null or contains "mesic" unexpectedly (e.g., from a composite classification), it returns spruce. Verify the actual value and add fallback: if `site_class` is empty, default to pine.
 
 ### Step 4: Post-planting tending chain (schedule.ts)
 
