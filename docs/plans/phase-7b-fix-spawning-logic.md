@@ -91,13 +91,9 @@ A `maximum_growth_no_cap` 10-year plan was generated and compared against the re
 
 Based on the no-cap validation, five issues remain:
 
-### 1. Year-1 clearcut backlog cannot fit the volume cap (capped goals only)
+### 1. ~~Year-1 clearcut backlog cannot fit the volume cap~~ REMOVED
 
-**Evidence:** With `maximum_growth_balanced` (1.25× cap), thinnings consume the cap and clearcuts spill. With no-cap, all 9 clearcuts scheduled in year 1 match the reference plan.
-
-**Root cause:** The very first year has a BACKLOG of overdue stands. The 1.25× cap is for steady-state, not catch-up.
-
-**Fix:** Year-1 backlog allowance: use 3.0× cap in year 1 only, goal's multiplier for years 2+.
+**Decision:** No special year-1 treatment. The goal's volume cap applies uniformly across all years. If the cap is tight, harvests naturally spill into later years — that's the intended behavior, not a bug.
 
 ### 2. Thinning spawned on clearcut-ready stands
 
@@ -161,16 +157,7 @@ Based on the no-cap validation, five issues remain:
 
 ## Implementation Plan
 
-### Step 1: Year-1 backlog allowance (schedule.ts, `runScheduleEngine`)
-
-```typescript
-const capMultiplier = (yr === startYear) ? 3.0 : strategy.volumeCapMultiplier();
-const volumeCapM3 = capMultiplier * currentAnnualGrowth;
-```
-
-Applies to ALL capped goals. No-cap goal (Infinity) is unaffected.
-
-### Step 2: Skip thinning when clearcut-eligible (schedule.ts, `spawnOperations`)
+### Step 1: Skip thinning when clearcut-eligible (schedule.ts, `spawnOperations`)
 
 ```typescript
 const ccEligible = / * clearcut eligibility check */;
@@ -196,7 +183,7 @@ if (ccEligible && s.volumeM3 > 10) {
 }
 ```
 
-### Step 3a: Widen tending windows (schedule.ts, `spawnOperations`)
+### Step 2a: Widen tending windows (schedule.ts, `spawnOperations`)
 
 ```typescript
 // early_tending: was 3–12, now 2–15
@@ -205,13 +192,13 @@ if (s.ageYears >= 2 && s.ageYears <= 15) { ... }
 else if (s.ageYears >= 8 && s.ageYears <= 30) { ... }
 ```
 
-### Step 3b: Investigate stand 83.0 (schedule.ts, `spawnOperations`)
+### Step 2b: Investigate stand 83.0 (schedule.ts, `spawnOperations`)
 
 Add debug logging for stand 83.0 to trace why it spawns clearcut:
 - Log: age, species, site_class, optMin from `getOptimalAge()`
-- If optMin is unexpectedly low, fix `getOptimalAge()` fallback (Step 7)
+- If optMin is unexpectedly low, fix `getOptimalAge()` fallback (Step 6)
 
-### Step 3c: No clearcut on seed_tree (schedule.ts, `spawnOperations`)
+### Step 2c: No clearcut on seed_tree (schedule.ts, `spawnOperations`)
 
 Add `developmentClass` to `SimStand`. Before the clearcut eligibility check:
 
@@ -229,7 +216,7 @@ if (s.developmentClass === "seed_tree") {
 }
 ```
 
-### Step 4: Fix species selection (schedule.ts, `regenerationSpecies`)
+### Step 3: Fix species selection (schedule.ts, `regenerationSpecies`)
 
 Debug stand 138.0's `site_class` value. The current logic:
 ```typescript
@@ -238,27 +225,31 @@ stand.site_class.includes("mesic") || stand.site_class.includes("herb-rich") ? "
 
 If `site_class` is `"sub-xeric"`, this correctly returns `"pine"`. But if `site_class` is empty/null or contains "mesic" unexpectedly (e.g., from a composite classification), it returns spruce. Verify the actual value and add fallback: if `site_class` is empty, default to pine.
 
-### Step 5: Post-planting tending chain (schedule.ts)
+### Step 4: Post-planting tending chain (schedule.ts)
 
 Add `plantingYear` to `SimStand`. When planting is applied:
 ```typescript
 st.plantingYear = yr;
 ```
 
-In `spawnOperations()`, after the cleared-stand regeneration block:
+In `spawnOperations()`, after the cleared-stand regeneration block, add post-planting tending. Uses the same `"early_tending"` dedup key as the standard age-based check to prevent duplicates:
+
 ```typescript
-if (!s.cleared && s.plantingYear > 0 && !s.spawnedTypes.has("post_plant_tending")) {
+// Post-planting tending chain (triggered by planting year, not stand age)
+if (!s.cleared && s.plantingYear > 0 && !s.spawnedTypes.has("early_tending")) {
   const yearsSincePlanting = year - s.plantingYear;
-  if (yearsSincePlanting >= 3 && yearsSincePlanting <= 5) {
-    s.spawnedTypes.add("post_plant_tending");
+  if (yearsSincePlanting >= 3 && yearsSincePlanting <= 6) {
+    s.spawnedTypes.add("early_tending");  // same key as standard age-based check
     spawned.push({ type: "early_tending", ... });
   }
 }
 ```
 
-### Step 6: Add developmentClass to SimStand (schedule.ts)
+Note: `"early_tending"` is the single dedup key shared between the age-based window (Step 2a) and this planting-year-based check. Whichever triggers first prevents the other.
 
-Required for Steps 3c and for future dev_class guards. Add to the initialization in `runScheduleEngine()`:
+### Step 5: Add developmentClass + plantingYear to SimStand initialization (schedule.ts)
+
+Required for Steps 2c and for future dev_class guards. Add to the initialization in `runScheduleEngine()`:
 ```typescript
 stands.set(k.standId, {
   ...
@@ -267,7 +258,7 @@ stands.set(k.standId, {
 });
 ```
 
-### Step 7: getOptimalAge fallback (config.ts)
+### Step 6: getOptimalAge fallback (config.ts)
 
 When `site_class` is unrecognized, fall back to `mesic`:
 ```typescript
@@ -278,7 +269,7 @@ export function getOptimalAge(species: string, siteClass: string): [number, numb
 }
 ```
 
-### Step 8: Peatland thinning cap (schedule.ts, `spawnOperations` + apply section)
+### Step 7: Peatland thinning cap (schedule.ts, `spawnOperations` + apply section)
 
 Add `thinningCount` to `SimStand`:
 ```typescript
@@ -309,7 +300,7 @@ In the apply section, increment `thinningCount`:
 }
 ```
 
-### Step 9: Peatland minimum harvest volume (schedule.ts, `spawnOperations`)
+### Step 8: Peatland minimum harvest volume (schedule.ts, `spawnOperations`)
 
 In the thinning and clearcut spawning blocks, after computing `removal_m3`:
 ```typescript
@@ -324,7 +315,7 @@ if (s.soilType === "peatland") {
 }
 ```
 
-### Step 10: First thinning volume threshold (schedule.ts, `spawnOperations`)
+### Step 9: First thinning volume threshold (schedule.ts, `spawnOperations`)
 
 In the first_thinning spawning block, add a volume guard:
 ```typescript
@@ -336,14 +327,14 @@ if (s.basalArea >= firstThinThresh && s.ageYears >= minFirstAge && !s.spawnedTyp
 }
 ```
 
-### Step 11: SimStand initialization (schedule.ts, `runScheduleEngine`)
+### Step 10: SimStand initialization (schedule.ts, `runScheduleEngine`)
 
 Initialize new fields:
 ```typescript
 stands.set(k.standId, {
   // ...existing fields...
   thinningCount: 0,     // NEW
-  plantingYear: 0,      // for Step 5
+  plantingYear: 0,      // for Step 4
 });
 ```
 
@@ -353,7 +344,7 @@ stands.set(k.standId, {
 
 | File | Changes |
 |------|---------|
-| `src/lib/ai/schedule.ts` | Year-1 backlog allowance; skip-thinning-when-clearcut move continue; widened tending windows; seed_tree no-clearcut; post-planting tending chain; add `developmentClass` + `plantingYear` + `thinningCount` to `SimStand`; species debug for 138.0; peatland thinning cap (Step 8); peatland minimum harvest volume (Step 9); first thinning volume threshold (Step 10); SimStand initialization (Step 11) |
+| `src/lib/ai/schedule.ts` | Year-1 backlog removed; skip-thinning-when-clearcut move continue (Step 1); widened tending windows (Step 2a); debug logging for stands 83.0, 138.0, 181.0, 183.0 (Steps 2b, 3); seed_tree no-clearcut (Step 2c); post-planting tending chain (Step 4); SimStand init with developmentClass, plantingYear, thinningCount (Steps 5, 10); peatland thinning cap (Step 7); peatland minimum harvest volume (Step 8); first thinning volume threshold (Step 9) |
 | `src/lib/ai/config.ts` | `getOptimalAge()` fallback to mesic |
 
 ---
@@ -368,7 +359,6 @@ After fixes:
 5. Stand 138.0: pine planting (not spruce)
 6. Stands 181.0, 183.0: selection_cutting or no cutting, not clearcut
 7. 10 young stands: all receive tending operations
-8. Generate `maximum_growth_balanced` 10-year plan → year 1 should have all clearcuts
-9. Peatland stands: no stand has more than 2 thinning operations total
-10. Peatland harvests: no harvest operation on peatland has removal < 40 m³/ha
-11. First thinnings: all have volume ≥ 50 m³/ha at time of spawning
+8. Peatland stands: no stand has more than 2 thinning operations total
+9. Peatland harvests: no harvest operation on peatland has removal < 40 m³/ha
+10. First thinnings: all have volume ≥ 50 m³/ha at time of spawning
