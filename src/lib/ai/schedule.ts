@@ -113,12 +113,37 @@ function thinningPriceRatio(species: string, tier: "first_thinning" | "thinning"
 function spawnOperations(
   stands: Map<string, SimStand>,
   year: number,
+  startYear: number,
   strategy: SchedulingStrategy,
   goal: PlanGoal,
 ): PlannedOperation[] {
   const spawned: PlannedOperation[] = [];
 
   for (const s of stands.values()) {
+    // ── DEBUG: per-stand state snapshot (year 1 only to avoid spam) ──
+    if (year <= startYear + 1) {
+      const [optMin, optMax] = getOptimalAge(s.species, s.siteClass);
+      const isProblem = ["83", "138", "181", "183"].some((id) => s.standId.includes(id));
+      dlog(
+        `[SPAWN yr=${year}] stand=${s.standId} age=${s.ageYears}y vol=${s.volumeM3.toFixed(0)}m³ ` +
+        `ba=${s.basalArea.toFixed(1)} devClass=${s.developmentClass} species=${s.species} ` +
+        `siteClass=${s.siteClass} soilType=${s.soilType} optMin=${optMin} ccEligible=${s.ageYears >= optMin} ` +
+        `spawnedTypes=[${[...s.spawnedTypes].join(",")}] ` +
+        `${isProblem ? "⚠ PROBLEM_STAND" : ""}`,
+      );
+
+      if (isProblem) {
+        const regenSp = strategy.regenerationSpecies(makeMinimalStand(s));
+        dlog(
+          `  [INVESTIGATE stand=${s.standId}] ` +
+          `developmentClass=${s.developmentClass} is_seed_tree=${s.developmentClass?.includes("seed_tree")} ` +
+          `is_shelterwood=${s.developmentClass?.includes("shelterwood")} ` +
+          `regenerationSpecies=${regenSp} site_class=${s.siteClass} ` +
+          `includes_mesic=${s.siteClass.includes("mesic")} includes_herbrich=${s.siteClass.includes("herb-rich")}`,
+        );
+      }
+    }
+
     // ── Regeneration chain (cleared stands) ──
     if (s.cleared) {
       const delay = strategy.regenDelayYears();
@@ -465,7 +490,7 @@ export function runScheduleEngine(
     const volumeCapM3 = strategy.volumeCapMultiplier() * currentAnnualGrowth;
 
     // ── 2. SPAWN operations from current stand states ──
-    const spawned = spawnOperations(stands, yr, strategy, goal);
+    const spawned = spawnOperations(stands, yr, startYear, strategy, goal);
 
     // ── 3. MERGE carryover + spawned → candidate pool ──
     const pool = [...carryover, ...spawned];
