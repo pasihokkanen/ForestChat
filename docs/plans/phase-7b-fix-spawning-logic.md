@@ -502,19 +502,139 @@ const stand: StandData = {
 
 ---
 
+## Complete File Audit — All Locations Requiring Changes
+
+### Current field flow (for reference)
+
+| Field | DB column | `Compartment` type | `StandData` | `SimStand` | `CompartmentFeature` |
+|-------|-----------|-------------------|-------------|------------|---------------------|
+| `age_years` | ✅ | ✅ | ✅ (ageYears) | ✅ | ✅ |
+| `basal_area` | ✅ | ✅ | ✅ (ba) | ✅ (basalArea) | ✅ |
+| `volume_m3` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `avg_height` | ✅ | ✅ | ❌ | ❌ | ✅ |
+| `avg_diameter` | ✅ | ✅ | ❌ | ❌ | ✅ |
+| `stem_count` | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+**Key insight:** `avg_height` and `avg_diameter` are display-only — they never enter simulation. The new fields MUST enter simulation, so they need a deeper integration path than existing metadata fields.
+
+### DB Schema
+
+| # | File | What |
+|---|------|------|
+| D1 | New migration SQL | `compartments.stem_count NUMERIC` |
+| D2 | New migration SQL | `compartment_species.stem_count, mean_height, mean_diameter, age, basal_area` |
+
+### Types
+
+| # | File | Interface | Add |
+|---|------|-----------|-----|
+| T1 | `types/database.ts` | `Compartment` | `stem_count: number \| null` |
+| T2 | `types/database.ts` | `CompartmentSpecies` | `stem_count, mean_height, mean_diameter, age, basal_area` |
+| T3 | `types/database.ts` | `CompartmentFeature` | `stem_count: number \| null` |
+| T4 | `lib/ai/types.ts` | `StandData` | `stemCount?: number, meanHeight?: number, meanDiameter?: number` |
+| T5 | `lib/ai/forest-state.ts` | `CompartmentInput` | `stem_count, mean_height, mean_diameter` |
+| T6 | `lib/ai/forest-state.ts` | `MutableStand` | `stemCount, meanHeight, meanDiameter` |
+| T7 | `lib/ai/schedule.ts` | `SimStand` | `stemCount, meanHeight, meanDiameter` |
+
+### Import Pipeline
+
+| # | File | What |
+|---|------|------|
+| I1 | `csv-importer.ts` L126–128 | Compartment insert: add `stem_count: stand.total_stem_count` after `basal_area` |
+| I2 | `csv-importer.ts` L196–204 | Species insert: add `stem_count, mean_height, mean_diameter, age, basal_area` |
+| I3 | `spatial-service.ts` L132–134 | Compartment upsert: add `stem_count: stand.stemCount` after `basal_area` |
+| I4 | `wfs-client.ts` | Stand interface: add `stemCount?, avgDiameter?, avgHeight?` |
+
+### Simulation Engine — Initialization
+
+| # | File | Location | What |
+|---|------|----------|------|
+| S1 | `generate-plan.ts` | `enrichCompartment()` | Read `c.stem_count`, `c.avg_height`, `c.avg_diameter` → `StandData` |
+| S2 | `schedule.ts` | `runScheduleEngine()` init | Init `stemCount, meanHeight, meanDiameter` from `StandData` |
+| S3 | `forest-state.ts` | `toMutable()` | Init from `CompartmentInput` |
+
+### Simulation Engine — Operation Mutations
+
+| # | File | Operation | stemCount | meanHeight | meanDiameter |
+|---|------|-----------|-----------|------------|--------------|
+| M1 | `schedule.ts` | Clearcut | → 0 | → 0 | → 0 |
+| M2 | `schedule.ts` | Selection cutting | × (1 − pct) | stays same | stays same |
+| M3 | `schedule.ts` | Thinning / first_thinning | × (1 − pct) | stays same | stays same |
+| M4 | `schedule.ts` | Tending / early_tending | × (1 − pct) | stays same | stays same |
+| M5 | `schedule.ts` | Overstory removal | → areaHa × 2000 | → 0.3 | → 0.5 |
+| M6 | `schedule.ts` | Planting | → areaHa × density[sp] | → 0.3 | → 0.5 |
+| M7 | `forest-state.ts` | All above | Same rules as schedule.ts | Same | Same |
+
+### Simulation Engine — Other
+
+| # | File | What |
+|---|------|------|
+| S4 | `schedule.ts` | Debug logging: add `stemCount` to `[SPAWN]` log line |
+
+### AI Tools & Queries
+
+| # | File | What |
+|---|------|------|
+| A1 | `query-tools.ts` L48–50 | Field map: add `stem_count: "stem_count"` |
+| A2 | `query-tools.ts` L72–74 | Formatter: add stem_count formatter |
+| A3 | `query-tools.ts` L114–115 | Filters: add `stem_count_min/max` |
+| A4 | `query-tools.ts` L154–156 | Stand card: show stem_count |
+| A5 | `chart-engine.ts` | Field aliases: add `stem_count` |
+
+### UI Components
+
+| # | File | What |
+|---|------|------|
+| U1 | `StandList.tsx` L602–618 | Species sub-rows: show per-species stem_count, mean_height, mean_diameter |
+| U2 | `StandPopup.tsx` | Popup: show stem_count |
+| U3 | `StandLayer.tsx` | Feature props: add stem_count |
+
+### Data Export
+
+| # | File | What |
+|---|------|------|
+| E1 | `geojson.ts` L102–104 | Feature properties: add `stem_count: c.stem_count` |
+
+### System Prompt
+
+| # | File | What |
+|---|------|------|
+| P1 | `system-prompt.ts` L184 | Compartments field list: add `stem_count` |
+
+### Test Data
+
+| # | File | What |
+|---|------|------|
+| X1 | `test-data.ts` | All 10+ compartment factory objects: add `stem_count: null` |
+| X2 | Various test files | Update fixtures with new fields |
+
+### Total: 36 locations across ~15 files
+
+---
+
 ## Files to Modify
 
 | File | Changes |
 |------|---------|
-| `src/lib/ai/schedule.ts` | Steps 1,2a,2b,2c,3,4,5,7,8,9,10 — spawning rules + debug logging + SimStand with new fields (Step 14) |
+| `src/lib/ai/schedule.ts` | Spawning fixes (Steps 1,2a,2b,2c,3,4,7,8,9,10) + debug logging + SimStand with new fields (T7, S2, M1–M6, S4) |
 | `src/lib/ai/config.ts` | `getOptimalAge()` fallback to mesic (Step 6) |
-| `src/lib/ai/types.ts` | Add `stemCount`, `meanHeight`, `meanDiameter` to StandData (Step 14) |
-| `src/lib/ai/forest-state.ts` | Add fields to CompartmentInput + MutableStand; mutate in estimateForestState (Step 14) |
-| `src/lib/ai/generate-plan.ts` | Enrich StandData with new DB fields (Step 15) |
-| New migration SQL | `013_add_compartment_metrics.sql` — add stem_count, mean_height, mean_diameter, age, basal_area to `compartment_species`; add `stem_count` to `compartments` (Step 11) |
-| `csv-importer.ts` | Save parsed per-species metrics to DB (Step 12) |
-| `wfs-client.ts` | Save metrics if available from WFS (Step 13) |
-| Tests | New unit tests T1–T14; update existing tests for widened windows |
+| `src/lib/ai/types.ts` | Add `stemCount`, `meanHeight`, `meanDiameter` to StandData (T4) |
+| `src/lib/ai/forest-state.ts` | CompartmentInput, MutableStand, toMutable, operation mutations (T5, T6, S3, M7) |
+| `src/lib/ai/generate-plan.ts` | Enrich StandData from DB (S1); Step 15 |
+| `src/lib/ai/query-tools.ts` | Field map, formatter, filters, stand card (A1–A4) |
+| `src/lib/ai/chart-engine.ts` | Field aliases for stem_count (A5) |
+| `src/types/database.ts` | Compartment, CompartmentSpecies, CompartmentFeature types (T1–T3) |
+| New migration SQL | `013_add_compartment_metrics.sql` (D1–D2) |
+| `src/lib/import/csv-importer.ts` | Save parsed metrics to DB (I1, I2); Step 12 |
+| `src/lib/import/spatial-service.ts` | Compartment upsert — add stem_count (I3) |
+| `src/lib/import/wfs-client.ts` | Stand interface — add stemCount (I4) |
+| `src/components/forest/StandList.tsx` | Species sub-rows — show new fields (U1) |
+| `src/components/map/StandPopup.tsx` | Popup — show stem_count (U2) |
+| `src/components/map/StandLayer.tsx` | Feature props — add stem_count (U3) |
+| `src/lib/map/geojson.ts` | Feature properties — add stem_count (E1) |
+| `src/lib/chat/system-prompt.ts` | Field list — add stem_count (P1) |
+| `src/lib/test-data.ts` | Compartment factory — add stem_count: null (X1) |
+| Tests | New unit tests T1–T14; update existing test fixtures (X2) |
 
 ---
 
