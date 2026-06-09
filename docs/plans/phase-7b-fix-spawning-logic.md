@@ -429,17 +429,91 @@ Also add `stem_count` to the `compartments` insert (from `stand.total_stem_count
 
 If the WFS response includes stem count, height, or diameter fields, map and save them to `compartment_species` and `compartments`.
 
+### Step 14: SimStand — add new fields and manage across all mutation points
+
+**New fields to add to simulation state:**
+
+```typescript
+interface SimStand {
+  // ...existing fields...
+  stemCount: number;      // total stem count (runkoluku)
+  meanHeight: number;     // mean height in meters (keskipituus)
+  meanDiameter: number;   // mean diameter in cm (keskiläpimitta)
+}
+```
+
+**Also add to:**
+| Type | File | Fields |
+|------|------|--------|
+| `StandData` | `types.ts` | `stemCount?: number`, `meanHeight?: number`, `meanDiameter?: number` |
+| `CompartmentInput` | `forest-state.ts` | `stem_count: number \| null`, `mean_height: number \| null`, `mean_diameter: number \| null` |
+| `MutableStand` | `forest-state.ts` | `stemCount`, `meanHeight`, `meanDiameter` |
+
+**Mutation rules — how each operation affects the new fields:**
+
+| Operation | stemCount | meanHeight | meanDiameter |
+|-----------|-----------|------------|--------------|
+| **Clearcut** | → 0 | → 0 | → 0 |
+| **Selection cutting** | × (1 − removalFraction) | stays same | stays same |
+| **Overstory removal** | → areaHa × 2000 | → 0.3 | → 0.5 |
+| **Thinning / first_thinning** | × (1 − removalFraction) | stays same | stays same |
+| **Tending / early_tending** | × (1 − removalFraction) | stays same | stays same |
+| **Planting** | → areaHa × density (Tapio) | → 0.3 | → 0.5 |
+| **Growth (per year)** | stays same† | stays same† | stays same† |
+
+† Natural growth of height/diameter requires a growth model — initial implementation keeps them constant between operations. This is acceptable because our decisions use stem_count and mean_height as **thresholds at operation time**, not as continuously-changing values.
+
+**Tapio recommended planting densities (stems/ha):**
+
+| Species | Density (stems/ha) |
+|---------|-------------------|
+| Pine (mänty) | 2,000–2,400 |
+| Spruce (kuusi) | 1,500–1,800 |
+| Silver birch (rauduskoivu) | 1,600 |
+| Downy birch (hieskoivu) | 1,600 |
+
+Use the midpoint: pine 2,200; spruce 1,650; birch 1,600.
+
+**Planting initial values (after `xxx_planting` operation):**
+- `stemCount = areaHa × plantingDensity[species]`
+- `meanHeight = 0.3` (m)
+- `meanDiameter = 0.5` (cm)
+
+**Files to modify for Step 14:**
+| File | Changes |
+|------|---------|
+| `schedule.ts` | Add fields to SimStand; init from StandData; mutate in apply block; add to debug logging |
+| `types.ts` | Add optional fields to StandData |
+| `forest-state.ts` | Add fields to CompartmentInput and MutableStand; mutate in estimateForestState |
+| `generate-plan.ts` | Read from DB compartment; pass through enrichment |
+
+### Step 15: StandData enrichment — read new fields from DB
+
+**File:** `generate-plan.ts` — `enrichCompartment()`
+
+```typescript
+const stand: StandData = {
+  // ...existing fields...
+  stemCount: c.stem_count ?? undefined,
+  meanHeight: c.mean_height ?? undefined,
+  meanDiameter: c.mean_diameter ?? undefined,
+};
+```
+
 ---
 
 ## Files to Modify
 
 | File | Changes |
 |------|---------|
-| `src/lib/ai/schedule.ts` | Skip-thinning-when-clearcut (Step 1); widened tending windows (Step 2a); debug logging for stands 83.0, 138.0, 181.0, 183.0 (Steps 2b, 3); seed_tree no-clearcut (Step 2c); post-planting tending chain (Step 4); SimStand init with developmentClass, plantingYear, thinningCount (Steps 5, 10); peatland thinning cap (Step 7); peatland minimum harvest volume (Step 8); first thinning volume threshold (Step 9) |
+| `src/lib/ai/schedule.ts` | Steps 1,2a,2b,2c,3,4,5,7,8,9,10 — spawning rules + debug logging + SimStand with new fields (Step 14) |
 | `src/lib/ai/config.ts` | `getOptimalAge()` fallback to mesic (Step 6) |
+| `src/lib/ai/types.ts` | Add `stemCount`, `meanHeight`, `meanDiameter` to StandData (Step 14) |
+| `src/lib/ai/forest-state.ts` | Add fields to CompartmentInput + MutableStand; mutate in estimateForestState (Step 14) |
+| `src/lib/ai/generate-plan.ts` | Enrich StandData with new DB fields (Step 15) |
 | New migration SQL | `013_add_compartment_metrics.sql` — add stem_count, mean_height, mean_diameter, age, basal_area to `compartment_species`; add `stem_count` to `compartments` (Step 11) |
-| `csv-importer.ts` | Save parsed per-species stem_count, mean_height, mean_diameter, age, basal_area to DB (Step 12) |
-| `wfs-client.ts` | Save stem_count/height/diameter if available from WFS (Step 13) |
+| `csv-importer.ts` | Save parsed per-species metrics to DB (Step 12) |
+| `wfs-client.ts` | Save metrics if available from WFS (Step 13) |
 | Tests | New unit tests T1–T14; update existing tests for widened windows |
 
 ---
