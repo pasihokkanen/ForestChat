@@ -442,6 +442,7 @@ export async function POST(request: NextRequest) {
       let createdChart = false;  // track for better fallback messages
       let lastToolResult: string | undefined;  // last successful tool result text
       const chartIdsCreatedThisTurn = new Set<string>();  // guard against duplicate create_chart calls
+      const planFingerprints = new Set<string>();  // guard against identical generate_plan calls
 
       // Guard against leading-whitespace text chunks that some models (DeepSeek)
       // emit before tool calls. These produce empty rows at the top of the answer.
@@ -491,6 +492,19 @@ export async function POST(request: NextRequest) {
                 continue;
               }
               if (chartId) chartIdsCreatedThisTurn.add(chartId);
+            }
+
+            // Skip duplicate generate_plan calls with identical parameters.
+            // Different goal/start_year/period_years = different plan → allowed.
+            if (chunk.name === "generate_plan") {
+              const args = (chunk.arguments ?? {}) as Record<string, unknown>;
+              const fp = `${args.goal ?? ""}|${args.start_year ?? ""}|${args.period_years ?? ""}`;
+              if (planFingerprints.has(fp)) {
+                console.warn(`[route] Skipping duplicate generate_plan(${fp}) — identical plan already generated`);
+                send({ event: "tool_end", data: { id: chunk.id, name: chunk.name, result: "Plan with these parameters already generated.", error: null } });
+                continue;
+              }
+              planFingerprints.add(fp);
             }
 
             send({ event: "tool_start", data: { id: chunk.id, name: chunk.name, args: chunk.arguments as Record<string, unknown> } });

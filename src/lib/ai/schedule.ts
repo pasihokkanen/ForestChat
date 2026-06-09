@@ -65,6 +65,10 @@ interface SimStand {
   /** Set of operation types already spawned for this stand (prevents duplicates). */
   spawnedTypes: Set<string>;
   growthMultiplier: number;
+  /** Year when stand was planted (0 = not planted). Used for post-planting tending chain. */
+  plantingYear: number;
+  /** Number of thinning operations applied (for peatland thinning cap). */
+  thinningCount: number;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -243,21 +247,28 @@ function spawnOperations(
         ? s.ageYears >= optMin + 10  // buffer: don't clearcut borderline mature_thinning
         : s.ageYears >= optMin;
 
-    if (ccEligible && s.volumeM3 > 10 && !s.spawnedTypes.has("clear_cut")) {
-      s.spawnedTypes.add("clear_cut");
-      const opType = goal === "carbon_storage" ? "selection_cutting" : "clear_cut";
-      const def = OPERATION_DEFAULTS[opType];
-      spawned.push({
-        stand: makeMinimalStand(s),
-        type: opType,
-        year,
-        income_eur: Math.round(s.valueEur * def.removalFraction),
-        cost_eur: 0,
-        removal_m3: Math.round(s.volumeM3 * def.removalFraction),
-        notes: `${opType === "selection_cutting" ? "Selection cutting (carbon storage)" : "Clearcut"} at age ${s.ageYears}y [${optMin}–${optMax}y]`,
-        dueYear: year,
-      });
-      continue;
+    if (ccEligible && s.volumeM3 > 10) {
+      // Step 1: Clearcut-eligible → always skip thinning, even if clearcut not spawned
+      if (!s.spawnedTypes.has("clear_cut")) {
+        const opType = goal === "carbon_storage" ? "selection_cutting" : "clear_cut";
+        const def = OPERATION_DEFAULTS[opType];
+        const removal = s.volumeM3 * def.removalFraction;
+        // Step 8: Peatland minimum harvest volume — Tapio recommends ≥40 m³/ha
+        if (s.soilType !== "peatland" || removal / s.areaHa >= 40) {
+          s.spawnedTypes.add("clear_cut");
+          spawned.push({
+            stand: makeMinimalStand(s),
+            type: opType,
+            year,
+            income_eur: Math.round(s.valueEur * def.removalFraction),
+            cost_eur: 0,
+            removal_m3: Math.round(removal),
+            notes: `${opType === "selection_cutting" ? "Selection cutting (carbon storage)" : "Clearcut"} at age ${s.ageYears}y [${optMin}–${optMax}y]`,
+            dueYear: year,
+          });
+        }
+      }
+      continue; // Step 1: skip thinning — this stand is clearcut-ready
     }
 
     // ── Thinning eligibility ──
@@ -266,41 +277,61 @@ function spawnOperations(
     const minFirstAge = MIN_AGE_FIRST_THINNING?.[s.species] ?? 30;
     const minThinAge = MIN_AGE_THINNING?.[s.species] ?? 40;
 
-    if (s.basalArea >= firstThinThresh && s.ageYears >= minFirstAge && !s.spawnedTypes.has("first_thinning")) {
-      s.spawnedTypes.add("first_thinning");
-      const def = OPERATION_DEFAULTS["first_thinning"];
-      const ratio = thinningPriceRatio(s.species, "first_thinning");
-      const removal = s.volumeM3 * def.removalFraction;
-      spawned.push({
-        stand: makeMinimalStand(s),
-        type: "first_thinning",
-        year,
-        income_eur: Math.round(s.valueEur * def.removalFraction * ratio),
-        cost_eur: 0,
-        removal_m3: Math.round(removal),
-        notes: `First thinning BA=${s.basalArea.toFixed(0)} age=${s.ageYears}y`,
-        dueYear: year,
-      });
-    } else if (s.basalArea >= thinThresh && s.ageYears >= minThinAge && !s.spawnedTypes.has("thinning")) {
-      s.spawnedTypes.add("thinning");
-      const def = OPERATION_DEFAULTS["thinning"];
-      const ratio = thinningPriceRatio(s.species, "thinning");
-      const removal = s.volumeM3 * def.removalFraction;
-      spawned.push({
-        stand: makeMinimalStand(s),
-        type: "thinning",
-        year,
-        income_eur: Math.round(s.valueEur * def.removalFraction * ratio),
-        cost_eur: 0,
-        removal_m3: Math.round(removal),
-        notes: `Thinning BA=${s.basalArea.toFixed(0)} age=${s.ageYears}y`,
-        dueYear: year,
-      });
+    // Step 7: Peatland thinning cap — Tapio recommends max 1-2 thinning passes
+    if (s.soilType === "peatland" && s.thinningCount >= 2) {
+      // Skip thinning — peatland stand at thinning limit
+      // Fall through to tending checks
+    } else {
+      // First thinning check
+      if (s.basalArea >= firstThinThresh && s.ageYears >= minFirstAge && !s.spawnedTypes.has("first_thinning")) {
+        // Step 9: First thinning volume threshold — Tapio: ≥50 m³/ha standing volume
+        const m3PerHa = s.volumeM3 / s.areaHa;
+        if (m3PerHa >= 50) {
+          const def = OPERATION_DEFAULTS["first_thinning"];
+          const removal = s.volumeM3 * def.removalFraction;
+          // Step 8: Peatland min harvest volume
+          if (s.soilType !== "peatland" || removal / s.areaHa >= 40) {
+            s.spawnedTypes.add("first_thinning");
+            const ratio = thinningPriceRatio(s.species, "first_thinning");
+            spawned.push({
+              stand: makeMinimalStand(s),
+              type: "first_thinning",
+              year,
+              income_eur: Math.round(s.valueEur * def.removalFraction * ratio),
+              cost_eur: 0,
+              removal_m3: Math.round(removal),
+              notes: `First thinning BA=${s.basalArea.toFixed(0)} age=${s.ageYears}y`,
+              dueYear: year,
+            });
+          }
+        }
+      }
+      // Regular thinning check (also runs if first_thinning was ineligible or skipped)
+      if (s.basalArea >= thinThresh && s.ageYears >= minThinAge && !s.spawnedTypes.has("thinning")) {
+        const def = OPERATION_DEFAULTS["thinning"];
+        const removal = s.volumeM3 * def.removalFraction;
+        // Step 8: Peatland min harvest volume
+        if (s.soilType !== "peatland" || removal / s.areaHa >= 40) {
+          s.spawnedTypes.add("thinning");
+          const ratio = thinningPriceRatio(s.species, "thinning");
+          spawned.push({
+            stand: makeMinimalStand(s),
+            type: "thinning",
+            year,
+            income_eur: Math.round(s.valueEur * def.removalFraction * ratio),
+            cost_eur: 0,
+            removal_m3: Math.round(removal),
+            notes: `Thinning BA=${s.basalArea.toFixed(0)} age=${s.ageYears}y`,
+            dueYear: year,
+          });
+        }
+      }
     }
 
     // ── Tending eligibility (seedling stands, once only) ──
+    // Step 2a: Widened windows — early_tending 2–15, tending 8–30
     if (s.tendedYear === 0 && !s.spawnedTypes.has("tending") && !s.spawnedTypes.has("early_tending")) {
-      if (s.ageYears >= 3 && s.ageYears <= 12) {
+      if (s.ageYears >= 2 && s.ageYears <= 15) {
         const def = OPERATION_DEFAULTS["early_tending"];
         s.spawnedTypes.add("early_tending");
         spawned.push({
@@ -313,7 +344,7 @@ function spawnOperations(
           notes: `Early tending at age ${s.ageYears}y`,
           dueYear: year,
         });
-      } else if (s.ageYears >= 10 && s.ageYears <= 25) {
+      } else if (s.ageYears >= 8 && s.ageYears <= 30) {
         const def = OPERATION_DEFAULTS["tending"];
         s.spawnedTypes.add("tending");
         spawned.push({
@@ -324,6 +355,25 @@ function spawnOperations(
           cost_eur: Math.round(COSTS.tending * s.areaHa),
           removal_m3: Math.round(s.volumeM3 * def.removalFraction),
           notes: `Tending at age ${s.ageYears}y`,
+          dueYear: year,
+        });
+      }
+    }
+
+    // ── Step 4: Post-planting tending chain (triggered by planting year, not stand age) ──
+    if (!s.cleared && s.plantingYear > 0 && !s.spawnedTypes.has("early_tending")) {
+      const yearsSincePlanting = year - s.plantingYear;
+      if (yearsSincePlanting >= 3 && yearsSincePlanting <= 6) {
+        const def = OPERATION_DEFAULTS["early_tending"];
+        s.spawnedTypes.add("early_tending");  // same key as standard age-based check
+        spawned.push({
+          stand: makeMinimalStand(s),
+          type: "early_tending",
+          year,
+          income_eur: 0,
+          cost_eur: Math.round(COSTS.early_tending * s.areaHa),
+          removal_m3: Math.round(s.volumeM3 * def.removalFraction),
+          notes: `Early tending ${yearsSincePlanting}y after planting`,
           dueYear: year,
         });
       }
@@ -461,6 +511,8 @@ export function runScheduleEngine(
       overstoryStarted: 0,
       spawnedTypes: new Set(),
       growthMultiplier,
+      plantingYear: 0,
+      thinningCount: 0,
     });
   }
 
@@ -592,6 +644,7 @@ export function runScheduleEngine(
         st.basalArea = Math.max(0, st.basalArea * (1 - Math.min(pct, 1)));
         st.valueEur = Math.max(0, Math.round(st.valueEur * (1 - Math.min(pct, 1))));
         st.spawnedTypes.delete(op.type);
+        st.thinningCount++;
       } else if (op.type === "early_tending" || op.type === "tending") {
         const removal = op.removal_m3;
         st.volumeM3 = Math.max(0, st.volumeM3 - removal);
@@ -605,6 +658,7 @@ export function runScheduleEngine(
         if (st.volumeM3 === 0) st.volumeM3 = st.areaHa * 1;
         if (st.valueEur === 0) st.valueEur = Math.round(st.areaHa * 50);
         st.spawnedTypes.clear();
+        st.plantingYear = yr;
       }
     }
 

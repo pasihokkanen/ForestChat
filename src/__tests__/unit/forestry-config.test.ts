@@ -45,8 +45,8 @@ describe("Forestry Config", () => {
 
   it("getOptimalAge returns default for unknown species", () => {
     const [min, max] = getOptimalAge("Unknown", "mesic");
-    expect(min).toBe(65);
-    expect(max).toBe(90);
+    expect(min).toBe(80);
+    expect(max).toBe(110);
   });
 
   it("getOptimalAge scales by growthMultiplier (Lappi = longer rotations)", () => {

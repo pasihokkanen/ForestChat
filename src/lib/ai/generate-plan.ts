@@ -295,8 +295,14 @@ export async function generatePlan(
       await supabase.from("plan_metadata").insert(metaPayload);
     }
 
-    // ── 7. Replace operations ──
-    await supabase.from("operations").delete().eq("forest_id", forestId).eq("created_by", "ai");
+    // ── 7. Replace operations from startYear onward ──
+    // Scoped to year >= startYear: earlier operations are preserved (e.g. from a prior plan period),
+    // but everything from this start point forward is regenerated to prevent back-to-back clearcuts
+    // or other nonsensical transitions across plan boundaries.
+    await supabase.from("operations").delete()
+      .eq("forest_id", forestId)
+      .eq("created_by", "ai")
+      .gte("year", startYear);
     if (allPlanOps.length > 0) {
       const { error: insertError } = await supabase.from("operations").insert(allPlanOps);
       if (insertError) throw new Error(`Failed to insert operations: ${insertError.message}`);

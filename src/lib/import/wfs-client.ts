@@ -37,6 +37,7 @@ export interface WfsStand {
   basalArea: number | null;
   avgDiameter: number | null;
   avgHeight: number | null;
+  stemCount: number | null;
   growthM3PerHa: number | null;
   geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon;
   attributes: Record<string, unknown>;

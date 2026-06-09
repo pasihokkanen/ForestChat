@@ -50,7 +50,9 @@ export const OPTIMAL_AGES: Record<string, Record<string, [number, number]>> = {
 
 export function getOptimalAge(species: string, site: string, growthMultiplier = 1.0): [number, number] {
   const sp = species === "birch" ? "silver_birch" : species;
-  const [optMin, optMax] = OPTIMAL_AGES[sp]?.[site] ?? [65, 90];
+  const table = OPTIMAL_AGES[sp];
+  if (!table) return [80, 110]; // unknown species, conservative
+  const [optMin, optMax] = table[site] ?? table["mesic"] ?? [80, 110];
   const ageMultiplier = 1 / growthMultiplier;
   return [Math.round(optMin * ageMultiplier), Math.round(optMax * ageMultiplier)];
 }

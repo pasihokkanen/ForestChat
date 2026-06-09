@@ -130,6 +130,7 @@ export async function filterStandsWithinProperty(
         age_years: stand.ageYears,
         volume_m3: stand.volumeM3,
         basal_area: stand.basalArea,
+        stem_count: stand.stemCount,
         avg_diameter: stand.avgDiameter,
         avg_height: stand.avgHeight,
         growth_m3_per_ha: stand.growthM3PerHa,
