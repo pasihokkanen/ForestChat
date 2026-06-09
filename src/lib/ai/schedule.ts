@@ -191,11 +191,57 @@ function spawnOperations(
       continue;
     }
 
+    // ── Overstory guard (seed tree / shelterwood stands) ──
+    // "Ylispuidenpoisto" — remove remaining overstory trees once
+    // the new seedling generation is established underneath.
+    // Tapio guidelines: "kun taimikko on vakiintunut" (seedlings established).
+    // MUST run BEFORE clearcut eligibility — seed_tree stands should never be clearcut.
+    const hasOverstory = s.developmentClass?.includes("seed_tree") ||
+                         s.developmentClass?.includes("shelterwood");
+    if (hasOverstory) {
+      if (s.volumeM3 < 30) {
+        // Volume too low — seed trees have done their job.
+        // Transition to regeneration: mark as cleared so the regen chain
+        // at the top of spawnOperations picks it up next year.
+        if (!s.cleared) {
+          s.cleared = true;
+          s.regenDelayStarted = year;
+        }
+        continue; // skip clearcut, overstory_removal, thinning, tending
+      }
+      if (!s.spawnedTypes.has("overstory_removal")) {
+        // First time seeing this stand — record the year
+        if (s.overstoryStarted === 0) {
+          s.overstoryStarted = year;
+        }
+        // Check if enough time has passed for seedlings to establish
+        const delay = strategy.overstoryDelayYears();
+        const yearsElapsed = year - s.overstoryStarted;
+        if (yearsElapsed >= delay && s.volumeM3 > 0) {
+          s.spawnedTypes.add("overstory_removal");
+          spawned.push({
+            stand: makeMinimalStand(s),
+            type: "overstory_removal",
+            year,
+            income_eur: Math.round(s.valueEur),
+            cost_eur: 0,
+            removal_m3: Math.round(s.volumeM3),
+            notes: `Overstory removal (seed trees, ~${yearsElapsed}y since seed cut), age ${s.ageYears}y`,
+            dueYear: year,
+          });
+          continue;
+        }
+      }
+      continue; // skip clearcut and thinning for overstory stands
+    }
+
     // ── Clearcut eligibility ──
     const [optMin, optMax] = getOptimalAge(s.species, s.siteClass);
     const ccEligible = goal === "carbon_storage"
       ? s.ageYears >= optMax + 15  // only significantly over-mature
-      : s.ageYears >= optMin;
+      : s.developmentClass === "mature_thinning"
+        ? s.ageYears >= optMin + 10  // buffer: don't clearcut borderline mature_thinning
+        : s.ageYears >= optMin;
 
     if (ccEligible && s.volumeM3 > 10 && !s.spawnedTypes.has("clear_cut")) {
       s.spawnedTypes.add("clear_cut");
@@ -250,37 +296,6 @@ function spawnOperations(
         notes: `Thinning BA=${s.basalArea.toFixed(0)} age=${s.ageYears}y`,
         dueYear: year,
       });
-    }
-
-    // ── Overstory removal (seed tree / shelterwood stands) ──
-    // "Ylispuidenpoisto" — remove remaining overstory trees once
-    // the new seedling generation is established underneath.
-    // Tapio guidelines: "kun taimikko on vakiintunut" (seedlings established).
-    // Wait overstoryDelayYears() after first encountering the stand.
-    const hasOverstory = s.developmentClass?.includes("seed_tree") ||
-                         s.developmentClass?.includes("shelterwood");
-    if (hasOverstory && !s.spawnedTypes.has("overstory_removal")) {
-      // First time seeing this stand — record the year
-      if (s.overstoryStarted === 0) {
-        s.overstoryStarted = year;
-      }
-      // Check if enough time has passed for seedlings to establish
-      const delay = strategy.overstoryDelayYears();
-      const yearsElapsed = year - s.overstoryStarted;
-      if (yearsElapsed >= delay && s.volumeM3 > 0) {
-        s.spawnedTypes.add("overstory_removal");
-        spawned.push({
-          stand: makeMinimalStand(s),
-          type: "overstory_removal",
-          year,
-          income_eur: Math.round(s.valueEur),
-          cost_eur: 0,
-          removal_m3: Math.round(s.volumeM3),
-          notes: `Overstory removal (seed trees, ~${yearsElapsed}y since seed cut), age ${s.ageYears}y`,
-          dueYear: year,
-        });
-        continue;
-      }
     }
 
     // ── Tending eligibility (seedling stands, once only) ──

@@ -60,7 +60,9 @@ export const aggressiveStrategy: SchedulingStrategy = {
   },
   regenDelayYears: () => 0,
   regenerationSpecies: (stand) =>
-    stand.site_class.includes("mesic") || stand.site_class.includes("herb-rich") ? "spruce" : "pine",
+    (!stand.site_class || stand.site_class === "")
+      ? "pine"
+      : stand.site_class.includes("mesic") || stand.site_class.includes("herb-rich") ? "spruce" : "pine",
   overstoryDelayYears: () => 5,
 };
 
@@ -72,7 +74,9 @@ export const noCapStrategy: SchedulingStrategy = {
   },
   regenDelayYears: () => 0,
   regenerationSpecies: (stand) =>
-    stand.site_class.includes("mesic") || stand.site_class.includes("herb-rich") ? "spruce" : "pine",
+    (!stand.site_class || stand.site_class === "")
+      ? "pine"
+      : stand.site_class.includes("mesic") || stand.site_class.includes("herb-rich") ? "spruce" : "pine",
   overstoryDelayYears: () => 5,
 };
 
@@ -97,7 +101,9 @@ export const balancedGrowthStrategy: SchedulingStrategy = {
   },
   regenDelayYears: () => 1,
   regenerationSpecies: (stand) =>
-    stand.site_class.includes("mesic") || stand.site_class.includes("herb-rich") ? "spruce" : "pine",
+    (!stand.site_class || stand.site_class === "")
+      ? "pine"
+      : stand.site_class.includes("mesic") || stand.site_class.includes("herb-rich") ? "spruce" : "pine",
   overstoryDelayYears: () => 7,
 };
 
@@ -178,7 +184,9 @@ export const balancedStrategy: SchedulingStrategy = {
   },
   regenDelayYears: () => 1,
   regenerationSpecies: (stand) =>
-    stand.site_class.includes("mesic") || stand.site_class.includes("herb-rich") ? "spruce" : "pine",
+    (!stand.site_class || stand.site_class === "")
+      ? "pine"
+      : stand.site_class.includes("mesic") || stand.site_class.includes("herb-rich") ? "spruce" : "pine",
   overstoryDelayYears: () => 7,
 };
 
