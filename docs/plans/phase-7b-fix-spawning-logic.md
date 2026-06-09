@@ -153,6 +153,43 @@ Based on the no-cap validation, five issues remain:
 
 **Fix:** When spawning `first_thinning`, additionally require `volumeM3 / areaHa ≥ 50`. This ensures the stand has built up enough volume before the first commercial thinning. Stands that meet the age+BA threshold but not the volume threshold will be re-checked each year as they grow.
 
+### 9. Missing compartment metrics for precise tending decisions (Tapio guidelines)
+
+**Source:** Tapio's varhaisperkaus/taimikonharvennus guidance uses `keskipituus` (mean height), `keskiläpimitta` (mean diameter), and `runkoluku` (stem count) to decide **which** tending operation to apply and **when**:
+
+| Metric | Threshold | Operation |
+|--------|-----------|-----------|
+| `mean_height` | < 1m (pine) / < 1.5m (spruce) | → `early_tending` (varhaisperkaus) |
+| `mean_height` | 1–7m (pine/spruce), 1–9m (birch) | → `tending` (taimikonharvennus) |
+| `mean_diameter` | < 8 cm | Confirms tending phase (varttunut taimikko) |
+| `mean_diameter` | ≥ 8 cm | Stand past tending → approaching first thinning |
+| `stem_count` | > 4000/ha | Needs early_tending |
+| `stem_count` | 2000–4000/ha | Needs tending |
+| `stem_count` | 800–2000/ha | Approaching first thinning |
+
+**Evidence:** Currently we use only `age` to distinguish early_tending (2–15) vs tending (8–30), which is a crude proxy. With real `stem_count` and `mean_height`, we can make precise decisions: a 5-year-old stand with height > 2m and 3500 stems/ha needs `tending`, not `early_tending`. A 12-year-old stand with 1500 stems/ha is already past tending.
+
+**Current state:** The CSV parser already parses `stem_count`, `mean_height`, `mean_diameter`, `basal_area` per species, plus total-level equivalents — but the importer **drops** them at DB insert. The `compartments` table has `avg_height` and `avg_diameter` but **no `stem_count`**. The `compartment_species` table has only `species`, `volume_m3`, `log_pct`, `area_ha`.
+
+**Fix:** 
+1. **DB migration**: Add `stem_count`, `mean_height`, `mean_diameter`, `basal_area` to `compartment_species`; add `stem_count` to `compartments`
+2. **CSV importer**: Save parsed fields to DB (already parsed, just not inserted)
+3. **WFS importer**: Save these fields if available from WFS data
+4. **Scheduling engine** (future): Use `stem_count` + `mean_height` in `spawnOperations()` to differentiate `early_tending` from `tending`, replacing the crude age-based window after data is available
+
+**Files affected:**
+| File | Change |
+|------|--------|
+| New migration SQL | Add columns to `compartment_species` and `compartments` |
+| `csv-importer.ts` | Save parsed per-species fields to DB |
+| `wfs-client.ts` / `code-tables.ts` | Save fields if available from WFS |
+| `schedule.ts` | Use `stem_count` + `mean_height` in tending decisions (post-data) |
+| `forest-state.ts` | Optionally track stem_count in growth simulation |
+| `generate-plan.ts` | Enrichment may need species-level metrics |
+| Tests | Update fixtures with new fields |
+
+**Note:** This is a data infrastructure task — the scheduling engine changes to USE these fields will follow once the DB and import are updated. For the initial fix, the age-based windows (Step 2a) remain the primary mechanism, widened to capture all tending-eligible stands. Once real `stem_count` data is in the DB, a follow-up change will replace the age windows with stem_count/height-based decisions.
+
 ---
 
 ## Implementation Plan
@@ -338,14 +375,72 @@ stands.set(k.standId, {
 });
 ```
 
+### Step 11: Database migration — add compartment metrics
+
+**New migration file:** `supabase/migrations/013_add_compartment_metrics.sql`
+
+```sql
+-- Add per-species metrics to compartment_species
+ALTER TABLE compartment_species ADD COLUMN IF NOT EXISTS stem_count NUMERIC;
+ALTER TABLE compartment_species ADD COLUMN IF NOT EXISTS mean_height NUMERIC;
+ALTER TABLE compartment_species ADD COLUMN IF NOT EXISTS mean_diameter NUMERIC;
+ALTER TABLE compartment_species ADD COLUMN IF NOT EXISTS age INTEGER;
+ALTER TABLE compartment_species ADD COLUMN IF NOT EXISTS basal_area NUMERIC;
+
+-- Add total stem count to compartments
+ALTER TABLE compartments ADD COLUMN IF NOT EXISTS stem_count NUMERIC;
+
+COMMENT ON COLUMN compartment_species.stem_count IS 'Stem count (runkoluku) for this species in the compartment';
+COMMENT ON COLUMN compartment_species.mean_height IS 'Mean height in meters (keskipituus)';
+COMMENT ON COLUMN compartment_species.mean_diameter IS 'Mean diameter in cm (keskiläpimitta)';
+COMMENT ON COLUMN compartment_species.age IS 'Age of this species group (ikä)';
+COMMENT ON COLUMN compartment_species.basal_area IS 'Basal area m²/ha (pohjapinta-ala)';
+COMMENT ON COLUMN compartments.stem_count IS 'Total stem count (runkoluku) for the compartment';
+```
+
+### Step 12: CSV importer — save parsed metrics to DB
+
+**File:** `src/lib/import/csv-importer.ts`
+
+Add the parsed fields to the `compartment_species` insert:
+
+```typescript
+speciesRows.push({
+  forest_id: forestId,
+  compartment_id: comp.id,
+  stand_id: stand.stand_id,
+  species: sp.species,
+  volume_m3: m3,
+  log_pct: sp.log_pct,
+  area_ha: Math.round(areaProportion * 1000) / 1000,
+  stem_count: sp.stem_count,     // NEW
+  mean_height: sp.mean_height,   // NEW
+  mean_diameter: sp.mean_diameter, // NEW
+  age: sp.age,                   // NEW
+  basal_area: sp.basal_area,     // NEW
+});
+```
+
+Also add `stem_count` to the `compartments` insert (from `stand.total_stem_count`).
+
+### Step 13: WFS importer — save metrics if available
+
+**Files:** `src/lib/import/wfs-client.ts`, `src/lib/import/code-tables.ts`
+
+If the WFS response includes stem count, height, or diameter fields, map and save them to `compartment_species` and `compartments`.
+
 ---
 
 ## Files to Modify
 
 | File | Changes |
 |------|---------|
-| `src/lib/ai/schedule.ts` | Year-1 backlog removed; skip-thinning-when-clearcut move continue (Step 1); widened tending windows (Step 2a); debug logging for stands 83.0, 138.0, 181.0, 183.0 (Steps 2b, 3); seed_tree no-clearcut (Step 2c); post-planting tending chain (Step 4); SimStand init with developmentClass, plantingYear, thinningCount (Steps 5, 10); peatland thinning cap (Step 7); peatland minimum harvest volume (Step 8); first thinning volume threshold (Step 9) |
-| `src/lib/ai/config.ts` | `getOptimalAge()` fallback to mesic |
+| `src/lib/ai/schedule.ts` | Skip-thinning-when-clearcut (Step 1); widened tending windows (Step 2a); debug logging for stands 83.0, 138.0, 181.0, 183.0 (Steps 2b, 3); seed_tree no-clearcut (Step 2c); post-planting tending chain (Step 4); SimStand init with developmentClass, plantingYear, thinningCount (Steps 5, 10); peatland thinning cap (Step 7); peatland minimum harvest volume (Step 8); first thinning volume threshold (Step 9) |
+| `src/lib/ai/config.ts` | `getOptimalAge()` fallback to mesic (Step 6) |
+| New migration SQL | `013_add_compartment_metrics.sql` — add stem_count, mean_height, mean_diameter, age, basal_area to `compartment_species`; add `stem_count` to `compartments` (Step 11) |
+| `csv-importer.ts` | Save parsed per-species stem_count, mean_height, mean_diameter, age, basal_area to DB (Step 12) |
+| `wfs-client.ts` | Save stem_count/height/diameter if available from WFS (Step 13) |
+| Tests | New unit tests T1–T14; update existing tests for widened windows |
 
 ---
 
@@ -362,3 +457,48 @@ After fixes:
 8. Peatland stands: no stand has more than 2 thinning operations total
 9. Peatland harvests: no harvest operation on peatland has removal < 40 m³/ha
 10. First thinnings: all have volume ≥ 50 m³/ha at time of spawning
+
+---
+
+## Test Plan
+
+### Unit tests (new)
+
+| # | Test | Expected |
+|---|------|----------|
+| T1 | Clearcut-eligible stand with high BA | Only `clear_cut` spawned, no `thinning` |
+| T2 | Stand with BA≥18, age≥30, volume<50 m³/ha | No `first_thinning` spawned |
+| T3 | Stand with BA≥18, age≥30, volume≥50 m³/ha | `first_thinning` spawned |
+| T4 | Peatland stand, thinningCount=2, BA≥22 | No thinning spawned |
+| T5 | Peatland stand, thinningCount=1, BA≥22 | Thinning spawned, thinningCount incremented to 2 |
+| T6 | Peatland stand, area=0.3ha, volume=20m³ | Thinning skipped (removal 5.6m³ → 18.7 m³/ha < 40) |
+| T7 | Peatland stand, area=2ha, volume=200m³ | Thinning spawned (removal 56m³ → 28 m³/ha ≥ 40) |
+| T8 | seed_tree stand, age≥optMin | No `clear_cut` spawned; `selection_cutting` spawned |
+| T9 | Post-planting: plantingYear>0, 4 years elapsed | `early_tending` spawned (same key as age-based) |
+| T10 | Post-planting + age-based both eligible | Only one `early_tending` spawned (shared dedup key) |
+| T11 | Young stand age 2 with volume 0 | `early_tending` spawned (widened window) |
+| T12 | Stand age 28 with volume | `tending` spawned (widened window) |
+| T13 | getOptimalAge with unknown site_class | Falls back to `mesic` |
+| T14 | getOptimalAge with unknown species | Returns [80, 110] |
+
+### Updated existing tests
+
+| Test | Change |
+|------|--------|
+| `schedulePlan` returns PlanSummary | Verify new summary fields if any |
+| Young stand does NOT trigger clearcut or thinning | May now trigger `early_tending` with widened windows |
+| `trySplitStand` stub | No change (stays null) |
+
+### Integration tests
+
+| # | Test | Expected |
+|---|------|----------|
+| I1 | `maximum_growth_no_cap` 10-year plan vs reference | 20 common stands, ≥15 full matches, 0 mismatches |
+| I2 | Stand 83.0 | Thinning only, not clearcut |
+| I3 | Stand 128.0 | Clearcut only, no extra thinning |
+| I4 | Stand 138.0 | Pine planting, not spruce |
+| I5 | Stands 181.0, 183.0 | No clearcut on seed_tree stands |
+| I6 | 10 young stands | All receive tending operations |
+| I7 | Peatland thinning cap | No peatland stand > 2 thinnings |
+| I8 | Peatland min harvest | No peatland harvest removal < 40 m³/ha |
+| I9 | First thinning volume | All first thinnings ≥ 50 m³/ha at spawn time |
