@@ -127,6 +127,36 @@ Based on the no-cap validation, five issues remain:
 
 **Fix:** Track `plantingYear` on the stand state. Spawn early_tending when `year - plantingYear >= 3`.
 
+### 6. Peatland thinning limits (Tapio guidelines)
+
+**Source:** Tapio's ensiharvennus guidance: *"suometsissä on syytä rajoittaa harvennuskertoja"* — peatlands should limit thinning passes. Mänty 1–2 passes, kuusi 1–2 passes.
+
+**Evidence:** Our engine allows unlimited re-thinning on peatland stands as long as BA recovers above the threshold. In reality, peatland stands cannot sustain repeated thinnings due to slower growth and weaker root systems.
+
+**Root cause:** No tracking of how many times a peatland stand has been thinned. Each year the BA check passes, another thinning is spawned.
+
+**Fix:** Add `thinningCount` to `SimStand`. Track increments on each thinning/first_thinning apply. Cap at 2 on peatland — skip spawning when `soilType === "peatland" && thinningCount >= 2`.
+
+### 7. Minimum harvest volume on peatlands (Tapio guidelines)
+
+**Source:** Tapio: *"hakkuukertymän on suositeltavaa olla vähintään 40 m³/ha"* — harvest removal should be ≥40 m³/ha for operational profitability on peatlands.
+
+**Evidence:** Small peatland stands with low volume may spawn thinnings with trivial removal volumes (e.g., 0.5 ha × 20 m³/ha × 25% = 2.5 m³ removal). These are uneconomical to execute in practice.
+
+**Root cause:** The spawning logic only checks BA and age thresholds, not whether the resulting harvest volume is operationally viable.
+
+**Fix:** When spawning a thinning or clearcut on a peatland stand, compute `removalM3PerHa = removalM3 / areaHa`. If < 40, skip the operation — the stand is too small/young for a viable harvest.
+
+### 8. First thinning volume threshold (Tapio guidelines)
+
+**Source:** Tapio's ensiharvennus timing is based on dominant height (12–15m). Our age-based proxy is reasonable, but some stands reach the age threshold with too little standing volume.
+
+**Evidence:** A 30-year-old pine stand on poor site with low stocking may have BA ≥ 18 but volume as low as 30 m³/ha. Removing 25% (7.5 m³/ha) is not economically viable and may not benefit stand development.
+
+**Root cause:** No volume-per-hectare guard on first_thinning spawning. The BA threshold alone doesn't guarantee sufficient standing volume.
+
+**Fix:** When spawning `first_thinning`, additionally require `volumeM3 / areaHa ≥ 50`. This ensures the stand has built up enough volume before the first commercial thinning. Stands that meet the age+BA threshold but not the volume threshold will be re-checked each year as they grow.
+
 ---
 
 ## Implementation Plan
@@ -248,15 +278,83 @@ export function getOptimalAge(species: string, siteClass: string): [number, numb
 }
 ```
 
+### Step 8: Peatland thinning cap (schedule.ts, `spawnOperations` + apply section)
+
+Add `thinningCount` to `SimStand`:
+```typescript
+interface SimStand {
+  // ...existing fields
+  thinningCount: number;  // NEW
+}
+```
+
+In the thinning spawning block, add peatland guard:
+```typescript
+// Peatland thinning cap — Tapio recommends max 1-2 thinning passes
+if (s.soilType === "peatland" && s.thinningCount >= 2) {
+  // skip thinning — peatland stand at thinning limit
+  // fall through to tending checks
+} else if (s.basalArea >= firstThinThresh && s.ageYears >= minFirstAge && !s.spawnedTypes.has("first_thinning")) {
+  // ...existing first_thinning logic...
+} else if (s.basalArea >= thinThresh && s.ageYears >= minThinAge && !s.spawnedTypes.has("thinning")) {
+  // ...existing thinning logic...
+}
+```
+
+In the apply section, increment `thinningCount`:
+```typescript
+} else if (op.type === "thinning" || op.type === "first_thinning") {
+  // ...existing state mutation...
+  st.thinningCount++;  // NEW
+}
+```
+
+### Step 9: Peatland minimum harvest volume (schedule.ts, `spawnOperations`)
+
+In the thinning and clearcut spawning blocks, after computing `removal_m3`:
+```typescript
+// Peatland minimum harvest — Tapio recommends ≥40 m³/ha
+if (s.soilType === "peatland") {
+  const m3PerHa = removal_m3 / s.areaHa;
+  if (m3PerHa < 40) {
+    // Not enough volume for a viable peatland harvest — skip
+    // Leave spawnedTypes unset so it retries next year
+    continue;
+  }
+}
+```
+
+### Step 10: First thinning volume threshold (schedule.ts, `spawnOperations`)
+
+In the first_thinning spawning block, add a volume guard:
+```typescript
+if (s.basalArea >= firstThinThresh && s.ageYears >= minFirstAge && !s.spawnedTypes.has("first_thinning")) {
+  // Volume threshold — Tapio: first thinning needs sufficient standing volume
+  const m3PerHa = s.volumeM3 / s.areaHa;
+  if (m3PerHa < 50) continue; // not enough volume yet — wait for growth
+  // ...existing first_thinning spawn logic...
+}
+```
+
+### Step 11: SimStand initialization (schedule.ts, `runScheduleEngine`)
+
+Initialize new fields:
+```typescript
+stands.set(k.standId, {
+  // ...existing fields...
+  thinningCount: 0,     // NEW
+  plantingYear: 0,      // for Step 5
+});
+```
+
 ---
 
 ## Files to Modify
 
 | File | Changes |
 |------|---------|
-| `src/lib/ai/schedule.ts` | Year-1 backlog allowance; skip-thinning-when-clearcut move continue; widened tending windows; seed_tree no-clearcut; post-planting tending chain; add `developmentClass` + `plantingYear` to `SimStand`; species debug for 138.0 |
+| `src/lib/ai/schedule.ts` | Year-1 backlog allowance; skip-thinning-when-clearcut move continue; widened tending windows; seed_tree no-clearcut; post-planting tending chain; add `developmentClass` + `plantingYear` + `thinningCount` to `SimStand`; species debug for 138.0; peatland thinning cap (Step 8); peatland minimum harvest volume (Step 9); first thinning volume threshold (Step 10); SimStand initialization (Step 11) |
 | `src/lib/ai/config.ts` | `getOptimalAge()` fallback to mesic |
-| `src/lib/ai/generate-plan.ts` | Pass `developmentClass` through enrichment to engine (if not already) |
 
 ---
 
@@ -271,3 +369,6 @@ After fixes:
 6. Stands 181.0, 183.0: selection_cutting or no cutting, not clearcut
 7. 10 young stands: all receive tending operations
 8. Generate `maximum_growth_balanced` 10-year plan → year 1 should have all clearcuts
+9. Peatland stands: no stand has more than 2 thinning operations total
+10. Peatland harvests: no harvest operation on peatland has removal < 40 m³/ha
+11. First thinnings: all have volume ≥ 50 m³/ha at time of spawning
