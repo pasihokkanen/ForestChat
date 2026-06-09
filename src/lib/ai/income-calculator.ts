@@ -14,12 +14,12 @@ interface RawSpecies {
 }
 
 /** Map operation type to price tier */
-function tierForType(type: string): "uudistushakkuu" | "harvennus" | "ensiharvennus" {
+function tierForType(type: string): "clear_cut" | "thinning" | "first_thinning" {
   const t = type.toLowerCase();
-  if (t === "clear_cut" || t === "päätehakkuu" || t === "avohakkuu") return "uudistushakkuu";
-  if (t === "first_thinning" || t === "ensiharvennus") return "ensiharvennus";
-  if (t === "selection_cutting" || t === "poimintahakkuu") return "harvennus";
-  return "harvennus"; // thinning, harvennus, etc.
+  if (t === "clear_cut" || t === "päätehakkuu" || t === "avohakkuu") return "clear_cut";
+  if (t === "first_thinning" || t === "ensiharvennus") return "first_thinning";
+  if (t === "selection_cutting" || t === "poimintahakkuu") return "thinning";
+  return "thinning"; // thinning, harvennus, etc.
 }
 
 /**
@@ -29,7 +29,7 @@ function tierForType(type: string): "uudistushakkuu" | "harvennus" | "ensiharven
 function speciesValue(
   speciesM3: number,
   tukkiPct: number,
-  tier: "uudistushakkuu" | "harvennus" | "ensiharvennus",
+  tier: "clear_cut" | "thinning" | "first_thinning",
   species: string
 ): number {
   const prices = getPrices(tier, species);
@@ -85,9 +85,9 @@ export async function calculateOperationIncome(
   } else {
     // Fallback: whole compartment as single species
     // For thinning, we need to adjust: thinning price / clear-cut price ratio
-    if (tier !== "uudistushakkuu") {
+    if (tier !== "clear_cut") {
       // Compute what the full clear-cut value would be
-      const ccPrices = getPrices("uudistushakkuu", species);
+      const ccPrices = getPrices("clear_cut", species);
       const tierPrices = getPrices(tier, species);
       const ccValue = totalM3 * (ccPrices.tukki + ccPrices.kuitu) / 2; // rough avg
       const ratio = (tierPrices.tukki + tierPrices.kuitu) / (ccPrices.tukki + ccPrices.kuitu);

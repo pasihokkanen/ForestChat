@@ -426,7 +426,7 @@ function spawnOperations(
 
   // --- Helper: price ratio for thinning tier vs clearcut ---
   const spKey = state.species === "birch" ? "silver_birch" : state.species;
-  const up = getPrices("uudistushakkuu", spKey);
+  const up = getPrices("clear_cut", spKey);
   const upSum = up.tukki + up.kuitu;
 
   // --- Check clearcut eligibility ---
@@ -449,15 +449,15 @@ function spawnOperations(
   }
 
   // --- Check thinning eligibility (skip regeneration_ready — those get clearcuts) ---
-  const thinThresh = THINNING_BA["harvennus"]?.[state.species] ?? 22;
-  const firstThinThresh = THINNING_BA["ensiharvennus"]?.[state.species] ?? 18;
+  const thinThresh = THINNING_BA["thinning"]?.[state.species] ?? 22;
+  const firstThinThresh = THINNING_BA["first_thinning"]?.[state.species] ?? 18;
   const minFirstAge = MIN_AGE_FIRST_THINNING?.[state.species] ?? 30;
   const minThinAge = MIN_AGE_THINNING?.[state.species] ?? 40;
   const canThin = !state.developmentClass.includes("mature_thinning") &&
                   !state.developmentClass.includes("regeneration_ready");
 
   if (state.basalArea >= firstThinThresh && state.ageYears >= minFirstAge && canThin) {
-    const ep = getPrices("ensiharvennus", spKey);
+    const ep = getPrices("first_thinning", spKey);
     const ratio = (ep.tukki + ep.kuitu) / upSum;
     const removalM3 = Math.round(state.volumeM3 * 0.25);
     spawned.push({
@@ -471,7 +471,7 @@ function spawnOperations(
       dueYear: year,
     });
   } else if (state.basalArea >= thinThresh && state.ageYears >= minThinAge) {
-    const hp = getPrices("harvennus", spKey);
+    const hp = getPrices("thinning", spKey);
     const ratio = (hp.tukki + hp.kuitu) / upSum;
     const removalM3 = Math.round(state.volumeM3 * 0.28);
     spawned.push({

@@ -6,6 +6,7 @@ const OP_MAP: Record<string, Record<Language, string>> = {
   thinning: { en: "Thinning", fi: "Harvennus" },
   first_thinning: { en: "First Thinning", fi: "Ensiharvennus" },
   selection_cutting: { en: "Selection Cutting", fi: "Poimintahakkuu" },
+  overstory_removal: { en: "Overstory Removal", fi: "Siemenpuiden poisto" },
   tending: { en: "Tending", fi: "Taimikonhoito" },
   early_tending: { en: "Early Tending", fi: "Taimikon varhaishoito" },
   pre_clearance: { en: "Pre-clearance", fi: "Ennakkoraivaus" },

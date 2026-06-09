@@ -8,7 +8,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Compartment, Operation } from "@/types/database";
 import { calculateOperationIncome } from "./income-calculator";
-import { COSTS, normalizeOperationType } from "./config";
+import { COSTS, normalizeOperationType, getRemovalPct } from "./config";
 import { serverMsg } from "../i18n";
 import type { Language } from "../i18n";
 
@@ -17,6 +17,7 @@ const VALID_TYPES = [
   "thinning",
   "first_thinning",
   "selection_cutting",
+  "overstory_removal",
   "tending",
   "early_tending",
   "site_prep",
@@ -59,12 +60,7 @@ export async function addOperation(
   const year = args.year as number;
   const type = normalizeType(args.type as string);
   // Type-aware removal percentage defaults (silvicultural ops get 0)
-  const removalPct = (args.removal_pct as number) ?? ({
-    clear_cut: 100,
-    thinning: 28,
-    first_thinning: 25,
-    selection_cutting: 50,
-  } as Record<string, number>)[type] ?? 0;
+  const removalPct = (args.removal_pct as number) ?? getRemovalPct(type);
 
   if (!standId || !year || !type) {
     return { success: false, result: "", error: "Required: stand_id, year, type" };

@@ -17,23 +17,23 @@ import {
 } from "@/lib/ai/config";
 
 describe("Forestry Config", () => {
-  it("has correct timber prices for uudistushakkuu pine", () => {
-    expect(PRICES.uudistushakkuu.pine.tukki).toBeCloseTo(78.99, 1);
-    expect(PRICES.uudistushakkuu.pine.kuitu).toBeCloseTo(25.28, 1);
+  it("has correct timber prices for clear_cut pine", () => {
+    expect(PRICES.clear_cut.pine.tukki).toBeCloseTo(78.99, 1);
+    expect(PRICES.clear_cut.pine.kuitu).toBeCloseTo(25.28, 1);
   });
 
-  it("has correct timber prices for uudistushakkuu spruce", () => {
-    expect(PRICES.uudistushakkuu.spruce.tukki).toBeCloseTo(82.52, 1);
-    expect(PRICES.uudistushakkuu.spruce.kuitu).toBeCloseTo(26.36, 1);
+  it("has correct timber prices for clear_cut spruce", () => {
+    expect(PRICES.clear_cut.spruce.tukki).toBeCloseTo(82.52, 1);
+    expect(PRICES.clear_cut.spruce.kuitu).toBeCloseTo(26.36, 1);
   });
 
   it("getPrices falls back to pine for unknown species", () => {
-    const prices = getPrices("uudistushakkuu", "Unknown");
+    const prices = getPrices("clear_cut", "Unknown");
     expect(prices.tukki).toBeCloseTo(78.99, 1);
   });
 
   it("getPrices maps birch to silver_birch", () => {
-    const prices = getPrices("uudistushakkuu", "birch");
+    const prices = getPrices("clear_cut", "birch");
     expect(prices.tukki).toBeCloseTo(61.76, 1);
   });
 
@@ -64,8 +64,8 @@ describe("Forestry Config", () => {
   });
 
   it("THINNING_BA has correct first thinning thresholds", () => {
-    expect(THINNING_BA.ensiharvennus.pine).toBe(16);
-    expect(THINNING_BA.ensiharvennus.spruce).toBe(24);
+    expect(THINNING_BA.first_thinning.pine).toBe(16);
+    expect(THINNING_BA.first_thinning.spruce).toBe(24);
   });
 
   it("MIN_AGE_FIRST_THINNING has correct values", () => {

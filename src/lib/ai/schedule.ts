@@ -9,7 +9,7 @@
 // on-demand from the current simulated state.
 
 import type { StandData, PlannedOperation, PlanGoal, YearPlan, PlanSummary } from "./types";
-import { getOptimalAge, THINNING_BA, MIN_AGE_FIRST_THINNING, MIN_AGE_THINNING, getPrices, COSTS } from "./config";
+import { getOptimalAge, THINNING_BA, MIN_AGE_FIRST_THINNING, MIN_AGE_THINNING, getPrices, COSTS, OPERATION_DEFAULTS } from "./config";
 import { getGrowthRate } from "./chart-engine";
 import * as fs from "fs";
 
@@ -53,10 +53,14 @@ interface SimStand {
   basalArea: number;
   valueEur: number;
   cleared: boolean;
+  /** Original development class from DB (seed_tree, shelterwood, etc.) */
+  developmentClass: string;
   /** Year when clearcut happened (0 = not cleared). Used for regen delay timing. */
   regenDelayStarted: number;
   /** Year when stand was last tended. 0 = never. Prevents re-tending. */
   tendedYear: number;
+  /** Year when seed_tree/shelterwood stand was first seen (0 = not applicable). */
+  overstoryStarted: number;
   /** Set of operation types already spawned for this stand (prevents duplicates). */
   spawnedTypes: Set<string>;
   growthMultiplier: number;
@@ -86,6 +90,8 @@ interface SchedulingStrategy {
   regenDelayYears(): number;
   /** Species preference for replanting after clearcut. */
   regenerationSpecies(stand: StandData): "spruce" | "pine" | "mixed";
+  /** Years to wait after seed_tree/shelterwood appears before overstory_removal. */
+  overstoryDelayYears(): number;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -114,10 +120,10 @@ function makeMinimalStand(s: SimStand): StandData {
 }
 
 /** Get the price ratio of a thinning tier vs clearcut tier for a species. */
-function thinningPriceRatio(species: string, tier: "ensiharvennus" | "harvennus"): number {
+function thinningPriceRatio(species: string, tier: "first_thinning" | "thinning"): number {
   const sp = species === "birch" ? "silver_birch" : species;
   const tp = getPrices(tier, sp);
-  const cp = getPrices("uudistushakkuu", sp);
+  const cp = getPrices("clear_cut", sp);
   const tSum = tp.tukki + tp.kuitu;
   const cSum = cp.tukki + cp.kuitu;
   return cSum > 0 ? tSum / cSum : 0.7;
@@ -196,35 +202,36 @@ function spawnOperations(
     if (ccEligible && s.volumeM3 > 10 && !s.spawnedTypes.has("clear_cut")) {
       s.spawnedTypes.add("clear_cut");
       const opType = goal === "carbon_storage" ? "selection_cutting" : "clear_cut";
-      const removalFrac = opType === "selection_cutting" ? 0.5 : 1.0;
+      const def = OPERATION_DEFAULTS[opType];
       spawned.push({
         stand: makeMinimalStand(s),
         type: opType,
         year,
-        income_eur: Math.round(s.valueEur * removalFrac),
+        income_eur: Math.round(s.valueEur * def.removalFraction),
         cost_eur: 0,
-        removal_m3: Math.round(s.volumeM3 * removalFrac),
+        removal_m3: Math.round(s.volumeM3 * def.removalFraction),
         notes: `${opType === "selection_cutting" ? "Selection cutting (carbon storage)" : "Clearcut"} at age ${s.ageYears}y [${optMin}–${optMax}y]`,
         dueYear: year,
       });
-      continue; // don't also spawn thinning on a stand that's being clearcut
+      continue;
     }
 
     // ── Thinning eligibility ──
-    const firstThinThresh = THINNING_BA["ensiharvennus"]?.[s.species] ?? 18;
-    const thinThresh = THINNING_BA["harvennus"]?.[s.species] ?? 22;
+    const firstThinThresh = THINNING_BA["first_thinning"]?.[s.species] ?? 18;
+    const thinThresh = THINNING_BA["thinning"]?.[s.species] ?? 22;
     const minFirstAge = MIN_AGE_FIRST_THINNING?.[s.species] ?? 30;
     const minThinAge = MIN_AGE_THINNING?.[s.species] ?? 40;
 
     if (s.basalArea >= firstThinThresh && s.ageYears >= minFirstAge && !s.spawnedTypes.has("first_thinning")) {
       s.spawnedTypes.add("first_thinning");
-      const ratio = thinningPriceRatio(s.species, "ensiharvennus");
-      const removal = s.volumeM3 * 0.25;
+      const def = OPERATION_DEFAULTS["first_thinning"];
+      const ratio = thinningPriceRatio(s.species, "first_thinning");
+      const removal = s.volumeM3 * def.removalFraction;
       spawned.push({
         stand: makeMinimalStand(s),
         type: "first_thinning",
         year,
-        income_eur: Math.round(s.valueEur * 0.25 * ratio),
+        income_eur: Math.round(s.valueEur * def.removalFraction * ratio),
         cost_eur: 0,
         removal_m3: Math.round(removal),
         notes: `First thinning BA=${s.basalArea.toFixed(0)} age=${s.ageYears}y`,
@@ -232,13 +239,14 @@ function spawnOperations(
       });
     } else if (s.basalArea >= thinThresh && s.ageYears >= minThinAge && !s.spawnedTypes.has("thinning")) {
       s.spawnedTypes.add("thinning");
-      const ratio = thinningPriceRatio(s.species, "harvennus");
-      const removal = s.volumeM3 * 0.28;
+      const def = OPERATION_DEFAULTS["thinning"];
+      const ratio = thinningPriceRatio(s.species, "thinning");
+      const removal = s.volumeM3 * def.removalFraction;
       spawned.push({
         stand: makeMinimalStand(s),
         type: "thinning",
         year,
-        income_eur: Math.round(s.valueEur * 0.28 * ratio),
+        income_eur: Math.round(s.valueEur * def.removalFraction * ratio),
         cost_eur: 0,
         removal_m3: Math.round(removal),
         notes: `Thinning BA=${s.basalArea.toFixed(0)} age=${s.ageYears}y`,
@@ -246,9 +254,41 @@ function spawnOperations(
       });
     }
 
+    // ── Overstory removal (seed tree / shelterwood stands) ──
+    // "Ylispuidenpoisto" — remove remaining overstory trees once
+    // the new seedling generation is established underneath.
+    // Tapio guidelines: "kun taimikko on vakiintunut" (seedlings established).
+    // Wait overstoryDelayYears() after first encountering the stand.
+    const hasOverstory = s.developmentClass?.includes("seed_tree") ||
+                         s.developmentClass?.includes("shelterwood");
+    if (hasOverstory && !s.spawnedTypes.has("overstory_removal")) {
+      // First time seeing this stand — record the year
+      if (s.overstoryStarted === 0) {
+        s.overstoryStarted = year;
+      }
+      // Check if enough time has passed for seedlings to establish
+      const delay = strategy.overstoryDelayYears();
+      const yearsElapsed = year - s.overstoryStarted;
+      if (yearsElapsed >= delay && s.volumeM3 > 0) {
+        s.spawnedTypes.add("overstory_removal");
+        spawned.push({
+          stand: makeMinimalStand(s),
+          type: "overstory_removal",
+          year,
+          income_eur: Math.round(s.valueEur),
+          cost_eur: 0,
+          removal_m3: Math.round(s.volumeM3),
+          notes: `Overstory removal (seed trees, ~${yearsElapsed}y since seed cut), age ${s.ageYears}y`,
+          dueYear: year,
+        });
+        continue;
+      }
+    }
+
     // ── Tending eligibility (seedling stands, once only) ──
     if (s.tendedYear === 0 && !s.spawnedTypes.has("tending") && !s.spawnedTypes.has("early_tending")) {
       if (s.ageYears >= 3 && s.ageYears <= 12) {
+        const def = OPERATION_DEFAULTS["early_tending"];
         s.spawnedTypes.add("early_tending");
         spawned.push({
           stand: makeMinimalStand(s),
@@ -256,11 +296,12 @@ function spawnOperations(
           year,
           income_eur: 0,
           cost_eur: Math.round(COSTS.early_tending * s.areaHa),
-          removal_m3: Math.round(s.volumeM3 * 0.4),
+          removal_m3: Math.round(s.volumeM3 * def.removalFraction),
           notes: `Early tending at age ${s.ageYears}y`,
           dueYear: year,
         });
       } else if (s.ageYears >= 10 && s.ageYears <= 25) {
+        const def = OPERATION_DEFAULTS["tending"];
         s.spawnedTypes.add("tending");
         spawned.push({
           stand: makeMinimalStand(s),
@@ -268,7 +309,7 @@ function spawnOperations(
           year,
           income_eur: 0,
           cost_eur: Math.round(COSTS.tending * s.areaHa),
-          removal_m3: Math.round(s.volumeM3 * 0.3),
+          removal_m3: Math.round(s.volumeM3 * def.removalFraction),
           notes: `Tending at age ${s.ageYears}y`,
           dueYear: year,
         });
@@ -287,6 +328,7 @@ const OP_TYPE_GROUP: Record<string, number> = {
   first_thinning: 0,
   thinning: 0,
   selection_cutting: 0,
+  overstory_removal: 0,
   clear_cut: 1,
   // Non-harvest ops get lowest priority — they don't consume volume cap
   early_tending: 2,
@@ -350,6 +392,7 @@ const aggressiveStrategy: SchedulingStrategy = {
   regenDelayYears: () => 0,
   regenerationSpecies: (stand) =>
     stand.site_class.includes("mesic") || stand.site_class.includes("herb-rich") ? "spruce" : "pine",
+  overstoryDelayYears: () => 5,
 };
 
 const noCapStrategy: SchedulingStrategy = {
@@ -362,6 +405,7 @@ const noCapStrategy: SchedulingStrategy = {
   regenDelayYears: () => 0,
   regenerationSpecies: (stand) =>
     stand.site_class.includes("mesic") || stand.site_class.includes("herb-rich") ? "spruce" : "pine",
+  overstoryDelayYears: () => 5,
 };
 
 const balancedGrowthStrategy: SchedulingStrategy = {
@@ -388,6 +432,7 @@ const balancedGrowthStrategy: SchedulingStrategy = {
   regenDelayYears: () => 1,
   regenerationSpecies: (stand) =>
     stand.site_class.includes("mesic") || stand.site_class.includes("herb-rich") ? "spruce" : "pine",
+  overstoryDelayYears: () => 7,
 };
 
 const carbonStorageStrategy: SchedulingStrategy = {
@@ -413,6 +458,7 @@ const carbonStorageStrategy: SchedulingStrategy = {
   },
   regenDelayYears: () => 2,
   regenerationSpecies: () => "spruce",
+  overstoryDelayYears: () => 10,
 };
 
 const balancedStrategy: SchedulingStrategy = {
@@ -423,7 +469,8 @@ const balancedStrategy: SchedulingStrategy = {
     // Separates the pre-sorted candidates into thinning group and clearcut group,
     // then alternates picking from each.
     const groupA = candidates.filter(
-      (op) => op.type === "thinning" || op.type === "first_thinning" || op.type === "selection_cutting",
+      (op) => op.type === "thinning" || op.type === "first_thinning" ||
+             op.type === "selection_cutting" || op.type === "overstory_removal",
     );
     const groupB = candidates.filter((op) => op.type === "clear_cut");
     const nonHarvest = candidates.filter(
@@ -471,6 +518,7 @@ const balancedStrategy: SchedulingStrategy = {
   regenDelayYears: () => 1,
   regenerationSpecies: (stand) =>
     stand.site_class.includes("mesic") || stand.site_class.includes("herb-rich") ? "spruce" : "pine",
+  overstoryDelayYears: () => 7,
 };
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -563,8 +611,10 @@ export function runScheduleEngine(
       basalArea: k.ba,
       valueEur: k.valueEur,
       cleared: false,
+      developmentClass: k.developmentClass,
       regenDelayStarted: 0,
       tendedYear: 0,
+      overstoryStarted: 0,
       spawnedTypes: new Set(),
       growthMultiplier,
     });
@@ -628,11 +678,11 @@ export function runScheduleEngine(
 
     // ── DEBUG: log year-by-year scheduling details ──
     const harvestOps = scheduled.filter(
-      (o) => ["clear_cut", "thinning", "first_thinning", "selection_cutting"].includes(o.type),
+      (o) => ["clear_cut", "thinning", "first_thinning", "selection_cutting", "overstory_removal"].includes(o.type),
     );
     const schedHarvestM3 = harvestOps.reduce((s, o) => s + o.removal_m3, 0);
     const remainHarvestM3 = remaining
-      .filter((o) => ["clear_cut", "thinning", "first_thinning", "selection_cutting"].includes(o.type))
+      .filter((o) => ["clear_cut", "thinning", "first_thinning", "selection_cutting", "overstory_removal"].includes(o.type))
       .reduce((s, o) => s + o.removal_m3, 0);
 
     if (scheduled.length > 0 || remaining.length > 0) {
@@ -683,6 +733,14 @@ export function runScheduleEngine(
         st.volumeM3 = Math.max(0, st.volumeM3 - removal);
         st.basalArea = Math.max(0, st.basalArea * (1 - Math.min(pct, 1)));
         st.valueEur = Math.max(0, Math.round(st.valueEur * (1 - Math.min(pct, 1))));
+      } else if (op.type === "overstory_removal") {
+        // Remove overstory trees — seedlings remain underneath.
+        // Unlike clearcut, the stand is NOT marked cleared — growth continues.
+        st.volumeM3 = st.areaHa * 1; // nominal seedling volume
+        st.basalArea = 2;             // seedling BA
+        st.valueEur = Math.round(st.areaHa * 50);
+        st.developmentClass = "seedling";
+        st.spawnedTypes.clear();
       } else if (op.type === "thinning" || op.type === "first_thinning") {
         const removal = op.removal_m3;
         const pct = st.volumeM3 > 0 ? removal / st.volumeM3 : 0;
@@ -795,6 +853,7 @@ export function schedulePlan(
         case "thinning":
         case "first_thinning":
         case "selection_cutting":
+        case "overstory_removal":
           yp.thinnings.push(op);
           totalIncome += op.income_eur;
           harvestTotal += op.removal_m3;

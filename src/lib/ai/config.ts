@@ -6,9 +6,9 @@ interface PriceSet {
 }
 
 // ─── Timber prices (UPM vko 19/2026, Central Finland) ───
-// Three tiers: uudistushakkuu, harvennus, ensiharvennus
+// Keys match operation type names.
 export const PRICES: Record<string, Record<string, PriceSet>> = {
-  uudistushakkuu: {
+  clear_cut: {
     pine:        { tukki: 78.99, kuitu: 25.28 },
     spruce:      { tukki: 82.52, kuitu: 26.36 },
     silver_birch:{ tukki: 61.76, kuitu: 25.79 },
@@ -16,7 +16,7 @@ export const PRICES: Record<string, Record<string, PriceSet>> = {
     larch:       { tukki: 58.00, kuitu: 20.00 },
     grey_alder:  { tukki: 15.00, kuitu: 12.00 },
   },
-  harvennus: {
+  thinning: {
     pine:        { tukki: 68.66, kuitu: 20.44 },
     spruce:      { tukki: 70.32, kuitu: 20.78 },
     silver_birch:{ tukki: 53.73, kuitu: 21.58 },
@@ -24,7 +24,7 @@ export const PRICES: Record<string, Record<string, PriceSet>> = {
     larch:       { tukki: 52.00, kuitu: 18.00 },
     grey_alder:  { tukki: 12.00, kuitu: 10.00 },
   },
-  ensiharvennus: {
+  first_thinning: {
     pine:        { tukki: 50.93, kuitu: 15.96 },
     spruce:      { tukki: 48.20, kuitu: 17.01 },
     silver_birch:{ tukki: 37.83, kuitu: 16.20 },
@@ -83,10 +83,36 @@ export const PRICE_REGION_MULTIPLIERS: Record<string, number> = {
   "9": 1.00,   // KOKO MAA (fallback)
 };
 
+// ─── Operation defaults (single source of truth) ───
+// removalPct: percentage stored in DB operations.removal_pct
+// removalFraction: fraction used in simulation (volumeM3 × this)
+// priceTier: maps to PRICES lookup (empty string = non-harvest, no income)
+
+export interface OperationDefaults {
+  removalPct: number;
+  removalFraction: number;
+  priceTier: string;
+}
+
+export const OPERATION_DEFAULTS: Record<string, OperationDefaults> = {
+  clear_cut:          { removalPct: 100, removalFraction: 1.0,  priceTier: "clear_cut" },
+  thinning:           { removalPct: 28,  removalFraction: 0.28, priceTier: "thinning" },
+  first_thinning:     { removalPct: 25,  removalFraction: 0.25, priceTier: "first_thinning" },
+  selection_cutting:  { removalPct: 50,  removalFraction: 0.50, priceTier: "thinning" },
+  overstory_removal:  { removalPct: 100, removalFraction: 1.0,  priceTier: "clear_cut" },
+  early_tending:      { removalPct: 40,  removalFraction: 0.40, priceTier: "" },
+  tending:            { removalPct: 30,  removalFraction: 0.30, priceTier: "" },
+};
+
+/** Get the removal percentage for an operation type (for DB storage). */
+export function getRemovalPct(type: string): number {
+  return OPERATION_DEFAULTS[type]?.removalPct ?? 0;
+}
+
 // ─── Thinning thresholds ───
 export const THINNING_BA: Record<string, Record<string, number>> = {
-  ensiharvennus: { pine: 16, spruce: 24, downy_birch: 16, silver_birch: 16, larch: 18, grey_alder: 16 },
-  harvennus:     { pine: 20, spruce: 26, downy_birch: 18, silver_birch: 18, larch: 20, grey_alder: 18 },
+  first_thinning: { pine: 16, spruce: 24, downy_birch: 16, silver_birch: 16, larch: 18, grey_alder: 16 },
+  thinning:       { pine: 20, spruce: 26, downy_birch: 18, silver_birch: 18, larch: 20, grey_alder: 18 },
 };
 
 export const MIN_AGE_FIRST_THINNING: Record<string, number> = { pine: 30, spruce: 25, downy_birch: 20, silver_birch: 20, larch: 25, grey_alder: 20 };
@@ -100,6 +126,7 @@ export const OPERATION_TYPE_DISPLAY: Record<string, string> = {
   thinning: "Thinning",
   first_thinning: "First Thinning",
   selection_cutting: "Selection Cutting",
+  overstory_removal: "Overstory Removal",
   tending: "Tending",
   early_tending: "Early Tending",
   pre_clearance: "Pre-clearance",
@@ -128,6 +155,9 @@ export const FINNISH_TO_SYSTEM: Record<string, string> = {
   first_thinning: "first_thinning",
   poimintahakkuu: "selection_cutting",
   selection_cutting: "selection_cutting",
+  ylispuidenpoisto: "overstory_removal",
+  ylispuunpoisto: "overstory_removal",
+  overstory_removal: "overstory_removal",
   taimikonhoito: "tending",
   tending: "tending",
   "taimikon varhaishoito": "early_tending",

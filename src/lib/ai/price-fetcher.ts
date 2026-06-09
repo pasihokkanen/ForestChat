@@ -95,9 +95,9 @@ async function fetchLukePrices(region: string): Promise<PriceData | null> {
 
       // Parse the response into PriceData
       const prices: Record<string, Record<string, TimberPrice>> = {
-        uudistushakkuu: {},
-        harvennus: {},
-        ensiharvennus: {},
+        clear_cut: {},
+        thinning: {},
+        first_thinning: {},
       };
 
       for (const row of data.data) {
@@ -105,10 +105,9 @@ async function fetchLukePrices(region: string): Promise<PriceData | null> {
         const value = parseFloat(row.values[0]);
         if (isNaN(value)) continue;
 
-        // Map HAKT code to tier
-        const tier = hakT === "8021" ? "uudistushakkuu"
-          : hakT === "8022" ? "ensiharvennus"
-          : hakT === "8023" ? "harvennus"
+        const tier = hakT === "8021" ? "clear_cut"
+          : hakT === "8022" ? "first_thinning"
+          : hakT === "8023" ? "thinning"
           : null;
         if (!tier) continue;
 
@@ -237,11 +236,11 @@ export async function getOperationPrice(
 ): Promise<TimberPrice> {
   const { prices } = await getPricesForRegion(supabase, region);
 
-  const tier = operationType === "clear_cut" ? "uudistushakkuu"
-    : operationType === "first_thinning" ? "ensiharvennus"
-    : operationType === "thinning" || operationType === "selection_cutting" ? "harvennus"
-    : "harvennus";
+  const tier = operationType === "clear_cut" ? "clear_cut"
+    : operationType === "first_thinning" ? "first_thinning"
+    : operationType === "thinning" || operationType === "selection_cutting" ? "thinning"
+    : "thinning";
 
   const sp = species === "birch" ? "silver_birch" : species;
-  return prices[tier]?.[sp] ?? prices.harvennus?.pine ?? { tukki: 70, kuitu: 20 };
+  return prices[tier]?.[sp] ?? prices.thinning?.pine ?? { tukki: 70, kuitu: 20 };
 }

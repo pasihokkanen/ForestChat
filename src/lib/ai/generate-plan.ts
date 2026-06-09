@@ -12,7 +12,7 @@ import { schedulePlan } from "./schedule";
 import { serverMsg } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
 import { getPricesForRegion } from "./price-fetcher";
-import { classifySite, detectPeatland, PRICES } from "./config";
+import { classifySite, detectPeatland, PRICES, getRemovalPct } from "./config";
 import { getGrowthRate } from "./chart-engine";
 
 interface GeneratePlanArgs {
@@ -48,7 +48,7 @@ function computeStandValue(
   species: RawSpecies[],
   prices?: Record<string, Record<string, { tukki: number; kuitu: number }>>,
 ): { valueEur: number; logM3: number; pulpM3: number } {
-  const tier = "uudistushakkuu";
+  const tier = "clear_cut";
   let totalValue = 0;
   let totalLog = 0;
   let totalPulp = 0;
@@ -254,20 +254,12 @@ export async function generatePlan(
           }
         }
         if (comp) {
-          const removalPct =
-            op.type === "clear_cut" || op.type === "selection_cutting" ? 100
-            : op.type === "thinning" ? 28
-            : op.type === "first_thinning" ? 25
-            : op.type === "early_tending" ? 40
-            : op.type === "tending" ? 30
-            : 0;
-
           allPlanOps.push({
             compartment_id: comp.id,
             forest_id: forestId,
             type: op.type,
             year: yp.year,
-            removal_pct: removalPct,
+            removal_pct: getRemovalPct(op.type),
             income_eur: op.income_eur,
             cost_eur: op.cost_eur,
             notes: op.notes,
