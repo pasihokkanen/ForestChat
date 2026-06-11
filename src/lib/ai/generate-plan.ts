@@ -306,6 +306,22 @@ export async function generatePlan(
           }
         }
         if (comp) {
+          // Encode pre-operation simulated state into notes as JSON after "|||" delimiter
+          const preState = {
+            age_years: op.stand.ageYears,
+            volume_m3: Math.round(op.stand.volumeM3),
+            area_ha: op.stand.areaHa,
+            ba: Math.round(op.stand.ba * 10) / 10,
+            stem_count: op.stand.stemCount,
+            mean_height: Math.round(op.stand.meanHeight * 10) / 10,
+            mean_diameter: Math.round(op.stand.meanDiameter * 10) / 10,
+            value_eur: Math.round(op.stand.valueEur),
+            main_species: op.stand.mainSpecies,
+            development_class: op.stand.developmentClass,
+            site_type: op.stand.siteType,
+          };
+          const notesWithState = `${op.notes}|||${JSON.stringify(preState)}`;
+
           allPlanOps.push({
             compartment_id: comp.id,
             forest_id: forestId,
@@ -314,7 +330,7 @@ export async function generatePlan(
             removal_pct: getRemovalPct(op.type),
             income_eur: op.income_eur,
             cost_eur: op.cost_eur,
-            notes: op.notes,
+            notes: notesWithState,
             created_by: "ai",
           });
         }

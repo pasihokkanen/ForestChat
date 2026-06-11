@@ -280,17 +280,34 @@ export default function OperationList({ map }: OperationListProps) {
     setGlobalFilter("");
   };
 
+  // Parse pre-operation simulated state from notes (stored as "...|||{json}" suffix)
+  interface PreOpState {
+    age_years: number; volume_m3: number; area_ha: number; ba: number;
+    stem_count: number; mean_height: number; mean_diameter: number;
+    value_eur: number; main_species: string; development_class: string; site_type: string;
+  }
+  function parsePreState(notes: string | null): PreOpState | null {
+    if (!notes) return null;
+    const idx = notes.lastIndexOf("|||");
+    if (idx === -1) return null;
+    try { return JSON.parse(notes.slice(idx + 3)) as PreOpState; } catch { return null; }
+  }
+
   const displayRows = useMemo(() => {
     let filtered = operations.map((op) => {
       const comp = compMap.get(op.compartment_id);
-      return { op, comp };
+      const pre = parsePreState(op.notes);
+      return { op, comp, pre };
     });
 
     if (yearFrom != null) filtered = filtered.filter((r) => r.op.year >= yearFrom);
     if (yearTo != null) filtered = filtered.filter((r) => r.op.year <= yearTo);
     if (typeFilter.size > 0) filtered = filtered.filter((r) => typeFilter.has(r.op.type));
     if (speciesFilter.size > 0 && compMap.size > 0) {
-      filtered = filtered.filter((r) => r.comp && speciesFilter.has(r.comp.main_species ?? ""));
+      filtered = filtered.filter((r) => {
+        const sp = r.pre?.main_species ?? r.comp?.main_species ?? "";
+        return speciesFilter.has(sp);
+      });
     }
     if (standFilter) {
       const standIds = standFilter.split(",").map((s) => s.trim()).filter(Boolean);
@@ -302,13 +319,15 @@ export default function OperationList({ map }: OperationListProps) {
       const lower = globalFilter.toLowerCase();
       filtered = filtered.filter((r) => {
         const comp = r.comp;
+        const pre = r.pre;
         return (
           r.op.type.toLowerCase().includes(lower) ||
           String(r.op.year).includes(lower) ||
           (comp?.stand_id ?? "").toLowerCase().includes(lower) ||
-          (comp?.main_species ?? "").toLowerCase().includes(lower) ||
-          (comp?.development_class ?? "").toLowerCase().includes(lower) ||
-          (comp ? String(comp.age_years ?? "") : "").includes(lower)
+          (pre?.main_species ?? comp?.main_species ?? "").toLowerCase().includes(lower) ||
+          (pre?.development_class ?? comp?.development_class ?? "").toLowerCase().includes(lower) ||
+          String(pre?.age_years ?? comp?.age_years ?? "").includes(lower) ||
+          String(pre?.volume_m3 ?? comp?.volume_m3 ?? "").includes(lower)
         );
       });
     }
@@ -323,14 +342,14 @@ export default function OperationList({ map }: OperationListProps) {
         case "stand_id": return row.comp?.stand_id ?? "";
         case "type": return row.op.type;
         case "year": return row.op.year;
-        case "age_years": return row.comp?.age_years ?? 0;
-        case "species": return row.comp?.main_species ?? "";
-        case "area_ha": return row.comp?.area_ha ?? 0;
-        case "volume_m3": return row.comp?.volume_m3 ?? 0;
+        case "age_years": return row.pre?.age_years ?? row.comp?.age_years ?? 0;
+        case "species": return row.pre?.main_species ?? row.comp?.main_species ?? "";
+        case "area_ha": return row.pre?.area_ha ?? row.comp?.area_ha ?? 0;
+        case "volume_m3": return row.pre?.volume_m3 ?? row.comp?.volume_m3 ?? 0;
         case "removal_pct": return row.op.removal_pct ?? 0;
         case "income_eur": return row.op.income_eur ?? 0;
         case "cost_eur": return row.op.cost_eur ?? 0;
-        case "development_class": return row.comp?.development_class ?? "";
+        case "development_class": return row.pre?.development_class ?? row.comp?.development_class ?? "";
         default: return "";
       }
     };
@@ -516,7 +535,7 @@ export default function OperationList({ map }: OperationListProps) {
             </tr>
           </thead>
           <tbody>
-            {displayRows.map(({ op, comp }) => {
+            {displayRows.map(({ op, comp, pre }) => {
               const standId = comp?.stand_id ?? "";
               const isStandHighlighted = highlightedStandIds.includes(standId);
               const isOpHighlighted = highlightedOperationIds.includes(op.id);
@@ -533,10 +552,10 @@ export default function OperationList({ map }: OperationListProps) {
                   <td className="px-2 py-1 font-mono text-xs">{standId}</td>
                   <td className="px-2 py-1 text-xs">{displayOp(op.type, language)}</td>
                   <td className="px-2 py-1 text-right">{op.year}</td>
-                  <td className="px-2 py-1 text-right">{comp?.age_years ?? ""}</td>
-                  <td className="px-2 py-1">{displaySpecies(comp?.main_species ?? "", language) || "—"}</td>
-                  <td className="px-2 py-1 text-right">{(comp?.area_ha ?? 0).toFixed(1)}</td>
-                  <td className="px-2 py-1 text-right">{Math.round(comp?.volume_m3 ?? 0).toLocaleString()}</td>
+                  <td className="px-2 py-1 text-right">{pre?.age_years ?? comp?.age_years ?? ""}</td>
+                  <td className="px-2 py-1">{displaySpecies(pre?.main_species ?? comp?.main_species ?? "", language) || "—"}</td>
+                  <td className="px-2 py-1 text-right">{(pre?.area_ha ?? comp?.area_ha ?? 0).toFixed(1)}</td>
+                  <td className="px-2 py-1 text-right">{Math.round(pre?.volume_m3 ?? comp?.volume_m3 ?? 0).toLocaleString()}</td>
                   <td className="px-2 py-1 text-right">
                     {op.removal_pct != null ? `${op.removal_pct}%` : "—"}
                   </td>
@@ -551,7 +570,7 @@ export default function OperationList({ map }: OperationListProps) {
                       : ""}
                   </td>
                   <td className="px-2 py-1 text-xs">
-                    {comp?.development_class ? displayDevClass(comp.development_class, language) : ""}
+                    {pre?.development_class ? displayDevClass(pre.development_class, language) : comp?.development_class ? displayDevClass(comp.development_class, language) : ""}
                   </td>
                   <td className="px-1 py-1 text-right">
                     <button
