@@ -577,6 +577,7 @@ export interface OperationListLabels {
   colStand: string;
   colType: string;
   colYear: string;
+  colAge: string;
   colSpecies: string;
   colArea: string;
   colVolume: string;
@@ -609,6 +610,7 @@ export function operationListLabels(lang: Language): OperationListLabels {
       colStand: "Kuvio",
       colType: "Tyyppi",
       colYear: "Vuosi",
+      colAge: "Ikä",
       colSpecies: "Puulaji",
       colArea: "Pinta-ala (ha)",
       colVolume: "Til. (m³)",
@@ -639,6 +641,7 @@ export function operationListLabels(lang: Language): OperationListLabels {
     colStand: "Stand",
     colType: "Type",
     colYear: "Year",
+    colAge: "Age",
     colSpecies: "Species",
     colArea: "Area (ha)",
     colVolume: "Vol. (m³)",

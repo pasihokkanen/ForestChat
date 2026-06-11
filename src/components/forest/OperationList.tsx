@@ -20,7 +20,7 @@ const SPECIES_OPTIONS = [
 
 // Column keys — labels come from i18n
 const OP_COLUMN_KEYS = [
-  "colStand", "colType", "colYear", "colSpecies", "colArea",
+  "colStand", "colType", "colYear", "colAge", "colSpecies", "colArea",
   "colVolume", "colRemoval", "colIncome", "colCost", "colDevClass",
 ] as const;
 
@@ -28,6 +28,7 @@ const COL_KEY_TO_DATA: Record<string, string> = {
   colStand: "stand_id",
   colType: "type",
   colYear: "year",
+  colAge: "age_years",
   colSpecies: "species",
   colArea: "area_ha",
   colVolume: "volume_m3",
@@ -149,6 +150,21 @@ export default function OperationList({ map }: OperationListProps) {
     if (el && opPersist.scrollTop > 0) {
       el.scrollTop = opPersist.scrollTop;
     }
+  }, []);
+
+  const [typeOpen, setTypeOpen] = useState(false);
+  const [speciesOpen, setSpeciesOpen] = useState(false);
+
+  // Close dropdowns when clicking outside
+  const typeRef = useRef<HTMLDivElement>(null);
+  const speciesRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (typeRef.current && !typeRef.current.contains(e.target as Node)) setTypeOpen(false);
+      if (speciesRef.current && !speciesRef.current.contains(e.target as Node)) setSpeciesOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
   }, []);
 
   const handleSort = (key: string) => {
@@ -291,7 +307,8 @@ export default function OperationList({ map }: OperationListProps) {
           String(r.op.year).includes(lower) ||
           (comp?.stand_id ?? "").toLowerCase().includes(lower) ||
           (comp?.main_species ?? "").toLowerCase().includes(lower) ||
-          (comp?.development_class ?? "").toLowerCase().includes(lower)
+          (comp?.development_class ?? "").toLowerCase().includes(lower) ||
+          (comp ? String(comp.age_years ?? "") : "").includes(lower)
         );
       });
     }
@@ -306,6 +323,7 @@ export default function OperationList({ map }: OperationListProps) {
         case "stand_id": return row.comp?.stand_id ?? "";
         case "type": return row.op.type;
         case "year": return row.op.year;
+        case "age_years": return row.comp?.age_years ?? 0;
         case "species": return row.comp?.main_species ?? "";
         case "area_ha": return row.comp?.area_ha ?? 0;
         case "volume_m3": return row.comp?.volume_m3 ?? 0;
@@ -367,43 +385,53 @@ export default function OperationList({ map }: OperationListProps) {
           />
 
           {/* Type multi-select */}
-          <div className="relative group">
-            <button className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
+          <div className="relative" ref={typeRef}>
+            <button
+              onClick={() => setTypeOpen((v) => !v)}
+              className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"
+            >
               {L.filterType}{typeFilter.size > 0 ? ` (${typeFilter.size})` : " ▼"}
             </button>
-            <div className="absolute top-full left-0 mt-1 z-10 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg p-1 hidden group-hover:block min-w-[200px]">
-              {OP_TYPE_OPTIONS.map((t) => (
-                <label key={t} className="flex items-center gap-1.5 px-2 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={typeFilter.has(t)}
-                    onChange={() => toggleFilter(setTypeFilter, t)}
-                    className="h-3 w-3"
-                  />
-                  {displayOp(t, language)}
-                </label>
-              ))}
-            </div>
+            {typeOpen && (
+              <div className="absolute top-full left-0 mt-1 z-20 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg p-1 min-w-[200px]">
+                {OP_TYPE_OPTIONS.map((t) => (
+                  <label key={t} className="flex items-center gap-1.5 px-2 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={typeFilter.has(t)}
+                      onChange={() => toggleFilter(setTypeFilter, t)}
+                      className="h-3 w-3"
+                    />
+                    {displayOp(t, language)}
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Species multi-select */}
-          <div className="relative group">
-            <button className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
+          <div className="relative" ref={speciesRef}>
+            <button
+              onClick={() => setSpeciesOpen((v) => !v)}
+              className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"
+            >
               {L.filterSpecies}{speciesFilter.size > 0 ? ` (${speciesFilter.size})` : " ▼"}
             </button>
-            <div className="absolute top-full left-0 mt-1 z-10 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg p-1 hidden group-hover:block min-w-[160px]">
-              {SPECIES_OPTIONS.map((s) => (
-                <label key={s} className="flex items-center gap-1.5 px-2 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={speciesFilter.has(s)}
-                    onChange={() => toggleFilter(setSpeciesFilter, s)}
-                    className="h-3 w-3"
-                  />
-                  {displaySpecies(s, language)}
-                </label>
-              ))}
-            </div>
+            {speciesOpen && (
+              <div className="absolute top-full left-0 mt-1 z-20 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg p-1 min-w-[160px]">
+                {SPECIES_OPTIONS.map((s) => (
+                  <label key={s} className="flex items-center gap-1.5 px-2 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={speciesFilter.has(s)}
+                      onChange={() => toggleFilter(setSpeciesFilter, s)}
+                      className="h-3 w-3"
+                    />
+                    {displaySpecies(s, language)}
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Stand filter */}
@@ -505,6 +533,7 @@ export default function OperationList({ map }: OperationListProps) {
                   <td className="px-2 py-1 font-mono text-xs">{standId}</td>
                   <td className="px-2 py-1 text-xs">{displayOp(op.type, language)}</td>
                   <td className="px-2 py-1 text-right">{op.year}</td>
+                  <td className="px-2 py-1 text-right">{comp?.age_years ?? ""}</td>
                   <td className="px-2 py-1">{displaySpecies(comp?.main_species ?? "", language) || "—"}</td>
                   <td className="px-2 py-1 text-right">{(comp?.area_ha ?? 0).toFixed(1)}</td>
                   <td className="px-2 py-1 text-right">{Math.round(comp?.volume_m3 ?? 0).toLocaleString()}</td>

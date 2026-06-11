@@ -152,6 +152,23 @@ export default function StandList({ map }: StandListProps) {
   const [globalFilter, setGlobalFilterRaw] = useState(standPersist.globalFilter);
   const setGlobalFilter = (v: string) => { standPersist.globalFilter = v; setGlobalFilterRaw(v); };
 
+  // Dropdown open state (click-toggle, not hover)
+  const [speciesOpen, setSpeciesOpen] = useState(false);
+  const [devClassOpen, setDevClassOpen] = useState(false);
+  const [siteTypeOpen, setSiteTypeOpen] = useState(false);
+  const speciesRef = useRef<HTMLDivElement>(null);
+  const devClassRef = useRef<HTMLDivElement>(null);
+  const siteTypeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (speciesRef.current && !speciesRef.current.contains(e.target as Node)) setSpeciesOpen(false);
+      if (devClassRef.current && !devClassRef.current.contains(e.target as Node)) setDevClassOpen(false);
+      if (siteTypeRef.current && !siteTypeRef.current.contains(e.target as Node)) setSiteTypeOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
   // Apply AI-pushed filters
   useEffect(() => {
     if (aiStandFilters) {
@@ -354,63 +371,78 @@ export default function StandList({ map }: StandListProps) {
       <div className="shrink-0 border-b border-gray-200 dark:border-gray-700 p-2 space-y-2 bg-gray-50 dark:bg-gray-800/50">
         <div className="flex flex-wrap gap-2 items-center">
           {/* Species multi-select */}
-          <div className="relative group">
-            <button className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
+          <div className="relative" ref={speciesRef}>
+            <button
+              onClick={() => setSpeciesOpen((v) => !v)}
+              className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"
+            >
               {L.filterSpecies}{speciesFilter.size > 0 ? ` (${speciesFilter.size})` : " ▼"}
             </button>
-            <div className="absolute top-full left-0 mt-1 z-10 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg p-1 hidden group-hover:block min-w-[160px]">
-              {SPECIES_OPTIONS.map((s) => (
-                <label key={s} className="flex items-center gap-1.5 px-2 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={speciesFilter.has(s)}
-                    onChange={() => toggleFilter(setSpeciesFilter, s)}
-                    className="h-3 w-3"
-                  />
-                  {displaySpecies(s, language)}
-                </label>
-              ))}
-            </div>
+            {speciesOpen && (
+              <div className="absolute top-full left-0 mt-1 z-20 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg p-1 min-w-[160px]">
+                {SPECIES_OPTIONS.map((s) => (
+                  <label key={s} className="flex items-center gap-1.5 px-2 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={speciesFilter.has(s)}
+                      onChange={() => toggleFilter(setSpeciesFilter, s)}
+                      className="h-3 w-3"
+                    />
+                    {displaySpecies(s, language)}
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Dev class multi-select */}
-          <div className="relative group">
-            <button className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
+          <div className="relative" ref={devClassRef}>
+            <button
+              onClick={() => setDevClassOpen((v) => !v)}
+              className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"
+            >
               {L.filterDevClass}{devClassFilter.size > 0 ? ` (${devClassFilter.size})` : " ▼"}
             </button>
-            <div className="absolute top-full left-0 mt-1 z-10 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg p-1 hidden group-hover:block min-w-[200px]">
-              {DEV_CLASS_OPTIONS.map((dc) => (
-                <label key={dc} className="flex items-center gap-1.5 px-2 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={devClassFilter.has(dc)}
-                    onChange={() => toggleFilter(setDevClassFilter, dc)}
-                    className="h-3 w-3"
-                  />
-                  {displayDevClass(dc, language)}
-                </label>
-              ))}
-            </div>
+            {devClassOpen && (
+              <div className="absolute top-full left-0 mt-1 z-20 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg p-1 min-w-[200px]">
+                {DEV_CLASS_OPTIONS.map((dc) => (
+                  <label key={dc} className="flex items-center gap-1.5 px-2 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={devClassFilter.has(dc)}
+                      onChange={() => toggleFilter(setDevClassFilter, dc)}
+                      className="h-3 w-3"
+                    />
+                    {displayDevClass(dc, language)}
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Site type multi-select */}
-          <div className="relative group">
-            <button className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
+          <div className="relative" ref={siteTypeRef}>
+            <button
+              onClick={() => setSiteTypeOpen((v) => !v)}
+              className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"
+            >
               {L.filterSite}{siteTypeFilter.size > 0 ? ` (${siteTypeFilter.size})` : " ▼"}
             </button>
-            <div className="absolute top-full left-0 mt-1 z-10 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg p-1 hidden group-hover:block min-w-[180px]">
-              {SITE_TYPE_OPTIONS.map((st) => (
-                <label key={st} className="flex items-center gap-1.5 px-2 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={siteTypeFilter.has(st)}
-                    onChange={() => toggleFilter(setSiteTypeFilter, st)}
-                    className="h-3 w-3"
-                  />
-                  {displaySiteType(st, language)}
-                </label>
-              ))}
-            </div>
+            {siteTypeOpen && (
+              <div className="absolute top-full left-0 mt-1 z-20 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg p-1 min-w-[180px]">
+                {SITE_TYPE_OPTIONS.map((st) => (
+                  <label key={st} className="flex items-center gap-1.5 px-2 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={siteTypeFilter.has(st)}
+                      onChange={() => toggleFilter(setSiteTypeFilter, st)}
+                      className="h-3 w-3"
+                    />
+                    {displaySiteType(st, language)}
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Age range */}
