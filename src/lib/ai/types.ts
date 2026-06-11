@@ -1,5 +1,17 @@
 // src/lib/ai/types.ts
-import type { Compartment } from "@/types/database";
+import type { Compartment, CompartmentSpecies } from "@/types/database";
+
+/** Per-species breakdown data for a stand */
+export interface SpeciesDatum {
+  species: string;
+  volumeM3: number;
+  logPct: number;
+  stemCount: number;
+  meanHeight: number;
+  meanDiameter: number;
+  age: number;
+  basalArea: number;
+}
 
 /** Enriched compartment data used by the forestry engine */
 export interface StandData {
@@ -19,6 +31,14 @@ export interface StandData {
   ageYears: number;
   ba: number;
   volumeM3: number;
+  /** Total stem count across all species (from compartment_species or compartment.stem_count) */
+  stemCount: number;
+  /** Mean height of dominant species (from compartment.avg_height or species weighted average) */
+  meanHeight: number;
+  /** Mean diameter of dominant species (from compartment.avg_diameter or species weighted average) */
+  meanDiameter: number;
+  /** Per-species breakdown (from compartment_species table) */
+  speciesData: SpeciesDatum[];
 }
 
 /** Owner's objective for plan generation */

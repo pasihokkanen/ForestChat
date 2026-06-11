@@ -6,8 +6,8 @@
 // No static operation pool — all operations are spawned dynamically.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Compartment } from "@/types/database";
-import type { StandData, PlanGoal } from "./types";
+import type { Compartment, CompartmentSpecies } from "@/types/database";
+import type { StandData, SpeciesDatum, PlanGoal } from "./types";
 import { schedulePlan } from "./schedule";
 import { serverMsg } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
@@ -90,6 +90,7 @@ function computeStandValue(
 /** Convert a DB Compartment into an enriched StandData. */
 function enrichCompartment(
   c: Compartment,
+  speciesRows: CompartmentSpecies[],
   prices?: Record<string, Record<string, { tukki: number; kuitu: number }>>,
   growthMultiplier = 1.0,
 ): StandData {
@@ -98,6 +99,36 @@ function enrichCompartment(
   const drainageStatus = c.drainage_status ?? "";
   const siteClass = classifySite(siteType);
   const isPeatland = detectPeatland(soilType, siteType, "", drainageStatus);
+
+  // Build species data from compartment_species rows
+  const speciesData: SpeciesDatum[] = speciesRows.map((sp) => ({
+    species: sp.species,
+    volumeM3: sp.volume_m3 ?? 0,
+    logPct: sp.log_pct ?? 0,
+    stemCount: sp.stem_count ?? 0,
+    meanHeight: sp.mean_height ?? 0,
+    meanDiameter: sp.mean_diameter ?? 0,
+    age: sp.age ?? c.age_years ?? 0,
+    basalArea: sp.basal_area ?? 0,
+  }));
+
+  // Total stem count: sum of species, fallback to compartment.stem_count
+  const totalStems = speciesData.reduce((s, sp) => s + sp.stemCount, 0)
+    || (c.stem_count ?? 0);
+
+  // Mean height: use compartment-level avg_height, fallback to dominant species
+  const meanHeight = c.avg_height
+    ?? (speciesData.length > 0
+      ? speciesData.reduce((s, sp) => s + sp.meanHeight * sp.stemCount, 0)
+        / Math.max(1, totalStems)
+      : 0);
+
+  // Mean diameter: use compartment-level avg_diameter, fallback to dominant species
+  const meanDiameter = c.avg_diameter
+    ?? (speciesData.length > 0
+      ? speciesData.reduce((s, sp) => s + sp.meanDiameter * sp.stemCount, 0)
+        / Math.max(1, totalStems)
+      : 0);
 
   const stand: StandData = {
     standId: c.stand_id,
@@ -116,6 +147,10 @@ function enrichCompartment(
     ageYears: c.age_years ?? 0,
     ba: c.basal_area ?? 0,
     volumeM3: c.volume_m3 ?? 0,
+    stemCount: totalStems,
+    meanHeight,
+    meanDiameter,
+    speciesData,
   };
 
   // Compute per-hectare growth rate
@@ -164,6 +199,22 @@ export async function generatePlan(
       return { success: true, result: serverMsg("planEmpty", language) };
     }
 
+    // ── 1b. Fetch compartment_species for stem/height/diameter data ──
+    const compartmentIds = compartments.map((c) => c.id);
+    const { data: speciesRows } = await supabase
+      .from("compartment_species")
+      .select("*")
+      .in("compartment_id", compartmentIds);
+    const allSpecies = (speciesRows as CompartmentSpecies[]) ?? [];
+
+    // Build species map: compartment_id → species rows
+    const speciesMap = new Map<string, CompartmentSpecies[]>();
+    for (const sp of allSpecies) {
+      const list = speciesMap.get(sp.compartment_id) || [];
+      list.push(sp);
+      speciesMap.set(sp.compartment_id, list);
+    }
+
     // ── 2. Load region-specific timber prices ──
     const { data: forestData } = await supabase
       .from("forests")
@@ -200,7 +251,8 @@ export async function generatePlan(
         continue;
       }
 
-      const stand = enrichCompartment(c, prices, growthMultiplier);
+      const speciesForCompartment = speciesMap.get(c.id) ?? [];
+      const stand = enrichCompartment(c, speciesForCompartment, prices, growthMultiplier);
       forestStands.push(stand);
       totalArea += stand.areaHa;
       totalVolume += stand.volumeM3;

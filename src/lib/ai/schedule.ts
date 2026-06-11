@@ -8,7 +8,7 @@
 // No stand splitting. No initial operation pool. All operations are spawned
 // on-demand from the current simulated state.
 
-import type { StandData, PlannedOperation, PlanGoal, YearPlan, PlanSummary } from "./types";
+import type { StandData, PlannedOperation, PlanGoal, YearPlan, PlanSummary, SpeciesDatum } from "./types";
 import { getOptimalAge, THINNING_BA, MIN_AGE_FIRST_THINNING, MIN_AGE_THINNING, getPrices, COSTS, OPERATION_DEFAULTS } from "./config";
 import { getGrowthRate } from "./chart-engine";
 import { getStrategy, type SchedulingStrategy } from "./strategies";
@@ -18,6 +18,49 @@ const DEBUG_LOG = "/tmp/schedule-debug.log";
 function dlog(msg: string) {
   try { fs.appendFileSync(DEBUG_LOG, msg + "\n"); } catch {}
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Tapio constants for planting and tending
+// ═══════════════════════════════════════════════════════════════════════
+
+/** Planting density (stems/ha) by species. Source: Tapio Metsänhoidon suositukset. */
+const PLANTING_DENSITY: Record<string, number> = {
+  pine: 2200,
+  spruce: 1650,
+  silver_birch: 1600,
+  downy_birch: 1600,
+  birch: 1600,
+  larch: 1800,
+};
+
+/** Initial seedling height (m) after planting. */
+const PLANTING_INITIAL_HEIGHT_M = 0.3;
+
+/** Initial seedling diameter (cm) after planting. */
+const PLANTING_INITIAL_DIAMETER_CM = 0.5;
+
+/** Natural ingress: additional stems/ha/year for young planted stands (first 5 years). */
+const NATURAL_INGRESS_RATE = 500;
+
+/** Natural ingress ceiling: max total stems/ha after planting + ingress. */
+const MAX_STEMS_HA = 6000;
+
+/** Early tending trigger: stems/ha must exceed this. Source: Tapio (>4000/ha). */
+const EARLY_TENDING_STEM_THRESHOLD = 4000;
+
+/** Early tending height thresholds (m). Source: Tapio (varhaisperkaus < 1m pine, < 1.5m spruce). */
+const EARLY_TENDING_MAX_HEIGHT: Record<string, number> = {
+  pine: 1.0,
+  spruce: 1.5,
+  silver_birch: 1.5,
+  downy_birch: 1.5,
+  birch: 1.5,
+  larch: 1.2,
+};
+
+/** Target stems/ha after early tending. Drops below 4000 so ingress can't re-trigger
+ *  immediately (takes 2+ years → height crosses threshold → switches to tending). */
+const EARLY_TENDING_TARGET_STEMS_HA = 3500;
 
 // ═══════════════════════════════════════════════════════════════════════
 // Stand splitting stub (not implemented — split removed per user request)
@@ -58,8 +101,6 @@ interface SimStand {
   developmentClass: string;
   /** Year when clearcut happened (0 = not cleared). Used for regen delay timing. */
   regenDelayStarted: number;
-  /** Year when stand was last tended. 0 = never. Prevents re-tending. */
-  tendedYear: number;
   /** Year when seed_tree/shelterwood stand was first seen (0 = not applicable). */
   overstoryStarted: number;
   /** Set of operation types already spawned for this stand (prevents duplicates). */
@@ -69,6 +110,14 @@ interface SimStand {
   plantingYear: number;
   /** Number of thinning operations applied (for peatland thinning cap). */
   thinningCount: number;
+  /** Total stem count across all species. Decreased by tending operations. */
+  stemCount: number;
+  /** Mean height (m) of dominant species. Used for tending threshold logic. */
+  meanHeight: number;
+  /** Mean diameter (cm) of dominant species. */
+  meanDiameter: number;
+  /** Per-species breakdown (kept for potential future use, not mutated by simulation). */
+  speciesData: SpeciesDatum[];
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -93,6 +142,10 @@ function makeMinimalStand(s: SimStand): StandData {
     ageYears: s.ageYears,
     ba: s.basalArea,
     volumeM3: s.volumeM3,
+    stemCount: s.stemCount,
+    meanHeight: s.meanHeight,
+    meanDiameter: s.meanDiameter,
+    speciesData: [],
   };
 }
 
@@ -328,52 +381,42 @@ function spawnOperations(
       }
     }
 
-    // ── Tending eligibility (seedling stands, once only) ──
-    // Step 2a: Widened windows — early_tending 2–15, tending 8–30
-    if (s.tendedYear === 0 && !s.spawnedTypes.has("tending") && !s.spawnedTypes.has("early_tending")) {
-      if (s.ageYears >= 2 && s.ageYears <= 15) {
-        const def = OPERATION_DEFAULTS["early_tending"];
-        s.spawnedTypes.add("early_tending");
+    // ── Tending eligibility (stem-count- and height-driven, Tapio thresholds) ──
+    // No lifecycle guards — if the stand meets criteria, it gets the operation.
+    // After tending, stems drop below thresholds (early→4000, tending→2000).
+    const stemsPerHa = s.areaHa > 0 ? s.stemCount / s.areaHa : 0;
+    const heightThreshold = EARLY_TENDING_MAX_HEIGHT[s.species] ?? 1.5;
+
+    if (stemsPerHa > EARLY_TENDING_STEM_THRESHOLD) {
+      if (s.meanHeight < heightThreshold) {
+        // Early tending needed — stand is too dense and still short
+        const removal = s.stemCount - EARLY_TENDING_TARGET_STEMS_HA * s.areaHa;
+        const removalFraction = s.stemCount > 0 ? Math.min(1, removal / s.stemCount) : 0;
+        const removalM3 = Math.round(s.volumeM3 * removalFraction);
         spawned.push({
           stand: makeMinimalStand(s),
           type: "early_tending",
           year,
           income_eur: 0,
           cost_eur: Math.round(COSTS.early_tending * s.areaHa),
-          removal_m3: Math.round(s.volumeM3 * def.removalFraction),
-          notes: `Early tending at age ${s.ageYears}y`,
+          removal_m3: removalM3,
+          notes: `Early tending: ${Math.round(stemsPerHa)}→${EARLY_TENDING_TARGET_STEMS_HA} stems/ha, h=${s.meanHeight.toFixed(1)}m${s.plantingYear > 0 ? ` (${year - s.plantingYear}y post-plant)` : ""}`,
           dueYear: year,
         });
-      } else if (s.ageYears >= 8 && s.ageYears <= 30) {
-        const def = OPERATION_DEFAULTS["tending"];
-        s.spawnedTypes.add("tending");
+      } else {
+        // Stand is too dense but too tall for early tending — needs tending (taimikonharvennus)
+        const targetStemsHa = 2000; // Tapio: 1800-2200 after taimikonharvennus
+        const removal = s.stemCount - targetStemsHa * s.areaHa;
+        const removalFraction = s.stemCount > 0 ? Math.min(1, removal / s.stemCount) : 0;
+        const removalM3 = Math.round(s.volumeM3 * removalFraction);
         spawned.push({
           stand: makeMinimalStand(s),
           type: "tending",
           year,
           income_eur: 0,
           cost_eur: Math.round(COSTS.tending * s.areaHa),
-          removal_m3: Math.round(s.volumeM3 * def.removalFraction),
-          notes: `Tending at age ${s.ageYears}y`,
-          dueYear: year,
-        });
-      }
-    }
-
-    // ── Step 4: Post-planting tending chain (triggered by planting year, not stand age) ──
-    if (!s.cleared && s.plantingYear > 0 && !s.spawnedTypes.has("early_tending")) {
-      const yearsSincePlanting = year - s.plantingYear;
-      if (yearsSincePlanting >= 3 && yearsSincePlanting <= 6) {
-        const def = OPERATION_DEFAULTS["early_tending"];
-        s.spawnedTypes.add("early_tending");  // same key as standard age-based check
-        spawned.push({
-          stand: makeMinimalStand(s),
-          type: "early_tending",
-          year,
-          income_eur: 0,
-          cost_eur: Math.round(COSTS.early_tending * s.areaHa),
-          removal_m3: Math.round(s.volumeM3 * def.removalFraction),
-          notes: `Early tending ${yearsSincePlanting}y after planting`,
+          removal_m3: removalM3,
+          notes: `Tending: ${Math.round(stemsPerHa)}→${targetStemsHa} stems/ha (too tall for early tending, h=${s.meanHeight.toFixed(1)}m)`,
           dueYear: year,
         });
       }
@@ -507,12 +550,15 @@ export function runScheduleEngine(
       cleared: false,
       developmentClass: k.developmentClass,
       regenDelayStarted: 0,
-      tendedYear: 0,
       overstoryStarted: 0,
       spawnedTypes: new Set(),
       growthMultiplier,
       plantingYear: 0,
       thinningCount: 0,
+      stemCount: k.stemCount,
+      meanHeight: k.meanHeight,
+      meanDiameter: k.meanDiameter,
+      speciesData: k.speciesData,
     });
   }
 
@@ -619,10 +665,12 @@ export function runScheduleEngine(
         st.basalArea = 0;
         st.ageYears = 0;
         st.valueEur = 0;
+        st.stemCount = 0;
+        st.meanHeight = 0;
+        st.meanDiameter = 0;
         st.cleared = true;
         st.regenDelayStarted = yr;
         st.spawnedTypes.clear();
-        st.tendedYear = 0;
       } else if (op.type === "selection_cutting") {
         const removal = op.removal_m3;
         const pct = st.volumeM3 > 0 ? removal / st.volumeM3 : 0;
@@ -647,18 +695,28 @@ export function runScheduleEngine(
         st.thinningCount++;
       } else if (op.type === "early_tending" || op.type === "tending") {
         const removal = op.removal_m3;
+        const volBefore = st.volumeM3;
         st.volumeM3 = Math.max(0, st.volumeM3 - removal);
-        st.tendedYear = yr;
-        st.spawnedTypes.delete("early_tending");
-        st.spawnedTypes.delete("tending");
+        // Reduce stem count and basal area proportionally to volume removal
+        const removedFraction = st.stemCount > 0 ? removal / Math.max(1, volBefore) : 0;
+        const stemReduction = Math.round(st.stemCount * Math.min(1, removedFraction));
+        st.stemCount = Math.max(0, st.stemCount - stemReduction);
+        st.basalArea = Math.max(0, st.basalArea * (1 - Math.min(1, removedFraction)));
       } else if (op.type.includes("planting")) {
         st.cleared = false;
         st.regenDelayStarted = 0;
+        st.spawnedTypes.clear();
+        st.plantingYear = yr;
+        // Tapio initial seedling state
+        const plantSpecies = op.type.replace("_planting", "");
+        const density = PLANTING_DENSITY[plantSpecies] ?? 1800;
+        st.stemCount = Math.round(st.areaHa * density);
+        st.meanHeight = PLANTING_INITIAL_HEIGHT_M;
+        st.meanDiameter = PLANTING_INITIAL_DIAMETER_CM;
+        st.ageYears = 0;
         if (st.basalArea === 0) st.basalArea = 2;
         if (st.volumeM3 === 0) st.volumeM3 = st.areaHa * 1;
         if (st.valueEur === 0) st.valueEur = Math.round(st.areaHa * 50);
-        st.spawnedTypes.clear();
-        st.plantingYear = yr;
       }
     }
 
@@ -680,6 +738,48 @@ export function runScheduleEngine(
         st.volumeM3 += growthM3;
       }
       st.ageYears += 1;
+
+      // Natural ingress: young stands gain stems from natural regeneration.
+      // Only for stands with stem data (planted or natural with known stem counts).
+      // Continues until stand age > 10 years, up to MAX_STEMS_HA.
+      // New seedlings are planting-sized (h=0.3m, d=0.5cm) — tiny compared to existing trees.
+      if (st.stemCount > 0 && st.ageYears <= 10 && st.stemCount / st.areaHa < MAX_STEMS_HA) {
+        const oldStems = st.stemCount;
+        const ingress = Math.round(Math.min(
+          NATURAL_INGRESS_RATE * st.areaHa,
+          (MAX_STEMS_HA * st.areaHa) - st.stemCount,
+        ));
+        if (ingress > 0) {
+          // Weighted average: existing trees keep their height/diameter,
+          // new seedlings are at planting size.
+          const newHeight = PLANTING_INITIAL_HEIGHT_M;
+          const newDiameter = PLANTING_INITIAL_DIAMETER_CM / 100; // cm → m
+          st.meanHeight = (st.meanHeight * oldStems + newHeight * ingress) / st.stemCount;
+          st.meanDiameter = (st.meanDiameter * oldStems + newDiameter * ingress) / st.stemCount;
+
+          // Basal area contribution from new seedlings (m²/ha → total m²)
+          // Each seedling: π × (d/2)² = π × (0.005/2)² = π × 0.00000625 ≈ 0.0000196 m²
+          const seedlingBA = ingress * Math.PI * (newDiameter / 2) ** 2;
+          st.basalArea += seedlingBA;
+
+          // Volume contribution: approximate as tiny cylinders
+          // Each seedling: basal_area × height = 0.0000196 × 0.3 ≈ 0.0000059 m³
+          const seedlingVol = seedlingBA * newHeight;
+          st.volumeM3 += seedlingVol;
+
+          st.stemCount += ingress;
+        }
+      }
+
+      // Height growth proxy: seedlings grow slowly (~0.15 m/y), then speed up.
+      // Young stands (0-5y): 0.15 m/y → at year 4 post-plant: 0.3 + 4×0.15 = 0.9m (under pine 1.0m limit ✓)
+      // Mid stands (5-15y): 0.4 m/y → rapid growth phase
+      // Older stands (15-30y): 0.3 m/y → slowing down
+      if (st.stemCount > 0 && st.ageYears <= 30) {
+        const heightGrowth = st.ageYears <= 5 ? 0.15 : st.ageYears <= 15 ? 0.4 : 0.3;
+        st.meanHeight += heightGrowth;
+        st.meanDiameter += heightGrowth * 0.7; // diameter grows slower than height
+      }
     }
 
     // ── 8. CARRYOVER: unselected ops pushed to next year ──

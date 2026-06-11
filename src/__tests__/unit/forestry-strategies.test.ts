@@ -23,6 +23,10 @@ function makeStand(overrides: Partial<StandData> & { standId: string }): StandDa
     ageYears: overrides.ageYears ?? 50,
     ba: overrides.ba ?? 20,
     volumeM3: overrides.volumeM3 ?? 200,
+    stemCount: overrides.stemCount ?? 0,
+    meanHeight: overrides.meanHeight ?? 0,
+    meanDiameter: overrides.meanDiameter ?? 0,
+    speciesData: overrides.speciesData ?? [],
   };
 }
 
