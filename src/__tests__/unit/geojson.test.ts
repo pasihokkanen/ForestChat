@@ -24,7 +24,7 @@ function makeCompartment(overrides: Partial<Compartment> = {}): Compartment {
     basal_area: null,
     avg_diameter: null,
     avg_height: null,
-    stem_count: null,
+    stem_count_per_ha: null,
       growth_m3_per_ha: null,
     geometry: {
       type: "MultiPolygon",

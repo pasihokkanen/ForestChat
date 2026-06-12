@@ -105,29 +105,29 @@ function enrichCompartment(
     species: sp.species,
     volumeM3: sp.volume_m3 ?? 0,
     logPct: sp.log_pct ?? 0,
-    stemCount: sp.stem_count ?? 0,
+    stemCount: sp.stem_count_per_ha ?? 0,
     meanHeight: sp.mean_height ?? 0,
     meanDiameter: sp.mean_diameter ?? 0,
     age: sp.age ?? c.age_years ?? 0,
     basalArea: sp.basal_area ?? 0,
   }));
 
-  // Total stem count: sum of species, fallback to compartment.stem_count
-  const totalStems = speciesData.reduce((s, sp) => s + sp.stemCount, 0)
-    || (c.stem_count ?? 0);
+  // Stems per hectare: sum of per-species per-ha values, fallback to compartment.stem_count_per_ha
+  const stemsPerHa = speciesData.reduce((s, sp) => s + sp.stemCount, 0)
+    || (c.stem_count_per_ha ?? 0);
 
   // Mean height: use compartment-level avg_height, fallback to dominant species
   const meanHeight = c.avg_height
     ?? (speciesData.length > 0
       ? speciesData.reduce((s, sp) => s + sp.meanHeight * sp.stemCount, 0)
-        / Math.max(1, totalStems)
+        / Math.max(1, stemsPerHa)
       : 0);
 
   // Mean diameter: use compartment-level avg_diameter, fallback to dominant species
   const meanDiameter = c.avg_diameter
     ?? (speciesData.length > 0
       ? speciesData.reduce((s, sp) => s + sp.meanDiameter * sp.stemCount, 0)
-        / Math.max(1, totalStems)
+        / Math.max(1, stemsPerHa)
       : 0);
 
   const stand: StandData = {
@@ -147,7 +147,7 @@ function enrichCompartment(
     ageYears: c.age_years ?? 0,
     ba: c.basal_area ?? 0,
     volumeM3: c.volume_m3 ?? 0,
-    stemCount: totalStems,
+    stemCount: stemsPerHa,
     meanHeight,
     meanDiameter,
     speciesData,
@@ -312,7 +312,7 @@ export async function generatePlan(
             volume_m3: Math.round(op.stand.volumeM3),
             area_ha: op.stand.areaHa,
             ba: Math.round(op.stand.ba * 10) / 10,
-            stem_count: op.stand.stemCount,
+            stem_count_per_ha: op.stand.stemCount,
             mean_height: Math.round(op.stand.meanHeight * 10) / 10,
             mean_diameter: Math.round(op.stand.meanDiameter * 10) / 10,
             value_eur: Math.round(op.stand.valueEur),

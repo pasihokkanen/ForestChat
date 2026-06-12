@@ -31,7 +31,7 @@ export interface StandData {
   ageYears: number;
   ba: number;
   volumeM3: number;
-  /** Total stem count across all species (from compartment_species or compartment.stem_count) */
+  /** Stem count per hectare (stems/ha). Sum of per-species stem_count_per_ha from compartment_species. */
   stemCount: number;
   /** Mean height of dominant species (from compartment.avg_height or species weighted average) */
   meanHeight: number;

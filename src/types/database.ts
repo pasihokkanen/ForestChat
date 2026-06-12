@@ -27,7 +27,7 @@ export interface Compartment {
   basal_area: number | null;
   avg_diameter: number | null;
   avg_height: number | null;
-  stem_count: number | null;
+  stem_count_per_ha: number | null;
   growth_m3_per_ha: number | null;
   geometry: GeoJSON.MultiPolygon | null;
   attributes: Record<string, unknown> | null;
@@ -44,7 +44,7 @@ export interface CompartmentSpecies {
   volume_m3: number;
   log_pct: number | null;
   area_ha: number;
-  stem_count: number | null;
+  stem_count_per_ha: number | null;
   mean_height: number | null;
   mean_diameter: number | null;
   age: number | null;

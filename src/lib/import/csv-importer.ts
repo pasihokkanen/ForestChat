@@ -124,14 +124,14 @@ export async function importStandsFromCsv(
         age_years: stand.total_age,
         volume_m3: stand.total_m3,
         basal_area: stand.total_basal_area,
-        stem_count: stand.total_stem_count,
+        stem_count_per_ha: stand.total_stem_count_per_ha,
         avg_diameter: stand.total_mean_diameter,
         avg_height: stand.total_mean_height,
         geometry: geom,
         attributes: {
           land_class: stand.land_class,
           total_m3_ha: stand.total_m3_ha,
-          total_stem_count: stand.total_stem_count,
+          total_stem_count_per_ha: stand.total_stem_count_per_ha,
           total_log_pct: stand.total_log_pct,
           total_pct: stand.total_pct,
           center_lat: stand.center_lat,
@@ -177,7 +177,7 @@ export async function importStandsFromCsv(
       volume_m3: number;
       log_pct: number | null;
       area_ha: number;
-      stem_count: number | null;
+      stem_count_per_ha: number | null;
       mean_height: number | null;
       mean_diameter: number | null;
       age: number | null;
@@ -207,7 +207,7 @@ export async function importStandsFromCsv(
           volume_m3: m3,
           log_pct: sp.log_pct,
           area_ha: Math.round(areaProportion * 1000) / 1000,
-          stem_count: sp.stem_count,
+          stem_count_per_ha: sp.stem_count_per_ha,
           mean_height: sp.mean_height,
           mean_diameter: sp.mean_diameter,
           age: sp.age,

@@ -45,7 +45,7 @@ describe("parseForestDataCsv", () => {
     expect(s.main_species).toBe("pine");
     expect(s.total_age).toBe(25);
     expect(s.total_basal_area).toBe(15);
-    expect(s.total_stem_count).toBe(1200);
+    expect(s.total_stem_count_per_ha).toBe(1200);
     expect(s.total_mean_height).toBe(14);
     expect(s.total_mean_diameter).toBe(13);
     expect(s.total_log_pct).toBe(55);
@@ -61,7 +61,7 @@ describe("parseForestDataCsv", () => {
         "stand_id", "area_ha", "land_class", "development_class",
         "site_type", "soil_type", "drainage_status", "main_species",
         "center_lat", "center_lon", "polygon_wkt",
-        "total_age", "total_basal_area", "total_stem_count", "total_mean_height",
+        "total_age", "total_basal_area", "total_stem_count_per_ha", "total_mean_height",
         "total_mean_diameter", "total_log_pct", "total_m3_ha", "total_m3", "total_pct",
         "pine_age", "pine_basal_area", "pine_m3",
       ],
@@ -129,7 +129,7 @@ describe("parseForestDataCsv", () => {
     const s = parseForestDataCsv(csvStr).stands[0];
     expect(s.total_age).toBe(30);
     expect(s.total_basal_area).toBe(18);
-    expect(s.total_stem_count).toBe(900);
+    expect(s.total_stem_count_per_ha).toBe(900);
     expect(s.total_mean_height).toBe(15);
     expect(s.total_mean_diameter).toBe(14);
     expect(s.total_log_pct).toBe(60);

@@ -17,7 +17,7 @@ const FI_TO_EN_COLUMN: Record<string, string> = {
   paapuulaji: "main_species",
   total_ika: "total_age",
   total_ppa: "total_basal_area",
-  total_runkoluku: "total_stem_count",
+  total_runkoluku: "total_stem_count_per_ha",
   total_kpituus: "total_mean_height",
   total_klapimitta: "total_mean_diameter",
   total_tukki_pct: "total_log_pct",
@@ -27,7 +27,7 @@ const FI_TO_EN_COLUMN: Record<string, string> = {
 const SPECIES_FIELD_SUFFIX_MAP: Record<string, string> = {
   ika: "age",
   ppa: "basal_area",
-  runkoluku: "stem_count",
+  runkoluku: "stem_count_per_ha",
   kpituus: "mean_height",
   klapimitta: "mean_diameter",
   tukki_pct: "log_pct",
@@ -117,7 +117,7 @@ export interface CsvSpeciesRow {
   species: string;          // English snake_case: "pine", "spruce", "aspen", etc.
   age: number | null;
   basal_area: number | null;
-  stem_count: number | null;
+  stem_count_per_ha: number | null;
   mean_height: number | null;
   mean_diameter: number | null;
   log_pct: number | null;
@@ -140,7 +140,7 @@ export interface CsvStandRow {
   polygon_wkt: string;        // MULTIPOLYGON WKT in EPSG:4326
   total_age: number | null;
   total_basal_area: number | null;
-  total_stem_count: number | null;
+  total_stem_count_per_ha: number | null;
   total_mean_height: number | null;
   total_mean_diameter: number | null;
   total_log_pct: number | null;
@@ -369,7 +369,7 @@ export function parseForestDataCsv(csvContent: string): ParsedCsvData {
     // Parse totals — try English first, fall back to Finnish
     const totalAge = parseNum(row["total_age"]) ?? parseNum(row["total_ika"]);
     const totalBasalArea = parseNum(row["total_basal_area"]) ?? parseNum(row["total_ppa"]);
-    const totalStemCount = parseNum(row["total_stem_count"]) ?? parseNum(row["total_runkoluku"]);
+    const totalStemCount = parseNum(row["total_stem_count_per_ha"]) ?? parseNum(row["total_runkoluku"]);
     const totalMeanHeight = parseNum(row["total_mean_height"]) ?? parseNum(row["total_kpituus"]);
     const totalMeanDiameter = parseNum(row["total_mean_diameter"]) ?? parseNum(row["total_klapimitta"]);
     const totalLogPct = parseNum(row["total_log_pct"]) ?? parseNum(row["total_tukki_pct"]);
@@ -421,7 +421,7 @@ export function parseForestDataCsv(csvContent: string): ParsedCsvData {
         species: spName,
         age: parseNum(fields["age"] ?? fields["ika"] ?? ""),
         basal_area: parseNum(fields["basal_area"] ?? fields["ppa"] ?? ""),
-        stem_count: parseNum(fields["stem_count"] ?? fields["runkoluku"] ?? ""),
+        stem_count_per_ha: parseNum(fields["stem_count_per_ha"] ?? fields["runkoluku"] ?? ""),
         mean_height: parseNum(fields["mean_height"] ?? fields["kpituus"] ?? ""),
         mean_diameter: parseNum(fields["mean_diameter"] ?? fields["klapimitta"] ?? ""),
         log_pct: parseNum(fields["log_pct"] ?? fields["tukki_pct"] ?? ""),
@@ -445,7 +445,7 @@ export function parseForestDataCsv(csvContent: string): ParsedCsvData {
       polygon_wkt: polygonWkt,
       total_age: totalAge,
       total_basal_area: totalBasalArea,
-      total_stem_count: totalStemCount,
+      total_stem_count_per_ha: totalStemCount,
       total_mean_height: totalMeanHeight,
       total_mean_diameter: totalMeanDiameter,
       total_log_pct: totalLogPct,

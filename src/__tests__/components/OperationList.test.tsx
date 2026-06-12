@@ -10,7 +10,7 @@ function seedStore() {
       area_ha: 2.5, volume_m3: 300, age_years: 45,
       development_class: "mature_thinning", site_type: "mesic",
       soil_type: null, drainage_status: null, basal_area: null,
-      avg_diameter: null, avg_height: null, stem_count: null,
+      avg_diameter: null, avg_height: null, stem_count_per_ha: null,
       growth_m3_per_ha: null,
       geometry: null, attributes: null,
       created_at: "", updated_at: "",

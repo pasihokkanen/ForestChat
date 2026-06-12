@@ -63,6 +63,31 @@ const EARLY_TENDING_MAX_HEIGHT: Record<string, number> = {
 const EARLY_TENDING_TARGET_STEMS_HA = 3500;
 
 // ═══════════════════════════════════════════════════════════════════════
+// Tapio first thinning targets (ensiharvennus harvennusmallit)
+// Post-operation stems/ha by species × site class.
+// Source: Metsanhoidon suositukset — harvennusmallit
+// ═══════════════════════════════════════════════════════════════════════
+
+/** Tapio post-first-thinning stem count target (stems/ha) by species and site class. */
+const FIRST_THINNING_TARGET_STEMS_HA: Record<string, Record<string, number>> = {
+  pine:       { mesic: 1100, "sub-xeric": 1100, xeric: 1000 },
+  spruce:     { "herb-rich heath": 1100, mesic: 1100 },
+  silver_birch: { "herb-rich heath": 750, mesic: 750 },
+  downy_birch:  { mesic: 1150, "sub-xeric": 1150 },
+  larch:      { mesic: 900, "sub-xeric": 900 },
+  grey_alder: { mesic: 700, "sub-xeric": 700 },
+};
+
+/** Default first thinning target when species/site not in table. */
+const FIRST_THINNING_DEFAULT_TARGET = 1100;
+
+/** Minimum removal fraction for first thinning (Tapio lower bound: 35%). */
+const FIRST_THINNING_MIN_REMOVAL = 0.35;
+
+/** Maximum removal fraction for first thinning (Tapio upper bound: 50%). */
+const FIRST_THINNING_MAX_REMOVAL = 0.50;
+
+// ═══════════════════════════════════════════════════════════════════════
 // Stand splitting stub (not implemented — split removed per user request)
 // Exported for backward compat with strategies.ts. Always returns null.
 // ═══════════════════════════════════════════════════════════════════════
@@ -110,7 +135,7 @@ interface SimStand {
   plantingYear: number;
   /** Number of thinning operations applied (for peatland thinning cap). */
   thinningCount: number;
-  /** Total stem count across all species. Decreased by tending operations. */
+  /** Stem count per hectare (stems/ha). Decreased by tending operations. */
   stemCount: number;
   /** Mean height (m) of dominant species. Used for tending threshold logic. */
   meanHeight: number;
@@ -340,22 +365,41 @@ function spawnOperations(
         // Step 9: First thinning volume threshold — Tapio: ≥50 m³/ha standing volume
         const m3PerHa = s.volumeM3 / s.areaHa;
         if (m3PerHa >= 50) {
-          const def = OPERATION_DEFAULTS["first_thinning"];
-          const removal = s.volumeM3 * def.removalFraction;
-          // Step 8: Peatland min harvest volume
-          if (s.soilType !== "peatland" || removal / s.areaHa >= 40) {
-            s.spawnedTypes.add("first_thinning");
-            const ratio = thinningPriceRatio(s.species, "first_thinning");
-            spawned.push({
-              stand: makeMinimalStand(s),
-              type: "first_thinning",
-              year,
-              income_eur: Math.round(s.valueEur * def.removalFraction * ratio),
-              cost_eur: 0,
-              removal_m3: Math.round(removal),
-              notes: `First thinning BA=${s.basalArea.toFixed(0)} age=${s.ageYears}y`,
-              dueYear: year,
-            });
+          // Tapio-driven removal: calculate fraction from stem count target
+          const target = FIRST_THINNING_TARGET_STEMS_HA[s.species]?.[s.siteClass]
+            ?? FIRST_THINNING_DEFAULT_TARGET;
+          const stemsPerHa = s.stemCount; // already per-hectare
+
+          // Only spawn first_thinning if current stems exceed Tapio target.
+          // Stands already at/below target are optimally thinned — skip.
+          // (This is math, not a guard: (stems-target)/stems would be ≤0)
+          if (stemsPerHa > target) {
+            let removalFraction: number;
+            if (stemsPerHa > target + 50) {
+              // Stand is dense enough: use stem-count-target-driven removal
+              removalFraction = (stemsPerHa - target) / Math.max(1, stemsPerHa);
+              removalFraction = Math.min(FIRST_THINNING_MAX_REMOVAL, Math.max(FIRST_THINNING_MIN_REMOVAL, removalFraction));
+            } else {
+              // Stand slightly above target: use minimum removal
+              removalFraction = FIRST_THINNING_MIN_REMOVAL;
+            }
+            const removal = s.volumeM3 * removalFraction;
+            // Step 8: Peatland min harvest volume
+            if (s.soilType !== "peatland" || removal / s.areaHa >= 40) {
+              s.spawnedTypes.add("first_thinning");
+              const ratio = thinningPriceRatio(s.species, "first_thinning");
+              const removalPct = Math.round(removalFraction * 100);
+              spawned.push({
+                stand: makeMinimalStand(s),
+                type: "first_thinning",
+                year,
+                income_eur: Math.round(s.valueEur * removalFraction * ratio),
+                cost_eur: 0,
+                removal_m3: Math.round(removal),
+                notes: `First thinning BA=${s.basalArea.toFixed(0)} ${Math.round(stemsPerHa)}→${target} stems/ha (${removalPct}%) age=${s.ageYears}y`,
+                dueYear: year,
+              });
+            }
           }
         }
       }
@@ -384,14 +428,15 @@ function spawnOperations(
     // ── Tending eligibility (stem-count- and height-driven, Tapio thresholds) ──
     // No lifecycle guards — if the stand meets criteria, it gets the operation.
     // After tending, stems drop below thresholds (early→4000, tending→2000).
-    const stemsPerHa = s.areaHa > 0 ? s.stemCount / s.areaHa : 0;
+    const stemsPerHa = s.stemCount; // already per-hectare
     const heightThreshold = EARLY_TENDING_MAX_HEIGHT[s.species] ?? 1.5;
 
     if (stemsPerHa > EARLY_TENDING_STEM_THRESHOLD) {
       if (s.meanHeight < heightThreshold) {
         // Early tending needed — stand is too dense and still short
-        const removal = s.stemCount - EARLY_TENDING_TARGET_STEMS_HA * s.areaHa;
-        const removalFraction = s.stemCount > 0 ? Math.min(1, removal / s.stemCount) : 0;
+        const removalFraction = stemsPerHa > 0
+          ? Math.min(1, Math.max(0, (stemsPerHa - EARLY_TENDING_TARGET_STEMS_HA) / stemsPerHa))
+          : 0;
         const removalM3 = Math.round(s.volumeM3 * removalFraction);
         spawned.push({
           stand: makeMinimalStand(s),
@@ -406,8 +451,9 @@ function spawnOperations(
       } else {
         // Stand is too dense but too tall for early tending — needs tending (taimikonharvennus)
         const targetStemsHa = 2000; // Tapio: 1800-2200 after taimikonharvennus
-        const removal = s.stemCount - targetStemsHa * s.areaHa;
-        const removalFraction = s.stemCount > 0 ? Math.min(1, removal / s.stemCount) : 0;
+        const removalFraction = stemsPerHa > 0
+          ? Math.min(1, Math.max(0, (stemsPerHa - targetStemsHa) / stemsPerHa))
+          : 0;
         const removalM3 = Math.round(s.volumeM3 * removalFraction);
         spawned.push({
           stand: makeMinimalStand(s),
@@ -693,15 +739,18 @@ export function runScheduleEngine(
         st.valueEur = Math.max(0, Math.round(st.valueEur * (1 - Math.min(pct, 1))));
         st.spawnedTypes.delete(op.type);
         st.thinningCount++;
-      } else if (op.type === "early_tending" || op.type === "tending") {
+      } else if (op.type === "early_tending") {
         const removal = op.removal_m3;
         const volBefore = st.volumeM3;
         st.volumeM3 = Math.max(0, st.volumeM3 - removal);
-        // Reduce stem count and basal area proportionally to volume removal
-        const removedFraction = st.stemCount > 0 ? removal / Math.max(1, volBefore) : 0;
-        const stemReduction = Math.round(st.stemCount * Math.min(1, removedFraction));
-        st.stemCount = Math.max(0, st.stemCount - stemReduction);
-        st.basalArea = Math.max(0, st.basalArea * (1 - Math.min(1, removedFraction)));
+        st.stemCount = EARLY_TENDING_TARGET_STEMS_HA;
+        st.basalArea = Math.max(0, st.basalArea * (1 - Math.min(1, removal / Math.max(1, volBefore))));
+      } else if (op.type === "tending") {
+        const removal = op.removal_m3;
+        const volBefore = st.volumeM3;
+        st.volumeM3 = Math.max(0, st.volumeM3 - removal);
+        st.stemCount = 2000; // Tapio: 1800-2200 stems/ha after taimikonharvennus
+        st.basalArea = Math.max(0, st.basalArea * (1 - Math.min(1, removal / Math.max(1, volBefore))));
       } else if (op.type.includes("planting")) {
         st.cleared = false;
         st.regenDelayStarted = 0;
@@ -710,7 +759,7 @@ export function runScheduleEngine(
         // Tapio initial seedling state
         const plantSpecies = op.type.replace("_planting", "");
         const density = PLANTING_DENSITY[plantSpecies] ?? 1800;
-        st.stemCount = Math.round(st.areaHa * density);
+        st.stemCount = density; // stems/ha (already per-hectare)
         st.meanHeight = PLANTING_INITIAL_HEIGHT_M;
         st.meanDiameter = PLANTING_INITIAL_DIAMETER_CM;
         st.ageYears = 0;
@@ -740,34 +789,34 @@ export function runScheduleEngine(
       st.ageYears += 1;
 
       // Natural ingress: young stands gain stems from natural regeneration.
-      // Only for stands with stem data (planted or natural with known stem counts).
-      // Continues until stand age > 10 years, up to MAX_STEMS_HA.
-      // New seedlings are planting-sized (h=0.3m, d=0.5cm) — tiny compared to existing trees.
-      if (st.stemCount > 0 && st.ageYears <= 10 && st.stemCount / st.areaHa < MAX_STEMS_HA) {
-        const oldStems = st.stemCount;
-        const ingress = Math.round(Math.min(
-          NATURAL_INGRESS_RATE * st.areaHa,
-          (MAX_STEMS_HA * st.areaHa) - st.stemCount,
+      // All values per-hectare. Seedlings are planting-sized (h=0.3m, d=0.5cm).
+      // Continues until stand age > 10 years, up to MAX_STEMS_HA (both per-ha).
+      if (st.stemCount > 0 && st.ageYears <= 10 && st.stemCount < MAX_STEMS_HA) {
+        const oldStemsPerHa = st.stemCount;
+        const ingressPerHa = Math.round(Math.min(
+          NATURAL_INGRESS_RATE,
+          MAX_STEMS_HA - st.stemCount,
         ));
-        if (ingress > 0) {
+        if (ingressPerHa > 0) {
+          const newStemsPerHa = oldStemsPerHa + ingressPerHa;
           // Weighted average: existing trees keep their height/diameter,
           // new seedlings are at planting size.
           const newHeight = PLANTING_INITIAL_HEIGHT_M;
           const newDiameter = PLANTING_INITIAL_DIAMETER_CM / 100; // cm → m
-          st.meanHeight = (st.meanHeight * oldStems + newHeight * ingress) / st.stemCount;
-          st.meanDiameter = (st.meanDiameter * oldStems + newDiameter * ingress) / st.stemCount;
+          st.meanHeight = (st.meanHeight * oldStemsPerHa + newHeight * ingressPerHa) / newStemsPerHa;
+          st.meanDiameter = (st.meanDiameter * oldStemsPerHa + newDiameter * ingressPerHa) / newStemsPerHa;
 
-          // Basal area contribution from new seedlings (m²/ha → total m²)
-          // Each seedling: π × (d/2)² = π × (0.005/2)² = π × 0.00000625 ≈ 0.0000196 m²
-          const seedlingBA = ingress * Math.PI * (newDiameter / 2) ** 2;
+          // Basal area contribution from new seedlings (m²/ha)
+          // Each seedling: π × (d/2)² = π × (0.005/2)² ≈ 0.0000196 m²
+          const seedlingBA = ingressPerHa * Math.PI * (newDiameter / 2) ** 2;
           st.basalArea += seedlingBA;
 
-          // Volume contribution: approximate as tiny cylinders
-          // Each seedling: basal_area × height = 0.0000196 × 0.3 ≈ 0.0000059 m³
+          // Volume contribution: approximate as tiny cylinders per hectare
+          // Each seedling: basal_area × height ≈ 0.0000059 m³
           const seedlingVol = seedlingBA * newHeight;
           st.volumeM3 += seedlingVol;
 
-          st.stemCount += ingress;
+          st.stemCount = newStemsPerHa;
         }
       }
 

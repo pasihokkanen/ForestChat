@@ -283,7 +283,7 @@ export default function OperationList({ map }: OperationListProps) {
   // Parse pre-operation simulated state from notes (stored as "...|||{json}" suffix)
   interface PreOpState {
     age_years: number; volume_m3: number; area_ha: number; ba: number;
-    stem_count: number; mean_height: number; mean_diameter: number;
+    stem_count_per_ha: number; mean_height: number; mean_diameter: number;
     value_eur: number; main_species: string; development_class: string; site_type: string;
   }
   function parsePreState(notes: string | null): PreOpState | null {
