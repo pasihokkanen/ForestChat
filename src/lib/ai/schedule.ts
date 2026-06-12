@@ -45,8 +45,9 @@ const NATURAL_INGRESS_RATE = 500;
 /** Natural ingress ceiling: max total stems/ha after planting + ingress. */
 const MAX_STEMS_HA = 6000;
 
-/** Early tending trigger: stems/ha must exceed this. Source: Tapio (>4000/ha). */
-const EARLY_TENDING_STEM_THRESHOLD = 4000;
+/** Early tending trigger: stems/ha must exceed this.
+ *  Tapio span: 4000–5000 stems/ha. Midpoint = 4500. */
+const EARLY_TENDING_STEM_THRESHOLD = 4500;
 
 /** Early tending height thresholds (m). Source: Tapio (varhaisperkaus < 1m pine, < 1.5m spruce). */
 const EARLY_TENDING_MAX_HEIGHT: Record<string, number> = {
@@ -86,6 +87,31 @@ const FIRST_THINNING_MIN_REMOVAL = 0.35;
 
 /** Maximum removal fraction for first thinning (Tapio upper bound: 50%). */
 const FIRST_THINNING_MAX_REMOVAL = 0.50;
+
+// ═══════════════════════════════════════════════════════════════════════
+// Tapio regular thinning targets (harvennus)
+// Post-operation basal area (m²/ha) by species × site class.
+// Source: Metsanhoidon suositukset — harvennusmallit
+// ═══════════════════════════════════════════════════════════════════════
+
+/** Tapio post-thinning basal area target (m²/ha) by species and site class. */
+const THINNING_TARGET_BA: Record<string, Record<string, number>> = {
+  pine:       { mesic: 18, "sub-xeric": 16, xeric: 14 },
+  spruce:     { "herb-rich heath": 20, mesic: 19 },
+  silver_birch: { "herb-rich heath": 15, mesic: 15 },
+  downy_birch:  { mesic: 15 },
+  larch:      { mesic: 16, "sub-xeric": 16 },
+  grey_alder: { mesic: 14, "sub-xeric": 14 },
+};
+
+/** Default thinning target BA when species/site not in table. */
+const THINNING_DEFAULT_TARGET_BA = 16;
+
+/** Minimum removal fraction for regular thinning (Tapio lower bound). */
+const THINNING_MIN_REMOVAL = 0.25;
+
+/** Maximum removal fraction for regular thinning (Tapio upper bound). */
+const THINNING_MAX_REMOVAL = 0.45;
 
 // ═══════════════════════════════════════════════════════════════════════
 // Stand splitting stub (not implemented — split removed per user request)
@@ -405,22 +431,35 @@ function spawnOperations(
       }
       // Regular thinning check (also runs if first_thinning was ineligible or skipped)
       if (s.basalArea >= thinThresh && s.ageYears >= minThinAge && !s.spawnedTypes.has("thinning")) {
-        const def = OPERATION_DEFAULTS["thinning"];
-        const removal = s.volumeM3 * def.removalFraction;
-        // Step 8: Peatland min harvest volume
-        if (s.soilType !== "peatland" || removal / s.areaHa >= 40) {
-          s.spawnedTypes.add("thinning");
-          const ratio = thinningPriceRatio(s.species, "thinning");
-          spawned.push({
-            stand: makeMinimalStand(s),
-            type: "thinning",
-            year,
-            income_eur: Math.round(s.valueEur * def.removalFraction * ratio),
-            cost_eur: 0,
-            removal_m3: Math.round(removal),
-            notes: `Thinning BA=${s.basalArea.toFixed(0)} age=${s.ageYears}y`,
-            dueYear: year,
-          });
+        const m3PerHa = s.volumeM3 / s.areaHa;
+        if (m3PerHa >= 50) {
+          // Tapio-driven removal: calculate fraction from BA target
+          const targetBA = THINNING_TARGET_BA[s.species]?.[s.siteClass]
+            ?? THINNING_DEFAULT_TARGET_BA;
+          let removalFraction: number;
+          if (s.basalArea > targetBA) {
+            removalFraction = (s.basalArea - targetBA) / Math.max(1, s.basalArea);
+            removalFraction = Math.min(THINNING_MAX_REMOVAL, Math.max(THINNING_MIN_REMOVAL, removalFraction));
+          } else {
+            removalFraction = THINNING_MIN_REMOVAL; // stand at or below target — use minimum
+          }
+          const removal = s.volumeM3 * removalFraction;
+          // Step 8: Peatland min harvest volume
+          if (s.soilType !== "peatland" || removal / s.areaHa >= 40) {
+            s.spawnedTypes.add("thinning");
+            const ratio = thinningPriceRatio(s.species, "thinning");
+            const removalPct = Math.round(removalFraction * 100);
+            spawned.push({
+              stand: makeMinimalStand(s),
+              type: "thinning",
+              year,
+              income_eur: Math.round(s.valueEur * removalFraction * ratio),
+              cost_eur: 0,
+              removal_m3: Math.round(removal),
+              notes: `Thinning BA=${s.basalArea.toFixed(0)}→${targetBA} m²/ha (${removalPct}%) age=${s.ageYears}y`,
+              dueYear: year,
+            });
+          }
         }
       }
     }

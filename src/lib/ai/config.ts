@@ -98,8 +98,8 @@ export interface OperationDefaults {
 
 export const OPERATION_DEFAULTS: Record<string, OperationDefaults> = {
   clear_cut:          { removalPct: 100, removalFraction: 1.0,  priceTier: "clear_cut" },
-  thinning:           { removalPct: 28,  removalFraction: 0.28, priceTier: "thinning" },
-  first_thinning:     { removalPct: 25,  removalFraction: 0.25, priceTier: "first_thinning" },
+  thinning:           { removalPct: 33,  removalFraction: 0.33, priceTier: "thinning" },
+  first_thinning:     { removalPct: 40,  removalFraction: 0.40, priceTier: "first_thinning" },
   selection_cutting:  { removalPct: 50,  removalFraction: 0.50, priceTier: "thinning" },
   overstory_removal:  { removalPct: 100, removalFraction: 1.0,  priceTier: "clear_cut" },
   early_tending:      { removalPct: 40,  removalFraction: 0.40, priceTier: "" },
@@ -113,8 +113,10 @@ export function getRemovalPct(type: string): number {
 
 // ─── Thinning thresholds ───
 export const THINNING_BA: Record<string, Record<string, number>> = {
-  first_thinning: { pine: 16, spruce: 24, downy_birch: 16, silver_birch: 16, larch: 18, grey_alder: 16 },
-  thinning:       { pine: 20, spruce: 26, downy_birch: 18, silver_birch: 18, larch: 20, grey_alder: 18 },
+  // Tapio ensiharvennus BA triggers (midpoint of span: pine 22-26→24, spruce 26-30→28, birch 20-24→22)
+  first_thinning: { pine: 24, spruce: 28, downy_birch: 22, silver_birch: 22, larch: 22, grey_alder: 18 },
+  // Tapio harvennus BA triggers (midpoint of span: pine 24-28→26, spruce 26-32→29, birch 20-24→22)
+  thinning:       { pine: 26, spruce: 29, downy_birch: 22, silver_birch: 22, larch: 24, grey_alder: 20 },
 };
 
 export const MIN_AGE_FIRST_THINNING: Record<string, number> = { pine: 30, spruce: 25, downy_birch: 20, silver_birch: 20, larch: 25, grey_alder: 20 };

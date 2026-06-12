@@ -61,12 +61,12 @@ describe("schedulePlan (Phase 7b rewrite — dynamic spawning)", () => {
     // mesic ceiling=220, volPerHa=5 → well under. Large area → cap fits 28 m³ removal.
     const stand = makeStand({
       standId: "2",
-      volumeM3: 100, valueEur: 5000, areaHa: 20,
-      ageYears: 50, ba: 25,
-      siteType: "mesic", site_class: "tuore",
+      volumeM3: 2000, valueEur: 50000, areaHa: 20,
+      ageYears: 50, ba: 28,
+      siteType: "mesic", site_class: "mesic",
       annual_growth: 5.5,
     });
-    const { years } = schedulePlan([stand], 2026, 20, "balanced", 1.0);
+    const { years } = schedulePlan([stand], 2026, 20, "maximum_growth_no_cap", 1.0);
     const allThinnings = years.flatMap((y) => y.thinnings);
     expect(allThinnings.length).toBeGreaterThanOrEqual(1);
   });

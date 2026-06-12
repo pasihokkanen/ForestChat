@@ -64,8 +64,8 @@ describe("Forestry Config", () => {
   });
 
   it("THINNING_BA has correct first thinning thresholds", () => {
-    expect(THINNING_BA.first_thinning.pine).toBe(16);
-    expect(THINNING_BA.first_thinning.spruce).toBe(24);
+    expect(THINNING_BA.first_thinning.pine).toBe(24);
+    expect(THINNING_BA.first_thinning.spruce).toBe(28);
   });
 
   it("MIN_AGE_FIRST_THINNING has correct values", () => {
