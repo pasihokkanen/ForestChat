@@ -39,10 +39,20 @@ const PLANTING_INITIAL_HEIGHT_M = 0.3;
 /** Initial seedling diameter (cm) after planting. */
 const PLANTING_INITIAL_DIAMETER_CM = 0.5;
 
-/** Natural ingress: additional stems/ha/year for young planted stands (first 5 years). */
-const NATURAL_INGRESS_RATE = 500;
+/** Natural ingress base rate: max stems/ha/year at zero density.
+ *  Quadratic decline from this rate: ingress = RATE × (1 − (stems/MAX)³).
+ *  Density-dependent: sparse stands get high ingress, dense stands get very low.
+ *  Steep cubic exponent ensures post-early-tending stands (3500 stems/ha) won't
+ *  re-trigger before height crosses the threshold — no history flags needed. */
+const NATURAL_INGRESS_BASE_RATE = 520;
 
-/** Natural ingress ceiling: max total stems/ha after planting + ingress. */
+/** Natural ingress exponent: controls how steeply ingress drops with density.
+ *  Cubic (3.0) creates a sharp knee — fast ingress for sparse stands,
+ *  very slow ingress near carrying capacity. */
+const NATURAL_INGRESS_EXPONENT = 3.0;
+
+/** Natural ingress ceiling: carrying capacity (stems/ha).
+ *  Ingress reaches zero at this density. */
 const MAX_STEMS_HA = 6000;
 
 /** Early tending trigger: stems/ha must exceed this.
@@ -50,7 +60,7 @@ const MAX_STEMS_HA = 6000;
 const EARLY_TENDING_STEM_THRESHOLD = 4000;
 
 /** Early tending height thresholds (m). Source: Tapio (varhaisperkaus < 1m pine, < 1.5m spruce). */
-// Tapio upper bounds: below = varhaisperkaus (early_tending), above = taimikonharvennus (tending)
+// Tapio upper bounds: below = varhaisperkaus (early_tending)
 // Pine: varhaisperkaus at 0.5-1.0m → upper bound 1.0m
 // Spruce: varhaisperkaus at 1.0-1.5m → upper bound 1.5m
 const EARLY_TENDING_MAX_HEIGHT: Record<string, number> = {
@@ -60,6 +70,21 @@ const EARLY_TENDING_MAX_HEIGHT: Record<string, number> = {
   downy_birch: 1.5,
   birch: 1.5,
   larch: 1.2,
+};
+
+/** Tending (taimikonharvennus) minimum height (m). Source: Tapio.
+ *  Taimikonharvennus is done at 2-4m (pine/spruce) or 3-5m (birch).
+ *  Below this height but above EARLY_TENDING_MAX_HEIGHT, no operation
+ *  fires — the stand is in a natural rest period between varhaisperkaus
+ *  and taimikonharvennus.
+ *  Values are midpoints of Tapio windows to produce ~7-9y gaps. */
+const TENDING_MIN_HEIGHT: Record<string, number> = {
+  pine: 3.0,
+  spruce: 3.5,
+  silver_birch: 4.0,
+  downy_birch: 4.0,
+  birch: 4.0,
+  larch: 3.5,
 };
 
 /** Target stems/ha after early tending. Drops below 4000 so ingress can't re-trigger
@@ -468,13 +493,14 @@ function spawnOperations(
     }
 
     // ── Tending eligibility (stem-count- and height-driven, Tapio thresholds) ──
-    // No lifecycle guards — if the stand meets criteria, it gets the operation.
-    // After tending, stems drop below thresholds (early→4000, tending→2000).
+    // Three zones: height < etMax → early_tending; etMax ≤ h < tendMin → nothing;
+    // height ≥ tendMin → tending. No history flags needed.
     const stemsPerHa = s.stemCount; // already per-hectare
-    const heightThreshold = EARLY_TENDING_MAX_HEIGHT[s.species] ?? 1.5;
+    const etMaxHeight = EARLY_TENDING_MAX_HEIGHT[s.species] ?? 1.5;
+    const tendMinHeight = TENDING_MIN_HEIGHT[s.species] ?? 3.5;
 
     if (stemsPerHa > EARLY_TENDING_STEM_THRESHOLD) {
-      if (s.meanHeight < heightThreshold) {
+      if (s.meanHeight < etMaxHeight) {
         // Early tending needed — stand is too dense and still short
         const removalFraction = stemsPerHa > 0
           ? Math.min(1, Math.max(0, (stemsPerHa - EARLY_TENDING_TARGET_STEMS_HA) / stemsPerHa))
@@ -490,8 +516,8 @@ function spawnOperations(
           notes: `Early tending: ${Math.round(stemsPerHa)}→${EARLY_TENDING_TARGET_STEMS_HA} stems/ha, h=${s.meanHeight.toFixed(1)}m${s.plantingYear > 0 ? ` (${year - s.plantingYear}y post-plant)` : ""}`,
           dueYear: year,
         });
-      } else {
-        // Stand is too dense but too tall for early tending — needs tending (taimikonharvennus)
+      } else if (s.meanHeight >= tendMinHeight) {
+        // Stand is too dense AND tall enough for tending (taimikonharvennus)
         const targetStemsHa = 2000; // Tapio: 1800-2200 after taimikonharvennus
         const removalFraction = stemsPerHa > 0
           ? Math.min(1, Math.max(0, (stemsPerHa - targetStemsHa) / stemsPerHa))
@@ -832,12 +858,16 @@ export function runScheduleEngine(
       st.ageYears += 1;
 
       // Natural ingress: young stands gain stems from natural regeneration.
+      // Density-dependent cubic model: ingress = BASE × (1 − (stems/MAX)³).
+      // Sparse stands get fast ingress; near carrying capacity it approaches zero.
       // All values per-hectare. Seedlings are planting-sized (h=0.3m, d=0.5cm).
-      // Continues until stand age > 10 years, up to MAX_STEMS_HA (both per-ha).
+      // Continues until stand age > 10 years, up to MAX_STEMS_HA.
       if (st.stemCount > 0 && st.ageYears <= 10 && st.stemCount < MAX_STEMS_HA) {
         const oldStemsPerHa = st.stemCount;
+        const densityRatio = st.stemCount / MAX_STEMS_HA;
+        const ingressRate = NATURAL_INGRESS_BASE_RATE * (1 - Math.pow(densityRatio, NATURAL_INGRESS_EXPONENT));
         const ingressPerHa = Math.round(Math.min(
-          NATURAL_INGRESS_RATE,
+          ingressRate,
           MAX_STEMS_HA - st.stemCount,
         ));
         if (ingressPerHa > 0) {
