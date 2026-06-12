@@ -852,6 +852,7 @@ export function runScheduleEngine(
         if (st.volumeM3 > 0) {
           const ratio = growthM3 / st.volumeM3;
           st.valueEur = Math.round(st.valueEur * (1 + ratio));
+          st.basalArea = st.basalArea * (1 + ratio);
         }
         st.volumeM3 += growthM3;
       }
