@@ -46,10 +46,13 @@ const NATURAL_INGRESS_RATE = 500;
 const MAX_STEMS_HA = 6000;
 
 /** Early tending trigger: stems/ha must exceed this.
- *  Tapio span: 4000–5000 stems/ha. Midpoint = 4500. */
-const EARLY_TENDING_STEM_THRESHOLD = 4500;
+ *  Tapio: varhaisperkaus when stems > 4000/ha. */
+const EARLY_TENDING_STEM_THRESHOLD = 4000;
 
 /** Early tending height thresholds (m). Source: Tapio (varhaisperkaus < 1m pine, < 1.5m spruce). */
+// Tapio upper bounds: below = varhaisperkaus (early_tending), above = taimikonharvennus (tending)
+// Pine: varhaisperkaus at 0.5-1.0m → upper bound 1.0m
+// Spruce: varhaisperkaus at 1.0-1.5m → upper bound 1.5m
 const EARLY_TENDING_MAX_HEIGHT: Record<string, number> = {
   pine: 1.0,
   spruce: 1.5,
@@ -797,6 +800,7 @@ export function runScheduleEngine(
         st.plantingYear = yr;
         // Tapio initial seedling state
         const plantSpecies = op.type.replace("_planting", "");
+        st.species = plantSpecies; // stand species changes to planted species
         const density = PLANTING_DENSITY[plantSpecies] ?? 1800;
         st.stemCount = density; // stems/ha (already per-hectare)
         st.meanHeight = PLANTING_INITIAL_HEIGHT_M;
