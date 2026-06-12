@@ -805,6 +805,7 @@ export function runScheduleEngine(
         st.volumeM3 = Math.max(0, st.volumeM3 - removal);
         st.basalArea = Math.max(0, st.basalArea * (1 - Math.min(pct, 1)));
         st.valueEur = Math.max(0, Math.round(st.valueEur * (1 - Math.min(pct, 1))));
+        st.stemCount = Math.round(st.stemCount * (1 - Math.min(pct, 1)));
         st.spawnedTypes.delete(op.type);
         st.thinningCount++;
       } else if (op.type === "early_tending") {
