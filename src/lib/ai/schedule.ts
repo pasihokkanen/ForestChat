@@ -877,13 +877,13 @@ export function runScheduleEngine(
           // Weighted average: existing trees keep their height/diameter,
           // new seedlings are at planting size.
           const newHeight = PLANTING_INITIAL_HEIGHT_M;
-          const newDiameter = PLANTING_INITIAL_DIAMETER_CM / 100; // cm → m
+          const newDiameterCm = PLANTING_INITIAL_DIAMETER_CM; // cm — same unit as st.meanDiameter
           st.meanHeight = (st.meanHeight * oldStemsPerHa + newHeight * ingressPerHa) / newStemsPerHa;
-          st.meanDiameter = (st.meanDiameter * oldStemsPerHa + newDiameter * ingressPerHa) / newStemsPerHa;
+          st.meanDiameter = (st.meanDiameter * oldStemsPerHa + newDiameterCm * ingressPerHa) / newStemsPerHa;
 
           // Basal area contribution from new seedlings (m²/ha)
-          // Each seedling: π × (d/2)² = π × (0.005/2)² ≈ 0.0000196 m²
-          const seedlingBA = ingressPerHa * Math.PI * (newDiameter / 2) ** 2;
+          // Each seedling: π × (d/2)² — convert cm→m by dividing by 200
+          const seedlingBA = ingressPerHa * Math.PI * (newDiameterCm / 200) ** 2;
           st.basalArea += seedlingBA;
 
           // Volume contribution: approximate as tiny cylinders per hectare
@@ -896,11 +896,20 @@ export function runScheduleEngine(
       }
 
       // Height growth proxy: seedlings grow slowly (~0.15 m/y), then speed up.
-      // Young stands (0-5y): 0.15 m/y → at year 4 post-plant: 0.3 + 4×0.15 = 0.9m (under pine 1.0m limit ✓)
+      // Young stands (0-5y): 0.15 m/y
       // Mid stands (5-15y): 0.4 m/y → rapid growth phase
       // Older stands (15-30y): 0.3 m/y → slowing down
-      if (st.stemCount > 0 && st.ageYears <= 30) {
-        const heightGrowth = st.ageYears <= 5 ? 0.15 : st.ageYears <= 15 ? 0.4 : 0.3;
+      // Mature stands (30-50y): 0.2 m/y → steady timber growth
+      // Aging stands (50-80y): 0.1 m/y → slow growth
+      // Senescent (80y+): 0.05 m/y → minimal growth
+      if (st.stemCount > 0) {
+        const heightGrowth =
+          st.ageYears <= 5  ? 0.15 :
+          st.ageYears <= 15 ? 0.40 :
+          st.ageYears <= 30 ? 0.30 :
+          st.ageYears <= 50 ? 0.20 :
+          st.ageYears <= 80 ? 0.10 :
+                              0.05;
         st.meanHeight += heightGrowth;
         st.meanDiameter += heightGrowth * 0.7; // diameter grows slower than height
       }
