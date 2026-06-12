@@ -21,7 +21,8 @@ const SPECIES_OPTIONS = [
 // Column keys — labels come from i18n
 const OP_COLUMN_KEYS = [
   "colStand", "colType", "colYear", "colAge", "colSpecies", "colArea",
-  "colVolume", "colRemoval", "colIncome", "colCost", "colDevClass",
+  "colVolume", "colStems", "colHeight", "colDiameter",
+  "colRemoval", "colIncome", "colCost", "colDevClass",
 ] as const;
 
 const COL_KEY_TO_DATA: Record<string, string> = {
@@ -32,6 +33,9 @@ const COL_KEY_TO_DATA: Record<string, string> = {
   colSpecies: "species",
   colArea: "area_ha",
   colVolume: "volume_m3",
+  colStems: "stem_count_per_ha",
+  colHeight: "mean_height",
+  colDiameter: "mean_diameter",
   colRemoval: "removal_pct",
   colIncome: "income_eur",
   colCost: "cost_eur",
@@ -327,7 +331,10 @@ export default function OperationList({ map }: OperationListProps) {
           (pre?.main_species ?? comp?.main_species ?? "").toLowerCase().includes(lower) ||
           (pre?.development_class ?? comp?.development_class ?? "").toLowerCase().includes(lower) ||
           String(pre?.age_years ?? comp?.age_years ?? "").includes(lower) ||
-          String(pre?.volume_m3 ?? comp?.volume_m3 ?? "").includes(lower)
+          String(pre?.volume_m3 ?? comp?.volume_m3 ?? "").includes(lower) ||
+          String(pre?.stem_count_per_ha ?? "").includes(lower) ||
+          String(pre?.mean_height ?? "").includes(lower) ||
+          String(pre?.mean_diameter ?? "").includes(lower)
         );
       });
     }
@@ -346,6 +353,9 @@ export default function OperationList({ map }: OperationListProps) {
         case "species": return row.pre?.main_species ?? row.comp?.main_species ?? "";
         case "area_ha": return row.pre?.area_ha ?? row.comp?.area_ha ?? 0;
         case "volume_m3": return row.pre?.volume_m3 ?? row.comp?.volume_m3 ?? 0;
+        case "stem_count_per_ha": return row.pre?.stem_count_per_ha ?? 0;
+        case "mean_height": return row.pre?.mean_height ?? 0;
+        case "mean_diameter": return row.pre?.mean_diameter ?? 0;
         case "removal_pct": return row.op.removal_pct ?? 0;
         case "income_eur": return row.op.income_eur ?? 0;
         case "cost_eur": return row.op.cost_eur ?? 0;
@@ -556,6 +566,9 @@ export default function OperationList({ map }: OperationListProps) {
                   <td className="px-2 py-1">{displaySpecies(pre?.main_species ?? comp?.main_species ?? "", language) || "—"}</td>
                   <td className="px-2 py-1 text-right">{(pre?.area_ha ?? comp?.area_ha ?? 0).toFixed(1)}</td>
                   <td className="px-2 py-1 text-right">{Math.round(pre?.volume_m3 ?? comp?.volume_m3 ?? 0).toLocaleString()}</td>
+                  <td className="px-2 py-1 text-right">{pre?.stem_count_per_ha != null ? Math.round(pre.stem_count_per_ha).toLocaleString() : "—"}</td>
+                  <td className="px-2 py-1 text-right">{pre?.mean_height != null ? pre.mean_height.toFixed(1) : "—"}</td>
+                  <td className="px-2 py-1 text-right">{pre?.mean_diameter != null ? pre.mean_diameter.toFixed(1) : "—"}</td>
                   <td className="px-2 py-1 text-right">
                     {op.removal_pct != null ? `${op.removal_pct}%` : "—"}
                   </td>

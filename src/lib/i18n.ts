@@ -581,6 +581,9 @@ export interface OperationListLabels {
   colSpecies: string;
   colArea: string;
   colVolume: string;
+  colStems: string;
+  colHeight: string;
+  colDiameter: string;
   colRemoval: string;
   colIncome: string;
   colCost: string;
@@ -614,6 +617,9 @@ export function operationListLabels(lang: Language): OperationListLabels {
       colSpecies: "Puulaji",
       colArea: "Pinta-ala (ha)",
       colVolume: "Til. (m³)",
+      colStems: "Runkoluku",
+      colHeight: "Pituus",
+      colDiameter: "Lpm.",
       colRemoval: "Poistuma %",
       colIncome: "Tuotto (€)",
       colCost: "Kulu (€)",
@@ -645,6 +651,9 @@ export function operationListLabels(lang: Language): OperationListLabels {
     colSpecies: "Species",
     colArea: "Area (ha)",
     colVolume: "Vol. (m³)",
+    colStems: "Stems/ha",
+    colHeight: "Height",
+    colDiameter: "Diam.",
     colRemoval: "Removal %",
     colIncome: "Income (€)",
     colCost: "Cost (€)",
