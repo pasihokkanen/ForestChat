@@ -501,7 +501,7 @@ export async function POST(request: NextRequest) {
               const fp = `${args.goal ?? ""}|${args.start_year ?? ""}|${args.period_years ?? ""}`;
               if (planFingerprints.has(fp)) {
                 console.warn(`[route] Skipping duplicate generate_plan(${fp}) — identical plan already generated`);
-                send({ event: "tool_end", data: { id: chunk.id, name: chunk.name, result: "Plan with these parameters already generated.", error: null } });
+                send({ event: "tool_end", data: { id: chunk.id, name: chunk.name, result: "Plan with these parameters already generated." } });
                 continue;
               }
               planFingerprints.add(fp);

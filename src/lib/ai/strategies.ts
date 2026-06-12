@@ -49,7 +49,8 @@ export const aggressiveStrategy: SchedulingStrategy = {
 
     for (const op of candidates) {
       const vol = op.removal_m3;
-      if (used + vol <= volumeCapM3 || op.removal_m3 === 0) {
+      // Always allow at least one harvest operation through, even over cap
+      if (scheduled.length === 0 || used + vol <= volumeCapM3 || vol === 0) {
         scheduled.push(op);
         used += vol;
       } else {
@@ -157,6 +158,7 @@ export const balancedStrategy: SchedulingStrategy = {
     // Round-robin between thinnings and clearcuts
     let ai = 0, bi = 0;
     let pickA = true;
+    let harvestScheduled = 0;
 
     while (ai < groupA.length || bi < groupB.length) {
       const pool = pickA ? groupA : groupB;
@@ -164,7 +166,11 @@ export const balancedStrategy: SchedulingStrategy = {
 
       if (idx < pool.length) {
         const op = pool[idx];
-        if (used + op.removal_m3 <= volumeCapM3) {
+        // Always allow at least one harvest operation through, even over cap
+        if (harvestScheduled === 0 || used + op.removal_m3 <= volumeCapM3) {
+          scheduled.push(op);
+          used += op.removal_m3;
+          harvestScheduled++;
           scheduled.push(op);
           used += op.removal_m3;
         } else {

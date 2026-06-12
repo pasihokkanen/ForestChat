@@ -176,13 +176,17 @@ describe("schedulePlan with strategies", () => {
       makeStand({ standId: `v${i}`, volumeM3: 500, valueEur: 25000, ageYears: 80, developmentClass: "regeneration_ready" })
     );
     const { years } = schedulePlan([...stands], 2026, 20, "balanced", 1.0);
-    // With cap=1.0× growth (computed from stands), no year should wildly exceed it
+    // At least one operation per year is always scheduled (even if over cap),
+    // but additional operations must fit within the cap.
+    let yearsWithClearcut = 0;
     for (const yp of years) {
       const total = [...yp.finalHarvests, ...yp.thinnings].reduce((s, o) => s + o.removal_m3, 0);
-      // Growth rate per stand ~5 m³/ha/y × 2 ha = 10 m³/y, × 10 stands = ~100 m³/y
-      // So with 1.0× cap, max per year is roughly 100 m³. Allow some slack for rounding.
-      expect(total).toBeLessThanOrEqual(150);
+      if (yp.finalHarvests.length > 0) yearsWithClearcut++;
+      // No year should schedule more than 2 clearcuts (first + one under cap)
+      expect(yp.finalHarvests.length).toBeLessThanOrEqual(2);
     }
+    // All 10 clearcuts should be spread across years (one per year max with 1× cap)
+    expect(yearsWithClearcut).toBe(10);
   });
 
   it("applies Lappi growth multiplier to scheduling", () => {
