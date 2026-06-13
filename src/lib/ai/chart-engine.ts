@@ -205,18 +205,21 @@ function densityFactor(
   developmentClass: string | null
 ): number {
   if (basalArea == null || basalArea === 0) {
-    if (developmentClass && developmentClass.includes("seedling")) return 0.45;
+    if (developmentClass && developmentClass.includes("seedling")) return 0.43;
     if (developmentClass === "open_area") return 0.20;
-    return 0.40;
+    return 0.38;  // slightly lowered: herb-rich young stands overshoot at 0.40
   }
   const expected = EXPECTED_BA[siteType] ?? 20;
   const density = basalArea / expected;
+  // Phase 9 recalibrated brackets: dynamic BA (computed from V/(H×f)) is ~30%
+  // lower than old proportional BA, so density ratios shift down. Brackets
+  // shifted up to maintain Tapio-consistent effective multiplier (~0.43).
   let raw: number;
-  if (density < 0.5)       raw = 0.55;
-  else if (density < 0.75) raw = 0.70;
-  else if (density < 1.3)  raw = 0.85;
-  else if (density < 1.5)  raw = 0.78;
-  else                     raw = 0.65;
+  if (density < 0.35)      raw = 0.72;  // was <0.5→0.55
+  else if (density < 0.55) raw = 0.87;  // was 0.5-0.75→0.70
+  else if (density < 0.95) raw = 0.95;  // was 0.75-1.3→0.85
+  else if (density < 1.10) raw = 0.83;  // was 1.3-1.5→0.78
+  else                     raw = 0.68;  // was 0.65
   return raw;
 }
 

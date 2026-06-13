@@ -1,7 +1,11 @@
 // src/lib/ai/stand-simulator.ts
 // Single-stand forward simulation — replays operations year by year,
-// applying GROW + ingress + height/diameter growth. Returns state snapshots
-// that are always consistent with the current operations in the DB.
+// applying GROW + ingress + per-species Tapio-anchored height/BA/diameter.
+// Returns state snapshots that are always consistent with the current
+// operations in the DB.
+//
+// Phase 9: Replaced height/diameter proxy and proportional BA with
+// per-species Tapio-anchored model (tapio-growth.ts).
 //
 // Used by the /api/forest/[id]/simulate endpoint for on-demand simulation
 // when stand-level operations are edited.
@@ -16,8 +20,15 @@ import {
   NATURAL_INGRESS_EXPONENT,
   MAX_STEMS_HA,
 } from "./schedule";
+import {
+  meanHeight,
+  computeSpeciesBA,
+  computeStandBA,
+  computeStandHeight,
+  computeDiameter,
+} from "./tapio-growth";
 
-// Internal mutable stand state (mirrors SimStand subset)
+// Internal mutable stand state (mirrors SimStand subset, minus basalArea)
 interface SimState {
   standId: string;
   areaHa: number;
@@ -27,7 +38,6 @@ interface SimState {
   developmentClass: string;
   volumeM3: number;
   ageYears: number;
-  basalArea: number;
   stemCount: number;
   meanHeight: number;
   meanDiameter: number;
@@ -40,7 +50,6 @@ interface SimState {
     meanHeight: number;
     meanDiameter: number;
     age: number;
-    basalArea: number;
     areaHa: number;
   }[];
 }
@@ -62,7 +71,6 @@ function initState(stand: StandData): SimState {
     developmentClass: stand.developmentClass,
     volumeM3: stand.volumeM3,
     ageYears: stand.ageYears,
-    basalArea: stand.ba,
     stemCount: stand.stemCount,
     meanHeight: stand.meanHeight,
     meanDiameter: stand.meanDiameter,
@@ -75,56 +83,67 @@ function initState(stand: StandData): SimState {
       meanHeight: sp.meanHeight,
       meanDiameter: sp.meanDiameter,
       age: sp.age,
-      basalArea: sp.basalArea,
       areaHa: sp.areaHa ?? 0,
     })),
   };
 }
 
-function snapshotState(st: SimState, year: number, isInitial: boolean): StandSnapshot {
-  const totalStems = st.speciesData.reduce((s, sd) => s + sd.stemCount, 0);
-  const oldWeightedHeight =
-    totalStems > 0
-      ? st.speciesData.reduce((s, sd) => s + sd.meanHeight * sd.stemCount, 0) / totalStems
-      : 0;
-  const heightDelta = st.meanHeight - oldWeightedHeight;
-  const oldWeightedDiameter =
-    totalStems > 0
-      ? st.speciesData.reduce((s, sd) => s + sd.meanDiameter * sd.stemCount, 0) / totalStems
-      : 0;
-  const diameterDelta = st.meanDiameter - oldWeightedDiameter;
+/**
+ * Build per-species aggregate maps for stand-level BA/height/diameter computation.
+ */
+function speciesForAgg(st: SimState): Array<{
+  volumeM3: number; species: string; stemCount: number; diameterCm: number;
+}> {
+  return st.speciesData.map((sp) => ({
+    volumeM3: sp.volumeM3,
+    species: sp.species,
+    stemCount: sp.stemCount,
+    diameterCm: 0,
+  }));
+}
 
-  const totalVol = st.speciesData.reduce((s, sp) => s + sp.volumeM3, 0);
-  const volRatio = totalVol > 0 ? st.volumeM3 / totalVol : 1;
+function snapshotState(st: SimState, year: number, _isInitial: boolean): StandSnapshot {
+  // Compute stand-level aggregates from species data
+  const speciesForAggData = speciesForAgg(st);
+  const standBA = computeStandBA(speciesForAggData, st.ageYears, st.siteType);
+  const standHeight = computeStandHeight(speciesForAggData, st.ageYears, st.siteType);
+  const standDiamCm = computeDiameter(standBA, st.stemCount);
+
+  // Use volRatio to ensure per-species volumes sum exactly to stand total
+  const rawTotalVol = st.speciesData.reduce((s, sp) => s + sp.volumeM3, 0);
+  const volRatio = rawTotalVol > 0 ? st.volumeM3 / rawTotalVol : 1;
   const totalSpeciesStems = st.speciesData.reduce((s, sd) => s + sd.stemCount, 0);
 
+  // Per-species snapshots — each species gets its own Tapio height and BA
   const speciesSnapshots: SpeciesSnapshot[] = st.speciesData.map((sp) => {
     const stemsPerHa =
       totalSpeciesStems > 0
         ? Math.round(sp.stemCount * st.stemCount / totalSpeciesStems)
         : 0;
-    const diamCm = Math.round((sp.meanDiameter + diameterDelta) * 10) / 10;
+    const sppVol = Math.round(sp.volumeM3 * volRatio);
+    const sppH = meanHeight(sp.species, st.siteType, st.ageYears);
+    const sppBA = computeSpeciesBA(sppVol, sppH, sp.species, stemsPerHa, 0);
+    const sppDiam = computeDiameter(sppBA, stemsPerHa);
     return {
       species: sp.species,
-      volumeM3: Math.round(sp.volumeM3 * volRatio),
+      volumeM3: sppVol,
       logPct: sp.logPct,
       stemCountPerHa: stemsPerHa,
-      meanHeight: Math.round((sp.meanHeight + heightDelta) * 10) / 10,
-      meanDiameter: diamCm,
+      meanHeight: sppH,
+      meanDiameter: sppDiam,
       age: st.ageYears,
-      basalArea: Math.round(stemsPerHa * Math.PI * Math.pow(diamCm / 200, 2) * 10) / 10,
+      basalArea: sppBA,
       areaHa: sp.areaHa ?? 0,
     };
   });
 
-  const standDiamCm = Math.round(st.meanDiameter * 10) / 10;
   return {
     standId: st.standId,
     areaHa: st.areaHa,
     volumeM3: Math.round(st.volumeM3),
-    basalArea: Math.round(st.stemCount * Math.PI * Math.pow(standDiamCm / 200, 2) * 10) / 10,
+    basalArea: standBA,
     stemCount: st.stemCount,
-    meanHeight: Math.round(st.meanHeight * 10) / 10,
+    meanHeight: standHeight,
     meanDiameter: standDiamCm,
     ageYears: st.ageYears,
     species: st.species,
@@ -139,7 +158,6 @@ function applyOperation(st: SimState, op: DBOperation, year: number): void {
 
   if (op.type === "clear_cut") {
     st.volumeM3 = 0;
-    st.basalArea = 0;
     st.ageYears = 0;
     st.stemCount = 0;
     st.meanHeight = 0;
@@ -147,24 +165,19 @@ function applyOperation(st: SimState, op: DBOperation, year: number): void {
     st.cleared = true;
   } else if (op.type === "selection_cutting" || op.type === "overstory_removal") {
     st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
-    st.basalArea = Math.round(st.basalArea * (1 - pct) * 10) / 10;
     if (op.type === "overstory_removal") {
       st.volumeM3 = Math.max(st.volumeM3, st.areaHa * 1);
-      st.basalArea = Math.max(st.basalArea, 2);
       st.developmentClass = "seedling";
     }
   } else if (op.type === "thinning" || op.type === "first_thinning") {
     st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
-    st.basalArea = Math.round(st.basalArea * (1 - pct) * 10) / 10;
     st.stemCount = Math.round(st.stemCount * (1 - pct));
   } else if (op.type === "early_tending") {
     st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
     st.stemCount = 3500; // Tapio early tending target
-    st.basalArea = Math.round(st.basalArea * (1 - pct) * 10) / 10;
   } else if (op.type === "tending") {
     st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
     st.stemCount = 2000; // Tapio tending target
-    st.basalArea = Math.round(st.basalArea * (1 - pct) * 10) / 10;
   } else if (op.type.includes("planting")) {
     st.cleared = false;
     const plantSpecies = op.type.replace("_planting", "");
@@ -174,7 +187,6 @@ function applyOperation(st: SimState, op: DBOperation, year: number): void {
     st.meanHeight = PLANTING_INITIAL_HEIGHT_M;
     st.meanDiameter = PLANTING_INITIAL_DIAMETER_CM;
     st.ageYears = 0;
-    if (st.basalArea === 0) st.basalArea = 2;
     if (st.volumeM3 === 0) st.volumeM3 = st.areaHa * 1;
     st.speciesData = [
       {
@@ -185,7 +197,6 @@ function applyOperation(st: SimState, op: DBOperation, year: number): void {
         meanHeight: PLANTING_INITIAL_HEIGHT_M,
         meanDiameter: PLANTING_INITIAL_DIAMETER_CM,
         age: 0,
-        basalArea: st.basalArea,
         areaHa: st.areaHa,
       },
     ];
@@ -193,31 +204,49 @@ function applyOperation(st: SimState, op: DBOperation, year: number): void {
 }
 
 function growStand(st: SimState): void {
+  // Cleared stands still age (bare ground gets older), but don't grow
   if (st.cleared || st.areaHa <= 0) {
     st.ageYears += 1;
     return;
   }
 
-  const growthPerHa = getGrowthRate(
-    st.siteType,
-    st.soilType,
-    st.species,
+  // Compute summed stand BA for growth rate input (from previous year's state).
+  const prevStandBA = computeStandBA(
+    speciesForAgg(st),
     st.ageYears,
-    st.basalArea,
-    null,
+    st.siteType,
+  );
+
+  const growthPerHa = getGrowthRate(
+    st.siteType, st.soilType, st.species,
+    st.ageYears, prevStandBA, null,
     1.0,
     st.areaHa > 0 ? st.volumeM3 / st.areaHa : undefined,
     true,
   );
   const growthM3 = growthPerHa * st.areaHa;
-  if (st.volumeM3 > 0) {
-    const ratio = growthM3 / st.volumeM3;
-    st.basalArea = st.basalArea * (1 + ratio);
-  }
   st.volumeM3 += growthM3;
   st.ageYears += 1;
 
-  // Natural ingress (same logic as schedule.ts)
+  // Update per-species volumes proportionally
+  if (st.speciesData.length > 0) {
+    const totalVol = st.speciesData.reduce((s, sp) => s + sp.volumeM3, 0);
+    if (totalVol > 0) {
+      const ratio = 1 + growthM3 / totalVol;
+      for (const sp of st.speciesData) {
+        sp.volumeM3 = Math.round(sp.volumeM3 * ratio * 10) / 10;
+      }
+    }
+  }
+
+  // Stand height from basal-area-weighted per-species heights
+  st.meanHeight = computeStandHeight(
+    speciesForAgg(st),
+    st.ageYears,
+    st.siteType,
+  );
+
+  // Natural ingress (unchanged from current model)
   if (st.stemCount > 0 && st.ageYears <= 10 && st.stemCount < MAX_STEMS_HA) {
     const oldStemsPerHa = st.stemCount;
     const densityRatio = st.stemCount / MAX_STEMS_HA;
@@ -227,38 +256,17 @@ function growStand(st: SimState): void {
       Math.min(ingressRate, MAX_STEMS_HA - st.stemCount),
     );
     if (ingressPerHa > 0) {
-      const newStemsPerHa = oldStemsPerHa + ingressPerHa;
-      const newHeight = PLANTING_INITIAL_HEIGHT_M;
-      const newDiameterCm = PLANTING_INITIAL_DIAMETER_CM;
-      st.meanHeight =
-        (st.meanHeight * oldStemsPerHa + newHeight * ingressPerHa) / newStemsPerHa;
-      st.meanDiameter =
-        (st.meanDiameter * oldStemsPerHa + newDiameterCm * ingressPerHa) / newStemsPerHa;
-      const seedlingBA = ingressPerHa * Math.PI * (newDiameterCm / 200) ** 2;
-      st.basalArea += seedlingBA;
-      const seedlingVol = seedlingBA * newHeight;
-      st.volumeM3 += seedlingVol;
-      st.stemCount = newStemsPerHa;
+      st.stemCount = oldStemsPerHa + ingressPerHa;
     }
   }
 
-  // Height/diameter growth
-  if (st.stemCount > 0) {
-    const heightGrowth =
-      st.ageYears <= 5
-        ? 0.15
-        : st.ageYears <= 15
-          ? 0.4
-          : st.ageYears <= 30
-            ? 0.3
-            : st.ageYears <= 50
-              ? 0.2
-              : st.ageYears <= 80
-                ? 0.1
-                : 0.05;
-    st.meanHeight += heightGrowth;
-    st.meanDiameter += heightGrowth * 0.7;
-  }
+  // Compute stand BA and diameter from species aggregates
+  const standBA = computeStandBA(
+    speciesForAgg(st),
+    st.ageYears,
+    st.siteType,
+  );
+  st.meanDiameter = computeDiameter(standBA, st.stemCount);
 }
 
 /**
