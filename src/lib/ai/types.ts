@@ -11,6 +11,42 @@ export interface SpeciesDatum {
   meanDiameter: number;
   age: number;
   basalArea: number;
+  areaHa: number;
+}
+
+/** Snapshot of one stand at one simulation year */
+export interface StandSnapshot {
+  standId: string;
+  areaHa: number;
+  volumeM3: number;
+  basalArea: number;
+  stemCount: number;
+  meanHeight: number;
+  meanDiameter: number;
+  ageYears: number;
+  species: string;
+  siteType: string;
+  developmentClass: string;
+  /** Per-species breakdown, proportionally scaled from aggregate */
+  speciesData: SpeciesSnapshot[];
+}
+
+export interface SpeciesSnapshot {
+  species: string;
+  volumeM3: number;
+  logPct: number;
+  stemCountPerHa: number;
+  meanHeight: number;
+  meanDiameter: number;
+  age: number;
+  basalArea: number;
+  areaHa: number;
+}
+
+/** All stand snapshots for one simulation year */
+export interface YearSnapshot {
+  year: number;
+  stands: StandSnapshot[];
 }
 
 /** Enriched compartment data used by the forestry engine */

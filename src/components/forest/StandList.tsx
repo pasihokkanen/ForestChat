@@ -3,16 +3,20 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useForestStore } from "@/lib/store";
 import type { Compartment, CompartmentSpecies, Operation } from "@/types/database";
+import type { YearSnapshot } from "@/lib/ai/types";
 import { displayDevClass, displaySiteType, displaySpecies, displayOp, standListLabels } from "@/lib/i18n";
 import type maplibregl from "maplibre-gl";
+import SimulationView from "./SimulationView";
+import type { PlannedOpForView } from "./SimulationView";
 
-type StandRowType = "stand" | "species" | "operation" | "empty";
+type StandRowType = "stand" | "species" | "operation" | "empty" | "expandedContent";
 
 type StandDisplayRow =
   | { rowType: "stand"; data: Compartment; species: CompartmentSpecies[]; operations: Operation[] }
   | { rowType: "species"; parentStandId: string; data: CompartmentSpecies }
   | { rowType: "operation"; parentStandId: string; data: Operation }
-  | { rowType: "empty"; parentStandId: string };
+  | { rowType: "empty"; parentStandId: string }
+  | { rowType: "expandedContent"; parentStandId: string; data: Compartment; species: CompartmentSpecies[]; operations: Operation[] };
 
 interface StandListProps {
   map: maplibregl.Map | null;
@@ -81,7 +85,19 @@ export default function StandList({ map }: StandListProps) {
   const setPendingStandSelection = useForestStore((s) => s.setPendingStandSelection);
   const aiStandFilters = useForestStore((s) => s.aiStandFilters);
   const language = useForestStore((s) => s.language) ?? "en";
+  const planMetadata = useForestStore((s) => s.planMetadata);
   const L = standListLabels(language);
+
+  // Parse simulation snapshots from plan metadata
+  const simulationSnapshots = useMemo(() => {
+    if (!planMetadata?.simulation_data) return null;
+    try {
+      return JSON.parse(planMetadata.simulation_data) as YearSnapshot[];
+    } catch (e) {
+      console.error("Failed to parse simulation_data:", e);
+      return null;
+    }
+  }, [planMetadata?.simulation_data]);
 
   // ── State backed by module-level standPersist to survive tab switches ──
   const [expandedStands, setExpandedStandsRaw] = useState<Set<string>>(
@@ -342,15 +358,7 @@ export default function StandList({ map }: StandListProps) {
       rows.push({ rowType: "stand", data: comp, species, operations: ops });
 
       if (expandedStands.has(comp.stand_id)) {
-        for (const sp of species) {
-          rows.push({ rowType: "species", parentStandId: comp.stand_id, data: sp });
-        }
-        for (const op of ops) {
-          rows.push({ rowType: "operation", parentStandId: comp.stand_id, data: op });
-        }
-        if (species.length === 0 && ops.length === 0) {
-          rows.push({ rowType: "empty", parentStandId: comp.stand_id });
-        }
+        rows.push({ rowType: "expandedContent", parentStandId: comp.stand_id, data: comp, species, operations: ops });
       }
     }
     return rows;
@@ -632,58 +640,78 @@ export default function StandList({ map }: StandListProps) {
               }
 
               if (row.rowType === "species") {
-                return (
-                  <tr key={`sp-${row.data.id}`} className="border-b border-gray-50 dark:border-gray-800/50 bg-gray-50/50 dark:bg-gray-800/20 text-xs">
-                    <td className="px-1 py-1"></td>
-                    <td className="px-2 py-1 pl-8 text-gray-500" colSpan={2}>
-                      ↳ {displaySpecies(row.data.species, language)}
-                    </td>
-                    <td className="px-2 py-1 text-right text-gray-500">{(row.data.area_ha ?? 0).toFixed(1)}</td>
-                    <td className="px-2 py-1 text-right text-gray-500">{Math.round(row.data.volume_m3 ?? 0).toLocaleString()}</td>
-                    <td className="px-2 py-1 text-gray-500" colSpan={2}>
-                      {L.logPct}: {row.data.log_pct != null ? `${row.data.log_pct}%` : "—"}
-                    </td>
-                    <td className="px-2 py-1"></td>
-                    <td className="px-2 py-1"></td>
-                    <td className="px-1 py-1"></td>
-                  </tr>
-                );
+                // Legacy species rows — kept for backward compatibility but unused
+                return null;
               }
 
               if (row.rowType === "operation") {
-                return (
-                  <tr key={`op-${row.data.id}`} className="border-b border-gray-50 dark:border-gray-800/50 bg-gray-50/50 dark:bg-gray-800/20 text-xs">
-                    <td className="px-1 py-1"></td>
-                    <td className="px-2 py-1 pl-8 text-gray-500" colSpan={2}>
-                      ↳ {displayOp(row.data.type, language)} ({row.data.year})
-                    </td>
-                    <td className="px-2 py-1"></td>
-                    <td className="px-2 py-1 text-right text-gray-500">
-                      {row.data.removal_pct != null ? `${row.data.removal_pct}%` : "—"}
-                    </td>
-                    <td className="px-2 py-1 text-right text-green-600 dark:text-green-400">
-                      {row.data.income_eur != null && row.data.income_eur !== 0
-                        ? `+${Math.round(row.data.income_eur).toLocaleString()} €`
-                        : ""}
-                    </td>
-                    <td className="px-2 py-1 text-right text-orange-600 dark:text-orange-400">
-                      {row.data.cost_eur != null && row.data.cost_eur !== 0
-                        ? `−${Math.round(row.data.cost_eur).toLocaleString()} €`
-                        : ""}
-                    </td>
-                    <td className="px-2 py-1"></td>
-                    <td className="px-2 py-1"></td>
-                    <td className="px-1 py-1"></td>
-                  </tr>
-                );
+                // Legacy operation rows — kept for backward compatibility but unused
+                return null;
               }
 
               if (row.rowType === "empty") {
+                // Legacy empty rows — kept for backward compatibility but unused
+                return null;
+              }
+
+              if (row.rowType === "expandedContent") {
+                // Filter to operations for THIS stand only
+                const opsForStand = row.operations.filter(op => op.compartment_id === row.data.id);
+
+                // Filter species: only show those with stem_count_per_ha > 0
+                const activeSpecies = row.species.filter(sp => (sp.stem_count_per_ha ?? 0) > 0);
+
                 return (
-                  <tr key={`empty-${row.parentStandId}`} className="border-b border-gray-50 dark:border-gray-800/50 bg-gray-50/50 dark:bg-gray-800/20 text-xs">
-                    <td className="px-1 py-1"></td>
-                    <td className="px-2 py-1 pl-8 text-gray-400 italic" colSpan={9}>
-                      {L.expandedEmpty}
+                  <tr key={`expand-${row.parentStandId}`}>
+                    <td colSpan={9} className="p-0">
+                      <div className="border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/20">
+                        {/* Current State — species rows with ALL fields */}
+                        <div className="px-4 py-2">
+                          <div className="text-xs font-semibold text-gray-500 mb-1">
+                            {L.simCurrentState}
+                          </div>
+                          {activeSpecies.map(sp => (
+                            <div key={sp.id} className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-600 pl-4 mb-1">
+                              <span className="font-medium w-20">{displaySpecies(sp.species, language)}</span>
+                              <span>Vol: {Math.round(sp.volume_m3 ?? 0).toLocaleString()} m³</span>
+                              <span>{L.colBA}: {(sp.basal_area ?? 0).toFixed(1)}</span>
+                              <span>{L.colStems}: {(sp.stem_count_per_ha ?? 0).toLocaleString()}</span>
+                              <span>{L.colHeight}: {(sp.mean_height ?? 0).toFixed(1)}</span>
+                              <span>{L.colDiameter}: {(sp.mean_diameter ?? 0).toFixed(1)}</span>
+                              <span>{L.colAge}: {sp.age ?? ""}</span>
+                              <span>{L.logPct}: {sp.log_pct != null ? `${sp.log_pct}%` : "—"}</span>
+                              <span>{L.colArea}: {(sp.area_ha ?? 0).toFixed(1)} ha</span>
+                            </div>
+                          ))}
+                          {activeSpecies.length === 0 && (
+                            <div className="text-xs text-gray-400 italic pl-4">
+                              No species with stems &gt; 0
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Simulation — year blocks with inline operations */}
+                        {simulationSnapshots && simulationSnapshots.length > 0 ? (
+                          <SimulationView
+                            standId={row.data.stand_id}
+                            simulationSnapshots={simulationSnapshots}
+                            operations={opsForStand.map(op => ({
+                              year: op.year,
+                              type: op.type,
+                              removalPct: op.removal_pct ?? 0,
+                              incomeEur: op.income_eur ?? 0,
+                              costEur: op.cost_eur ?? 0,
+                              notes: op.notes ?? "",
+                            }))}
+                            language={language}
+                            labels={L}
+                          />
+                        ) : (
+                          <div className="px-4 py-2 text-xs text-gray-400 italic">
+                            {L.simNoData}
+                          </div>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );

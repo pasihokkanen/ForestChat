@@ -5,6 +5,7 @@ import { useForest } from "@/lib/hooks/use-forest";
 import { useCharts } from "@/lib/hooks/use-charts";
 import { useOperations } from "@/lib/hooks/use-operations";
 import { useCompartmentSpecies } from "@/lib/hooks/use-compartment-species";
+import { usePlanMetadata } from "@/lib/hooks/use-plan-metadata";
 import { useForestStore } from "@/lib/store";
 import { compartmentsToGeoJSON, fitBoundsToFeatures } from "@/lib/map/geojson";
 import type { CompartmentFeatureCollection } from "@/types/database";
@@ -55,6 +56,7 @@ export default function ForestView({ forestId }: ForestViewProps) {
   } = useCompartments(forestId);
   useOperations(forestId);
   useCompartmentSpecies(forestId);
+  usePlanMetadata(forestId);
   const setForest = useForestStore((s) => s.setForest);
   const setCompartments = useForestStore((s) => s.setCompartments);
 

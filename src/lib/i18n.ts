@@ -499,6 +499,14 @@ export interface StandListLabels {
   footerFilteredFrom: string;
   showOnMap: string;
   logPct: string;
+  colStems: string;
+  colHeight: string;
+  colDiameter: string;
+  colBA: string;
+  simHeader: string;
+  simYearLabel: string;
+  simNoData: string;
+  simCurrentState: string;
 }
 
 export function standListLabels(lang: Language): StandListLabels {
@@ -535,6 +543,14 @@ export function standListLabels(lang: Language): StandListLabels {
       footerFilteredFrom: "(suodatettu",
       showOnMap: "Näytä kartalla",
       logPct: "Tukki",
+      colStems: "Runkoluku/ha",
+      colHeight: "Pituus (m)",
+      colDiameter: "Lpm. (cm)",
+      colBA: "PPA (m²/ha)",
+      simHeader: "Simulaatio",
+      simYearLabel: "Vuosi",
+      simNoData: "Ei simulaatiodataa. Luo metsäsuunnitelma ensin.",
+      simCurrentState: "Nykyinen tila",
     };
   }
   return {
@@ -569,6 +585,14 @@ export function standListLabels(lang: Language): StandListLabels {
     footerFilteredFrom: "(filtered from",
     showOnMap: "Show on map",
     logPct: "Log",
+    colStems: "Stems/ha",
+    colHeight: "Height (m)",
+    colDiameter: "Diam. (cm)",
+    colBA: "BA (m²/ha)",
+    simHeader: "Simulation",
+    simYearLabel: "Year",
+    simNoData: "No simulation data. Generate a plan first.",
+    simCurrentState: "Current State",
   };
 }
 

@@ -110,6 +110,7 @@ function enrichCompartment(
     meanDiameter: sp.mean_diameter ?? 0,
     age: sp.age ?? c.age_years ?? 0,
     basalArea: sp.basal_area ?? 0,
+    areaHa: sp.area_ha ?? 0,
   }));
 
   // Stems per hectare: sum of per-species per-ha values, fallback to compartment.stem_count_per_ha
@@ -265,7 +266,7 @@ export async function generatePlan(
 
     // ── 4. Schedule ──
     const startYear = args.startYear ?? new Date().getFullYear();
-    const { years, summary } = schedulePlan(
+    const { years, summary, simulationSnapshots } = schedulePlan(
       forestStands,
       startYear,
       periodYears,
@@ -348,6 +349,7 @@ export async function generatePlan(
       annual_growth_m3: summary.annualGrowth,
       owner_stated_value_eur: null,
       goal,
+      simulation_data: JSON.stringify(simulationSnapshots),
     };
 
     const { data: existingMeta } = await supabase

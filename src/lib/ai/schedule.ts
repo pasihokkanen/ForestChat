@@ -8,7 +8,7 @@
 // No stand splitting. No initial operation pool. All operations are spawned
 // on-demand from the current simulated state.
 
-import type { StandData, PlannedOperation, PlanGoal, YearPlan, PlanSummary, SpeciesDatum } from "./types";
+import type { StandData, PlannedOperation, PlanGoal, YearPlan, PlanSummary, SpeciesDatum, YearSnapshot, StandSnapshot, SpeciesSnapshot } from "./types";
 import { getOptimalAge, THINNING_BA, MIN_AGE_FIRST_THINNING, MIN_AGE_THINNING, getPrices, COSTS, OPERATION_DEFAULTS } from "./config";
 import { getGrowthRate } from "./chart-engine";
 import { getStrategy, type SchedulingStrategy } from "./strategies";
@@ -609,6 +609,8 @@ export interface ScheduleResult {
   overspillOps: number;
   /** Total removal m³ of overspill operations */
   overspillM3: number;
+  /** Year-by-year snapshots of all stand states after GROW step */
+  simulationSnapshots: YearSnapshot[];
 }
 
 /**
@@ -687,6 +689,42 @@ export function runScheduleEngine(
   let carryover: PlannedOperation[] = [];
   const yearPlans = new Map<number, PlannedOperation[]>();
   const annualGrowthHistory: number[] = [];
+  const simulationSnapshots: YearSnapshot[] = [];
+
+  // ── SNAPSHOT year 0: initial state before any simulation ──
+  {
+    const year0Snapshot: YearSnapshot = {
+      year: startYear - 1,
+      stands: [],
+    };
+    for (const st of stands.values()) {
+      year0Snapshot.stands.push({
+        standId: st.standId,
+        areaHa: st.areaHa,
+        volumeM3: Math.round(st.volumeM3),
+        basalArea: Math.round(st.basalArea * 10) / 10,
+        stemCount: st.stemCount,
+        meanHeight: Math.round(st.meanHeight * 10) / 10,
+        meanDiameter: Math.round(st.meanDiameter * 10) / 10,
+        ageYears: st.ageYears,
+        species: st.species,
+        siteType: st.siteType,
+        developmentClass: st.developmentClass,
+        speciesData: st.speciesData.map(sp => ({
+          species: sp.species,
+          volumeM3: Math.round(sp.volumeM3),
+          logPct: sp.logPct,
+          stemCountPerHa: sp.stemCount,
+          meanHeight: Math.round(sp.meanHeight * 10) / 10,
+          meanDiameter: Math.round(sp.meanDiameter * 10) / 10,
+          age: sp.age,
+          basalArea: Math.round(sp.basalArea * 10) / 10,
+          areaHa: sp.areaHa ?? 0,
+        })),
+      });
+    }
+    simulationSnapshots.push(year0Snapshot);
+  }
 
   // ── DEBUG: one-time diagnostic — carrying-capacity cap impact ──
   {
@@ -924,6 +962,61 @@ export function runScheduleEngine(
 
     // ── 8. CARRYOVER: unselected ops pushed to next year ──
     carryover = remaining;
+
+    // ── SNAPSHOT: capture all stand states for this year ──
+    const yearSnapshot: YearSnapshot = {
+      year: yr,
+      stands: [],
+    };
+    for (const st of stands.values()) {
+      // Compute the growth delta applied to the stand (for per-species height/diameter)
+      const totalStems = st.speciesData.reduce((s, sd) => s + sd.stemCount, 0);
+      const oldWeightedHeight = totalStems > 0
+        ? st.speciesData.reduce((s, sd) => s + sd.meanHeight * sd.stemCount, 0) / totalStems
+        : 0;
+      const heightDelta = st.meanHeight - oldWeightedHeight;
+      const oldWeightedDiameter = totalStems > 0
+        ? st.speciesData.reduce((s, sd) => s + sd.meanDiameter * sd.stemCount, 0) / totalStems
+        : 0;
+      const diameterDelta = st.meanDiameter - oldWeightedDiameter;
+
+      // Proportionally scale species breakdown
+      const totalVol = st.speciesData.reduce((s, sp) => s + sp.volumeM3, 0);
+      const volRatio = totalVol > 0 ? st.volumeM3 / totalVol : 1;
+      const totalBA = st.speciesData.reduce((s, sp) => s + sp.basalArea, 0);
+      const baRatio = totalBA > 0 ? st.basalArea / totalBA : 1;
+      const totalSpeciesStems = st.speciesData.reduce((s, sd) => s + sd.stemCount, 0);
+
+      const speciesSnapshots: SpeciesSnapshot[] = st.speciesData.map(sp => ({
+        species: sp.species,
+        volumeM3: Math.round(sp.volumeM3 * volRatio),
+        logPct: sp.logPct,
+        stemCountPerHa: totalSpeciesStems > 0
+          ? Math.round(sp.stemCount * st.stemCount / totalSpeciesStems)
+          : 0,
+        meanHeight: Math.round((sp.meanHeight + heightDelta) * 10) / 10,
+        meanDiameter: Math.round((sp.meanDiameter + diameterDelta) * 10) / 10,
+        age: st.ageYears,
+        basalArea: Math.round(sp.basalArea * baRatio * 10) / 10,
+        areaHa: sp.areaHa ?? 0,
+      }));
+
+      yearSnapshot.stands.push({
+        standId: st.standId,
+        areaHa: st.areaHa,
+        volumeM3: Math.round(st.volumeM3),
+        basalArea: Math.round(st.basalArea * 10) / 10,
+        stemCount: st.stemCount,
+        meanHeight: Math.round(st.meanHeight * 10) / 10,
+        meanDiameter: Math.round(st.meanDiameter * 10) / 10,
+        ageYears: st.ageYears,
+        species: st.species,
+        siteType: st.siteType,
+        developmentClass: st.developmentClass,
+        speciesData: speciesSnapshots,
+      });
+    }
+    simulationSnapshots.push(yearSnapshot);
   }
 
   // ── 9. Track overspill (carryover ops that never fit) ──
@@ -933,11 +1026,8 @@ export function runScheduleEngine(
     dlog(`[OVERSPILL] ${overspillOps} ops (${overspillM3.toFixed(0)} m³) could not be scheduled within ${periodYears} years`);
   }
 
-  return { yearPlans, finalStates: stands, annualGrowthHistory, overspillOps, overspillM3 };
+  return { yearPlans, finalStates: stands, annualGrowthHistory, overspillOps, overspillM3, simulationSnapshots };
 }
-
-// ═══════════════════════════════════════════════════════════════════════
-// Public API (called by generate-plan.ts)
 // ═══════════════════════════════════════════════════════════════════════
 
 /**
@@ -954,10 +1044,11 @@ export function schedulePlan(
 ): {
   years: YearPlan[];
   summary: PlanSummary;
+  simulationSnapshots: YearSnapshot[];
 } {
   const startYear = currentYear;
 
-  const { yearPlans, annualGrowthHistory, overspillOps, overspillM3 } = runScheduleEngine(
+  const { yearPlans, annualGrowthHistory, overspillOps, overspillM3, simulationSnapshots } = runScheduleEngine(
     forestStands,
     startYear,
     periodYears,
@@ -1033,5 +1124,5 @@ export function schedulePlan(
     overspillM3: Math.round(overspillM3),
   };
 
-  return { years, summary };
+  return { years, summary, simulationSnapshots };
 }
