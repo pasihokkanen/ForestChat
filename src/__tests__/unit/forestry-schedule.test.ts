@@ -58,10 +58,10 @@ describe("schedulePlan (Phase 7b rewrite — dynamic spawning)", () => {
   });
 
   it("spawns a thinning for a stand with high BA", () => {
-    // mesic ceiling=220, volPerHa=5 → well under. Large area → cap fits 28 m³ removal.
+    // 400 m³ over 2 ha = 200 m³/ha. Pine mesic age 50: H≈18m, f=0.5 → BA≈22 m²/ha.
     const stand = makeStand({
       standId: "2",
-      volumeM3: 2000, valueEur: 50000, areaHa: 20,
+      volumeM3: 400, valueEur: 50000, areaHa: 2,
       ageYears: 50, ba: 28,
       siteType: "mesic", site_class: "mesic",
       annual_growth: 5.5,
@@ -190,6 +190,7 @@ describe("trySplitStand (stub — splitting disabled)", () => {
       income_eur: 20000,
       cost_eur: 0,
       removal_m3: 400,
+      removalFraction: 0,
       notes: "",
     };
     const result = trySplitStand(stand, op, 250, 4);

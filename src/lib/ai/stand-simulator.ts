@@ -105,8 +105,8 @@ function speciesForAgg(st: SimState): Array<{
 function snapshotState(st: SimState, year: number, _isInitial: boolean): StandSnapshot {
   // Compute stand-level aggregates from species data
   const speciesForAggData = speciesForAgg(st);
-  const standBA = computeStandBA(speciesForAggData, st.ageYears, st.siteType);
-  const standHeight = computeStandHeight(speciesForAggData, st.ageYears, st.siteType);
+  const standBA = computeStandBA(speciesForAggData, st.ageYears, st.siteType, undefined, st.areaHa);
+  const standHeight = computeStandHeight(speciesForAggData, st.ageYears, st.siteType, st.areaHa);
   const standDiamCm = computeDiameter(standBA, st.stemCount);
 
   // Use volRatio to ensure per-species volumes sum exactly to stand total
@@ -122,7 +122,8 @@ function snapshotState(st: SimState, year: number, _isInitial: boolean): StandSn
         : 0;
     const sppVol = Math.round(sp.volumeM3 * volRatio);
     const sppH = meanHeight(sp.species, st.siteType, st.ageYears);
-    const sppBA = computeSpeciesBA(sppVol, sppH, sp.species, stemsPerHa, 0);
+    const sppVolPerHa = st.areaHa > 0 ? sppVol / st.areaHa : sppVol;
+    const sppBA = computeSpeciesBA(sppVolPerHa, sppH, sp.species, stemsPerHa, 0);
     const sppDiam = computeDiameter(sppBA, stemsPerHa);
     return {
       species: sp.species,
@@ -249,6 +250,8 @@ function growStand(st: SimState): void {
     speciesForAgg(st),
     st.ageYears,
     st.siteType,
+    undefined,
+    st.areaHa,
   );
 
   const growthPerHa = getGrowthRate(
@@ -278,6 +281,7 @@ function growStand(st: SimState): void {
     speciesForAgg(st),
     st.ageYears,
     st.siteType,
+    st.areaHa,
   );
 
   // Natural ingress: young stands gain stems from natural regeneration.
@@ -317,6 +321,8 @@ function growStand(st: SimState): void {
     speciesForAgg(st),
     st.ageYears,
     st.siteType,
+    undefined,
+    st.areaHa,
   );
   st.meanDiameter = computeDiameter(standBA, st.stemCount);
 }

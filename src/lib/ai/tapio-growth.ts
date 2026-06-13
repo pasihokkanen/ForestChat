@@ -155,6 +155,10 @@ export function computeDiameter(ba: number, stemCount: number): number {
 
 /**
  * Aggregated stand basal area: sum of per-species BAs.
+ * When `areaHa` is provided, volumes are assumed to be per-stand totals
+ * and are divided by areaHa to produce per-hectare BA.
+ * When omitted (legacy callers like the Tapio validation test),
+ * volumes are assumed to already be per-hectare.
  * Falls back to treating the first species at 100% volume/stems
  * when speciesData is empty (stands loaded without per-species breakdown).
  */
@@ -163,33 +167,40 @@ export function computeStandBA(
   standAge: number,
   siteType: string,
   fallbackSpecies?: string,
+  areaHa?: number,
 ): number {
   if (speciesData.length === 0) {
-    // No species breakdown — fallback not possible without species/volume
     return 0;
   }
+  const area = (areaHa && areaHa > 0) ? areaHa : 1;
   return Math.round(
     speciesData.reduce((sum, sp) => {
       const h = meanHeight(sp.species, siteType, standAge);
-      return sum + computeSpeciesBA(sp.volumeM3, h, sp.species, sp.stemCount, sp.diameterCm);
+      const volPerHa = sp.volumeM3 / area;
+      return sum + computeSpeciesBA(volPerHa, h, sp.species, sp.stemCount, sp.diameterCm);
     }, 0) * 10,
   ) / 10;
 }
 
 /**
  * Stand mean height: basal-area-weighted average of per-species heights.
+ * When `areaHa` is provided, volumes are assumed to be per-stand totals
+ * and are divided by areaHa before computing per-species BA for weighting.
  * For pure stands, this equals the species' meanHeight.
  */
 export function computeStandHeight(
   speciesData: Array<{ volumeM3: number; species: string; stemCount: number; diameterCm: number }>,
   standAge: number,
   siteType: string,
+  areaHa?: number,
 ): number {
   let totalBA = 0;
   let weightedSum = 0;
+  const area = (areaHa && areaHa > 0) ? areaHa : 1;
   for (const sp of speciesData) {
     const h = meanHeight(sp.species, siteType, standAge);
-    const ba = computeSpeciesBA(sp.volumeM3, h, sp.species, sp.stemCount, sp.diameterCm);
+    const volPerHa = sp.volumeM3 / area;
+    const ba = computeSpeciesBA(volPerHa, h, sp.species, sp.stemCount, sp.diameterCm);
     totalBA += ba;
     weightedSum += ba * h;
   }

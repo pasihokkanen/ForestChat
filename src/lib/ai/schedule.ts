@@ -443,6 +443,8 @@ function spawnOperations(
       speciesDataForBA(s),
       s.ageYears,
       s.siteType,
+      undefined,
+      s.areaHa,
     );
 
     // Step 7: Peatland thinning cap — Tapio recommends max 1-2 thinning passes
@@ -731,8 +733,8 @@ export function runScheduleEngine(
     };
     for (const st of stands.values()) {
       const speciesForAgg0 = speciesDataForBA(st);
-      const y0BA = computeStandBA(speciesForAgg0, st.ageYears, st.siteType);
-      const y0H = computeStandHeight(speciesForAgg0, st.ageYears, st.siteType);
+      const y0BA = computeStandBA(speciesForAgg0, st.ageYears, st.siteType, undefined, st.areaHa);
+      const y0H = computeStandHeight(speciesForAgg0, st.ageYears, st.siteType, st.areaHa);
       const y0D = computeDiameter(y0BA, st.stemCount);
 
       year0Snapshot.stands.push({
@@ -754,11 +756,19 @@ export function runScheduleEngine(
           stemCountPerHa: sp.stemCount,
           meanHeight: meanHeight(sp.species, st.siteType, st.ageYears),
           meanDiameter: computeDiameter(
-            computeSpeciesBA(sp.volumeM3, meanHeight(sp.species, st.siteType, st.ageYears), sp.species, sp.stemCount, 0),
+            computeSpeciesBA(
+              (st.areaHa > 0 ? sp.volumeM3 / st.areaHa : sp.volumeM3),
+              meanHeight(sp.species, st.siteType, st.ageYears),
+              sp.species, sp.stemCount, 0,
+            ),
             sp.stemCount,
           ),
           age: sp.age,
-          basalArea: computeSpeciesBA(sp.volumeM3, meanHeight(sp.species, st.siteType, st.ageYears), sp.species, sp.stemCount, 0),
+          basalArea: computeSpeciesBA(
+            (st.areaHa > 0 ? sp.volumeM3 / st.areaHa : sp.volumeM3),
+            meanHeight(sp.species, st.siteType, st.ageYears),
+            sp.species, sp.stemCount, 0,
+          ),
           areaHa: sp.areaHa ?? 0,
         })),
       });
@@ -978,6 +988,8 @@ export function runScheduleEngine(
         speciesDataForBA(st),
         st.ageYears,
         st.siteType,
+        undefined,
+        st.areaHa,
       );
 
       const growthPerHa = getGrowthRate(
@@ -1010,6 +1022,7 @@ export function runScheduleEngine(
         speciesDataForBA(st),
         st.ageYears,
         st.siteType,
+        st.areaHa,
       );
 
       // Natural ingress: young stands gain stems from natural regeneration.
@@ -1047,6 +1060,8 @@ export function runScheduleEngine(
         speciesDataForBA(st),
         st.ageYears,
         st.siteType,
+        undefined,
+        st.areaHa,
       );
       st.meanDiameter = computeDiameter(standBA, st.stemCount);
     }
@@ -1062,8 +1077,8 @@ export function runScheduleEngine(
     for (const st of stands.values()) {
       // Compute stand-level aggregates from species data
       const speciesForAgg = speciesDataForBA(st);
-      const snapBA = computeStandBA(speciesForAgg, st.ageYears, st.siteType);
-      const snapH = computeStandHeight(speciesForAgg, st.ageYears, st.siteType);
+      const snapBA = computeStandBA(speciesForAgg, st.ageYears, st.siteType, undefined, st.areaHa);
+      const snapH = computeStandHeight(speciesForAgg, st.ageYears, st.siteType, st.areaHa);
       const snapD = computeDiameter(snapBA, st.stemCount);
 
       // Use volRatio to ensure per-species volumes sum exactly to stand total
@@ -1079,7 +1094,8 @@ export function runScheduleEngine(
             : 0;
         const sppVol = Math.round(sp.volumeM3 * volRatio);
         const sppH = meanHeight(sp.species, st.siteType, st.ageYears);
-        const sppBA = computeSpeciesBA(sppVol, sppH, sp.species, stemsPerHa, 0);
+        const sppVolPerHa = st.areaHa > 0 ? sppVol / st.areaHa : sppVol;
+        const sppBA = computeSpeciesBA(sppVolPerHa, sppH, sp.species, stemsPerHa, 0);
         const sppDiam = computeDiameter(sppBA, stemsPerHa);
         return {
           species: sp.species,
