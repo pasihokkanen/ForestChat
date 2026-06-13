@@ -4,18 +4,27 @@
 
 **Goal:** Replace the heuristic height/diameter proxy and proportional BA scaling with a
 physically consistent growth model where all four dimensions (height, diameter, BA, volume)
-are anchored to Tapio reference data. BA is derived from volume and height via form factor;
-diameter follows from BA and stem count.
+are anchored to Tapio reference data. BA is computed per-species from volume and height via
+species-specific form factors, then summed to stand-level; diameter follows from BA and stem
+count. Stand height is basal-area-weighted across species.
 
 **Architecture:** Hardcode Tapio H100 tables and height development percentages per
-species × site type. Compute BA = V / (H × formFactor) instead of BA *= 1 + volumeRatio.
-Recalibrate density factor brackets to maintain Tapio volume validation with dynamic BA input.
-Extend validation test to cover height and BA at key ages.
+species × site type. For each species: Hᵢ = meanHeight(species, site, age),
+Gᵢ = Vᵢ / (Hᵢ × ff(species)). Stand aggregates: G = Σ Gᵢ, H = Σ(Gᵢ × Hᵢ)/G,
+D = 200 × √(G / (N × π)). Recalibrate density factor brackets to maintain Tapio volume
+validation with the summed stand BA input. Extend validation test to cover height and BA.
 
 **Tech Stack:** TypeScript, chart-engine.ts (getGrowthRate, densityFactor), schedule.ts, stand-simulator.ts
 
-**Version:** 1.1
+**Version:** 1.2
 **Date:** 2026-06-13
+
+**Changelog v1.2:**
+- **Per-species approach:** BA computed per-species (`Gᵢ = Vᵢ / (Hᵢ × ffᵢ)`), summed to stand (`G = Σ Gᵢ`). Stand height is basal-area-weighted (`H = Σ(Gᵢ×Hᵢ)/G`). Eliminates the stand vs per-species BA discrepancy.
+- Removed old `computeBA(volume, height, species, stems, diameter)` — replaced by `computeSpeciesBA()` (per-species) + `computeStandBA()` / `computeStandHeight()` / `computeStandDiameter()` (aggregates).
+- All GROW steps now update per-species volumes proportionally from the stand-level growth rate.
+- Removed "Per-species BA sum ≠ stand BA" Known Limitation (fixed by per-species approach).
+- Updated Data Flow diagram, T1/T3/T4/T5 code blocks, pitfalls, and risks.
 
 **Changelog v1.1:**
 - Fixed critical: T4 now includes spawning BA update (thinning thresholds must use computed BA, not stale field)
@@ -47,7 +56,8 @@ skews the density factor upward.
 1. **Height and diameter are not Tapio-anchored.** The 6-bracket proxy produces height 13m
    at age 50 for pine on mesic — Tapio expects ~18m.
 2. **BA is physically wrong for young stands.** `BA *= 1 + growthM3/volumeM3` inflates
-   BA 4–10× for stands with low volume but high growth rates.
+   BA 4–10× for stands with low volume but high growth rates. Stand BA should be the
+   sum of per-species BAs computed from volume and height: Gᵢ = Vᵢ / (Hᵢ × ffᵢ).
 3. **The feedback loop is uncalibrated.** The `densityFactor` was tuned assuming a fixed
    mature BA. With dynamic BA, the multiplier stack drifts from Tapio reference.
 4. **Height/diameter/BA are not validated** against Tapio data — only volume is.
@@ -55,7 +65,7 @@ skews the density factor upward.
 ### Requirements
 
 1. Height driven by Tapio H100 curves per species × site type
-2. BA derived from volume and height: `BA = V / (H × formFactor)`
+2. BA computed per-species: `Gᵢ = Vᵢ / (Hᵢ × ffᵢ)`, summed to stand: `G = Σ Gᵢ`
 3. Diameter derived from BA and stems: `D = 200 × √(BA / (N × π))`
 4. Growth engine recalibrated for dynamic BA input (density factor brackets adjusted)
 5. Tapio validation extended to cover height and BA at key ages
@@ -67,8 +77,9 @@ skews the density factor upward.
 **Why derive BA from volume instead of tracking it independently?**
 BA is the cross-sectional area of stems at breast height. The physical relationship
 `V = BA × H × f` holds for all even-aged stands. If volume (Tapio-validated) and height
-(Tapio H100 curves) are correct, BA follows mathematically. No need for a separate
-proportional model that diverges from physics.
+(Tapio H100 curves) are correct, BA follows mathematically per species:
+`Gᵢ = Vᵢ / (Hᵢ × ffᵢ)`. No need for a separate proportional model, and the sum
+`Σ Gᵢ` gives an exact stand BA — no discrepancy between per-species and stand values.
 
 **Why constant form factor per species?**
 Form factor varies ±5% with age and site quality. A constant value (pine=0.50, spruce=0.45,
@@ -97,12 +108,6 @@ with volume, so the thinning threshold still triggers at the right age.
 planting diameter and stem count rather than volume/height. This covers the first 2–4
 years after planting. The form factor approach works correctly from H ≥ 1.3m onward.
 
-**Per-species BA sum ≠ stand BA in mixed stands.** The stand-level BA uses the main
-species' form factor (`st.species`), while each species entry uses its own (e.g.,
-pine f=0.50 vs spruce f=0.45). For mixed stands, `sum(sppBA) ≠ standBA` by ~5-10%.
-This is acceptable — the per-species breakdown is already a proportional approximation
-(Phase 8 Known Limitation). Pure stands are unaffected.
-
 ---
 
 ## Data Flow
@@ -116,17 +121,20 @@ This is acceptable — the per-species breakdown is already a proportional appro
                     └──────────┬───────────────────────┘
                                │
                                ▼
-┌──────────────┐    ┌─────────────────────┐    ┌──────────────────┐
-│ getGrowthRate│───►│ V(t) = V(t-1) + ΔV  │───►│ BA = V/(H×f)    │
-│ (density     │    │ H(t) = H100 × pct   │    │ D = 200×√(BA/Nπ)│
-│  recalibrated)│   │ age += 1            │    │ (snapshot only)  │
-└──────────────┘    └─────────────────────┘    └──────────────────┘
-       ▲                                             │
-       │                                             ▼
-       │                                    ┌──────────────────┐
-       └────────────────────────────────────│ BA(t-1) feeds    │
-                                            │ densityFactor()  │
-                                            └──────────────────┘
+┌──────────────┐    ┌───────────────────────────┐    ┌───────────────────────┐
+│ getGrowthRate│───►│ V(t) = V(t-1) + ΔV        │───►│ Per-species:          │
+│ (density     │    │ age += 1                  │    │  Hᵢ = f(species,site) │
+│  recalibrated)│   │                           │    │  Gᵢ = Vᵢ/(Hᵢ×ffᵢ)   │
+└──────────────┘    └───────────────────────────┘    │  Dᵢ = 200×√(Gᵢ/Nᵢπ)  │
+       ▲                                             └───────┬───────────────┘
+       │                                                     │
+       │                                                     ▼
+       │                                    ┌───────────────────────────┐
+       │                                    │ Stand aggregates:         │
+       └────────────────────────────────────│  G = Σ Gᵢ                │
+                                            │  H = Σ(Gᵢ×Hᵢ)/G  (BA-wtd)│
+                                            │  D = 200×√(G/Nπ)         │
+                                            └───────────────────────────┘
 ```
 
 ---
@@ -282,25 +290,30 @@ const FORM_FACTOR: Record<string, number> = {
 };
 
 export function formFactor(species: string): number {
-  return FORM_FACTOR[species] ?? 0.50;
+  const ff = FORM_FACTOR[species];
+  if (ff === undefined) {
+    console.warn(`tapio-growth: unknown species \"${species}\" for form factor, falling back to pine`);
+    return 0.50;
+  }
+  return ff;
 }
 
 /**
- * Compute basal area (m²/ha) from volume, height, and species form factor.
+ * Compute basal area (m²/ha) for a single species from its volume, height, and form factor.
  * For seedling stands (H < 1.3m or volume ≤ 0), falls back to stems×diameter formula.
  */
-export function computeBA(
+export function computeSpeciesBA(
   volumeM3: number,
-  meanHeightM: number,
+  heightM: number,
   species: string,
   stemCount: number,
-  meanDiameterCm: number,
+  diameterCm: number,
 ): number {
-  if (volumeM3 <= 0 || meanHeightM < 1.3) {
-    return Math.round(stemCount * Math.PI * Math.pow(meanDiameterCm / 200, 2) * 10) / 10;
+  if (volumeM3 <= 0 || heightM < 1.3) {
+    return Math.round(stemCount * Math.PI * Math.pow(diameterCm / 200, 2) * 10) / 10;
   }
   const f = formFactor(species);
-  return Math.round(volumeM3 / (meanHeightM * f) * 10) / 10;
+  return Math.round(volumeM3 / (heightM * f) * 10) / 10;
 }
 
 /**
@@ -310,6 +323,51 @@ export function computeBA(
 export function computeDiameter(ba: number, stemCount: number): number {
   if (stemCount <= 0 || ba <= 0) return 0;
   return Math.round(200 * Math.sqrt(ba / (stemCount * Math.PI)) * 10) / 10;
+}
+
+/**
+ * Aggregated stand basal area: sum of per-species BAs.
+ */
+export function computeStandBA(
+  speciesData: Array<{ volumeM3: number; species: string; stemCount: number; diameterCm: number }>,
+  standAge: number,
+  siteType: string,
+): number {
+  return Math.round(
+    speciesData.reduce((sum, sp) => {
+      const h = meanHeight(sp.species, siteType, standAge);
+      return sum + computeSpeciesBA(sp.volumeM3, h, sp.species, sp.stemCount, sp.diameterCm);
+    }, 0) * 10,
+  ) / 10;
+}
+
+/**
+ * Stand mean height: basal-area-weighted average of per-species heights.
+ * For pure stands, this equals the species' meanHeight.
+ */
+export function computeStandHeight(
+  speciesData: Array<{ volumeM3: number; species: string; stemCount: number; diameterCm: number }>,
+  standAge: number,
+  siteType: string,
+): number {
+  let totalBA = 0;
+  let weightedSum = 0;
+  for (const sp of speciesData) {
+    const h = meanHeight(sp.species, siteType, standAge);
+    const ba = computeSpeciesBA(sp.volumeM3, h, sp.species, sp.stemCount, sp.diameterCm);
+    totalBA += ba;
+    weightedSum += ba * h;
+  }
+  if (totalBA <= 0) return meanHeight(speciesData[0]?.species ?? "pine", siteType, standAge);
+  return Math.round((weightedSum / totalBA) * 10) / 10;
+}
+
+/**
+ * Stand mean diameter from aggregated BA and total stem count.
+ * D = 200 × √(G_stand / (N_stand × π))
+ */
+export function computeStandDiameter(standBA: number, totalStems: number): number {
+  return computeDiameter(standBA, totalStems);
 }
 
 /** Tapio reference BA ranges for validation at key ages. */
@@ -457,7 +515,7 @@ The 200-year harvest volume bounds may need adjustment in T6.
 ### T3: Replace GROW in stand-simulator.ts
 
 **Objective:** Replace the height/diameter proxy and proportional BA scaling in the
-stand simulator's `growStand()` function with the Tapio-anchored model.
+stand simulator's `growStand()` function with the per-species Tapio-anchored model.
 
 **File:** Modify `src/lib/ai/stand-simulator.ts`
 
@@ -481,16 +539,16 @@ function growStand(st: SimState): void {
     return;
   }
 
-  // Compute BA for growth rate input (from previous year's state).
-  // st.meanDiameter may be stale on first call after model switch —
-  // only matters for seedling fallback (H < 1.3m), which uses DB diameter.
-  const prevBA = computeBA(
-    st.volumeM3, st.meanHeight, st.species, st.stemCount, st.meanDiameter,
+  // Compute summed stand BA for growth rate input (from previous year's state).
+  const prevStandBA = computeStandBA(
+    st.speciesData.map(sp => ({ volumeM3: sp.volumeM3, species: sp.species, stemCount: sp.stemCount, diameterCm: 0 })),
+    st.ageYears,
+    st.siteType,
   );
 
   const growthPerHa = getGrowthRate(
     st.siteType, st.soilType, st.species,
-    st.ageYears, prevBA, null,
+    st.ageYears, prevStandBA, null,
     1.0,
     st.areaHa > 0 ? st.volumeM3 / st.areaHa : undefined,
     true,
@@ -499,8 +557,23 @@ function growStand(st: SimState): void {
   st.volumeM3 += growthM3;
   st.ageYears += 1;
 
-  // Update height from Tapio curve
-  st.meanHeight = meanHeight(st.species, st.siteType, st.ageYears);
+  // Update per-species volumes proportionally
+  if (st.speciesData.length > 0) {
+    const totalVol = st.speciesData.reduce((s, sp) => s + sp.volumeM3, 0);
+    if (totalVol > 0) {
+      const ratio = 1 + growthM3 / totalVol;
+      for (const sp of st.speciesData) {
+        sp.volumeM3 = Math.round(sp.volumeM3 * ratio * 10) / 10;
+      }
+    }
+  }
+
+  // Stand height from basal-area-weighted per-species heights
+  st.meanHeight = computeStandHeight(
+    st.speciesData.map(sp => ({ volumeM3: sp.volumeM3, species: sp.species, stemCount: sp.stemCount, diameterCm: 0 })),
+    st.ageYears,
+    st.siteType,
+  );
 
   // Natural ingress (unchanged from current model)
   if (st.stemCount > 0 && st.ageYears <= 10 && st.stemCount < MAX_STEMS_HA) {
@@ -516,11 +589,13 @@ function growStand(st: SimState): void {
     }
   }
 
-  // Compute BA and diameter from volume, height, stems
-  const newBA = computeBA(
-    st.volumeM3, st.meanHeight, st.species, st.stemCount, st.meanDiameter,
+  // Compute stand BA and diameter from species aggregates
+  const standBA = computeStandBA(
+    st.speciesData.map(sp => ({ volumeM3: sp.volumeM3, species: sp.species, stemCount: sp.stemCount, diameterCm: 0 })),
+    st.ageYears,
+    st.siteType,
   );
-  st.meanDiameter = computeDiameter(newBA, st.stemCount);
+  st.meanDiameter = computeDiameter(standBA, st.stemCount);
 }
 ```
 
@@ -537,31 +612,33 @@ Also simplify `applyOperation()` — remove all `st.basalArea` manipulations:
 Remove `basalArea` from `SimState` interface entirely.
 
 Also remove the `heightDelta`/`diameterDelta`/`baRatio`/`totalBA` computations from
-`snapshotState()` — BA and diameter are now computed directly:
+`snapshotState()` — BA, height, and diameter are now computed from per-species aggregates:
 
 ```typescript
 function snapshotState(st: SimState, year: number, isInitial: boolean): StandSnapshot {
-  const standBA = computeBA(
-    st.volumeM3, st.meanHeight, st.species, st.stemCount, st.meanDiameter,
-  );
+  // Compute stand-level aggregates from species data
+  const speciesForAgg = st.speciesData.map(sp => ({
+    volumeM3: sp.volumeM3, species: sp.species, stemCount: sp.stemCount, diameterCm: 0,
+  }));
+  const standBA = computeStandBA(speciesForAgg, st.ageYears, st.siteType);
+  const standHeight = computeStandHeight(speciesForAgg, st.ageYears, st.siteType);
   const standDiamCm = computeDiameter(standBA, st.stemCount);
 
   const totalVol = st.speciesData.reduce((s, sp) => s + sp.volumeM3, 0);
-  const volRatio = totalVol > 0 ? st.volumeM3 / totalVol : 1;
   const totalSpeciesStems = st.speciesData.reduce((s, sd) => s + sd.stemCount, 0);
 
+  // Per-species snapshots — each species gets its own Tapio height and BA
   const speciesSnapshots: SpeciesSnapshot[] = st.speciesData.map((sp) => {
     const stemsPerHa =
       totalSpeciesStems > 0
         ? Math.round(sp.stemCount * st.stemCount / totalSpeciesStems)
         : 0;
-    const sppVol = Math.round(sp.volumeM3 * volRatio);
-    const sppH = meanHeight(sp.species, st.siteType, st.ageYears); // per-species height
-    const sppBA = computeBA(sppVol, sppH, sp.species, stemsPerHa, 0);
+    const sppH = meanHeight(sp.species, st.siteType, st.ageYears);
+    const sppBA = computeSpeciesBA(sp.volumeM3, sppH, sp.species, stemsPerHa, 0);
     const sppDiam = computeDiameter(sppBA, stemsPerHa);
     return {
       species: sp.species,
-      volumeM3: sppVol,
+      volumeM3: sp.volumeM3,
       logPct: sp.logPct,
       stemCountPerHa: stemsPerHa,
       meanHeight: sppH,
@@ -578,7 +655,7 @@ function snapshotState(st: SimState, year: number, isInitial: boolean): StandSna
     volumeM3: Math.round(st.volumeM3),
     basalArea: standBA,
     stemCount: st.stemCount,
-    meanHeight: st.meanHeight,
+    meanHeight: standHeight,
     meanDiameter: standDiamCm,
     ageYears: st.ageYears,
     species: st.species,
@@ -594,18 +671,28 @@ function snapshotState(st: SimState, year: number, isInitial: boolean): StandSna
 - `npm run build` — full project builds
 
 💡 **Pitfall:** The `snapshotState` no longer needs heightDelta/diameterDelta because
-heights and diameters come directly from the Tapio model, not from aggregate deltas.
+heights and diameters come directly from the per-species Tapio model, not from aggregate deltas.
 
-💡 **Pitfall:** Per-species height uses `meanHeight(sp.species, ...)`. This gives each
-species its own Tapio height curve. Species share the stand age but may have different
+💡 **Pitfall:** Per-species height uses `meanHeight(sp.species, ...)`. Each species gets
+its own Tapio height curve. Species share the stand age but may have different
 H100 values. This is correct — a pine-under-spruce at age 40 would have a different
 height than the spruce overstory.
+
+💡 **Pitfall:** Per-species volume is updated proportionally from the single stand-level
+growth rate. This is an approximation — in reality, growth rates differ by species. But
+since the growth rate already uses species-weighted density factors and the per-species
+BA computation uses the correct form factor, the resulting BA values are physically
+consistent. Per-species growth rate differentiation is explicitly out of scope (see §Out of Scope).
+
+💡 **Pitfall:** Stand height is now basal-area-weighted. For a pure pine stand, `computeStandHeight`
+returns the same value as `meanHeight("pine", site, age)` because all BA comes from pine.
+For mixed stands, the more voluminous species with larger BA dominates the weighted height.
 
 ---
 
 ### T4: Replace GROW in schedule.ts
 
-**Objective:** Apply the same Tapio-anchored GROW model to the full schedule engine.
+**Objective:** Apply the same per-species Tapio-anchored GROW model to the full schedule engine.
 
 **File:** Modify `src/lib/ai/schedule.ts`
 
@@ -613,14 +700,15 @@ height than the spruce overstory.
 
 The changes mirror T3 but in the schedule engine's GROW loop (lines ~849-922):
 
-1. **Import** `meanHeight`, `computeBA`, `computeDiameter` from `./tapio-growth`
+1. **Import** `meanHeight`, `computeSpeciesBA`, `computeStandBA`, `computeStandHeight`, `computeDiameter` from `./tapio-growth`
 2. **Replace** the GROW loop:
    - Remove height/diameter proxy (age-bracket `heightGrowth` computation, `st.meanHeight += heightGrowth`, `st.meanDiameter += heightGrowth * 0.7`)
    - Remove proportional BA scaling (`st.basalArea = st.basalArea * (1 + ratio)`)
-   - Add: `st.meanHeight = meanHeight(st.species, st.siteType, st.ageYears)`
-   - Add: compute BA for next year's growth rate input
+   - Add: per-species volume update (proportional to stand growth)
+   - Add: `st.meanHeight = computeStandHeight(speciesData, st.ageYears, st.siteType)` (BA-weighted)
+   - Add: compute summed stand BA for next year's growth rate input
 3. **Keep** ingress logic unchanged
-4. **Update** snapshot code (year-0 and year-loop snapshots) to use `computeBA`/`computeDiameter`
+4. **Update** snapshot code (year-0 and year-loop snapshots) to use `computeStandBA`/`computeStandHeight`/`computeDiameter`
    instead of the old heightDelta/diameterDelta/baRatio pattern
 5. **Remove** `st.basalArea` manipulations from `applyOperation` section for all op types:
    - `clear_cut`: remove `st.basalArea = 0`
@@ -630,10 +718,14 @@ The changes mirror T3 but in the schedule engine's GROW loop (lines ~849-922):
    - `planting`: remove `st.basalArea = 2` and `if (st.basalArea === 0) st.basalArea = 2`
 6. **Update spawning thresholds** — the `spawnOperations()` function checks `st.basalArea >= thinThresh`
    to decide whether to spawn thinnings. Since `st.basalArea` is no longer mutated, these checks
-   must use dynamically computed BA instead:
+   must use dynamically computed stand BA (sum of per-species BAs):
    ```typescript
    // In spawnOperations(), replace every `st.basalArea` reference with:
-   const currentBA = computeBA(st.volumeM3, st.meanHeight, st.species, st.stemCount, st.meanDiameter);
+   const currentBA = computeStandBA(
+     st.speciesData.map(sp => ({ volumeM3: sp.volumeM3, species: sp.species, stemCount: sp.stemCount, diameterCm: 0 })),
+     st.ageYears,
+     st.siteType,
+   );
    if (currentBA >= firstThinThresh && ...) { /* spawn first_thinning */ }
    if (currentBA >= thinThresh && ...) { /* spawn thinning */ }
    ```
@@ -643,12 +735,16 @@ The changes mirror T3 but in the schedule engine's GROW loop (lines ~849-922):
    // New:
    removalFraction = (currentBA - targetBA) / Math.max(1, currentBA);
    ```
-   And update `getGrowthRate()` calls inside `spawnOperations()` to pass computed BA instead of `st.basalArea`.
+   And update `getGrowthRate()` calls inside `spawnOperations()` to pass computed stand BA instead of `st.basalArea`.
 7. **Keep** `st.basalArea` field on `SimStand` but deprecate it — it's no longer mutated,
    only used as a throughput for `getGrowthRate()`. Compute it inline before calling
    `getGrowthRate()`:
    ```typescript
-   const growthRateBA = computeBA(st.volumeM3, st.meanHeight, st.species, st.stemCount, st.meanDiameter);
+   const growthRateBA = computeStandBA(
+     st.speciesData.map(sp => ({ volumeM3: sp.volumeM3, species: sp.species, stemCount: sp.stemCount, diameterCm: 0 })),
+     st.ageYears,
+     st.siteType,
+   );
    const growthPerHa = getGrowthRate(..., growthRateBA, ...);
    ```
 
@@ -689,7 +785,9 @@ so all three dimensions are verified against published Tapio reference data.
 2. Add BA and height ranges to each entry in TAPIO_TABLES using `TAPIO_BA_REF` and
    `TAPIO_HEIGHT_REF` from `tapio-growth.ts`.
 
-3. Modify `simulateGross()` to also track BA and height at milestone ages:
+3. Modify `simulateGross()` to also track BA and height at milestone ages using
+   per-species computation. For pure stands (single species), `computeStandBA` equals
+   `computeSpeciesBA`; for mixed stands, it sums correctly:
    ```typescript
    function simulateGross(config): {
      volumes: Map<number, number>;
@@ -699,18 +797,9 @@ so all three dimensions are verified against published Tapio reference data.
    ```
 
 4. Add assertion blocks for BA and height:
-   ```typescript
-   if (entry.baRange) {
-     const ba = milestones.basalAreas.get(entry.age);
-     expect(ba).toBeDefined();
-     const [baLow, baHigh] = entry.baRange;
-     expect(ba!).toBeGreaterThanOrEqual(baLow * 0.85);
-     expect(ba!).toBeLessThanOrEqual(baHigh * 1.15);
-   }
-   ```
 
-5. The simulation now uses `computeBA()` and `meanHeight()` instead of a hardcoded `matureBa`.
-   Remove the `matureBa` field from `SimConfig` — BA is computed from volume and height each year.
+5. The simulation now uses `computeStandBA()` and `computeStandHeight()` instead of a hardcoded `matureBa`.
+   Remove the `matureBa` field from `SimConfig` — BA is computed from per-species volume and height each year.
 
 **Verification:**
 - `npx vitest run src/lib/ai/__tests__/tapio-validation.test.ts` — all volume, height, and BA points pass
@@ -773,5 +862,5 @@ until Tapio validation is green.
 |------|--------|------------|
 | Density recalibration doesn't converge | Tapio validation fails | Iterative tuning; can fall back to old model for volume if needed |
 | Lifecycle test bounds break | CI fails | Adjust harvest bounds; the 200y test checks structural invariants, not exact BA |
-| Per-species height differences look wrong | User confusion | All species share stand age; height differences from different H100 values are correct |
+| Per-species heights differ in mixed stands | User confusion | All species share stand age; height differences from different H100 values are physically correct. Stand height is BA-weighted for display. |
 | Growth rate oscillations with dynamic BA | Unstable simulation | BA computed from previous year smooths the feedback; form factor caps prevent spikes |
