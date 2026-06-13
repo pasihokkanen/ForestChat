@@ -12,14 +12,8 @@ import type { StandData, PlannedOperation, PlanGoal, YearPlan, PlanSummary, Spec
 import { getOptimalAge, THINNING_BA, MIN_AGE_FIRST_THINNING, MIN_AGE_THINNING, getPrices, COSTS, OPERATION_DEFAULTS } from "./config";
 import { getGrowthRate } from "./chart-engine";
 import { getStrategy, type SchedulingStrategy } from "./strategies";
-import {
-  meanHeight,
-  meanDiameter,
-  computeSpeciesBA,
-  computeStandBA,
-  computeStandHeight,
-  computeDiameter,
-} from "./tapio-growth";
+import { computeStandBA } from "./tapio-growth";
+import { type GrowableStand, growStand, snapshotState, speciesForAgg } from "./stand-simulator";
 import * as fs from "fs";
 
 const DEBUG_LOG = "/tmp/schedule-debug.log";
@@ -229,31 +223,6 @@ function makeMinimalStand(s: SimStand): StandData {
   };
 }
 
-/**
- * Synthesize speciesData for BA computation when the stand has no
- * per-species breakdown. Treats the stand's main species as 100% of
- * volume and stem count.
- */
-function speciesDataForBA(st: SimStand): Array<{
-  volumeM3: number; species: string; stemCount: number; diameterCm: number;
-}> {
-  if (st.speciesData.length > 0) {
-    return st.speciesData.map(sp => ({
-      volumeM3: sp.volumeM3,
-      species: sp.species,
-      stemCount: sp.stemCount,
-      diameterCm: 0,
-    }));
-  }
-  // Fallback: use stand-level data as a single species
-  return [{
-    volumeM3: st.volumeM3,
-    species: st.species,
-    stemCount: st.stemCount,
-    diameterCm: st.meanDiameter,
-  }];
-}
-
 /** Get the price ratio of a thinning tier vs clearcut tier for a species. */
 function thinningPriceRatio(species: string, tier: "first_thinning" | "thinning"): number {
   const sp = species === "birch" ? "silver_birch" : species;
@@ -441,7 +410,7 @@ function spawnOperations(
 
     // Compute current stand BA for threshold checks (dynamic, not stale field)
     const currentBA = computeStandBA(
-      speciesDataForBA(s),
+      speciesForAgg(s),
       s.ageYears,
       s.siteType,
       undefined,
@@ -733,38 +702,7 @@ export function runScheduleEngine(
       stands: [],
     };
     for (const st of stands.values()) {
-      const y0H = computeStandHeight(speciesDataForBA(st), st.ageYears, st.siteType, st.areaHa);
-      const y0D = meanDiameter(st.species, st.siteType, st.ageYears);
-      const y0BA = Math.round(st.stemCount * Math.PI * Math.pow(y0D / 200, 2) * 10) / 10;
-
-      year0Snapshot.stands.push({
-        standId: st.standId,
-        areaHa: st.areaHa,
-        volumeM3: Math.round(st.volumeM3),
-        basalArea: y0BA,
-        stemCount: st.stemCount,
-        meanHeight: y0H,
-        meanDiameter: y0D,
-        ageYears: st.ageYears,
-        species: st.species,
-        siteType: st.siteType,
-        developmentClass: st.developmentClass,
-        speciesData: st.speciesData.map(sp => {
-          const spDiam = meanDiameter(sp.species, st.siteType, st.ageYears);
-          const spBA = Math.round(sp.stemCount * Math.PI * Math.pow(spDiam / 200, 2) * 10) / 10;
-          return {
-          species: sp.species,
-          volumeM3: Math.round(sp.volumeM3),
-          logPct: sp.logPct,
-          stemCountPerHa: sp.stemCount,
-          meanHeight: meanHeight(sp.species, st.siteType, st.ageYears),
-          meanDiameter: spDiam,
-          age: sp.age,
-          basalArea: spBA,
-          areaHa: sp.areaHa ?? 0,
-          };
-        }),
-      });
+      year0Snapshot.stands.push(snapshotState(st, startYear - 1, true));
     }
     simulationSnapshots.push(year0Snapshot);
   }
@@ -970,88 +908,12 @@ export function runScheduleEngine(
 
     // ── 7. GROW: simulate one year of growth on ALL stands ──
     for (const st of stands.values()) {
-      // Skip cleared stands (volumeM3 === 0 && stemCount === 0)
-      if (st.volumeM3 <= 0 && st.stemCount <= 0) {
-        st.ageYears += 1;
-        continue;
+      // growStand handles cleared/invalid stands (ages but returns 0 growth)
+      const oldVol = st.volumeM3;
+      const growthM3 = growStand(st, st.growthMultiplier);
+      if (growthM3 > 0 && oldVol > 0) {
+        st.valueEur = Math.round(st.valueEur * (1 + growthM3 / oldVol));
       }
-
-      // Compute summed stand BA for growth rate input (previous year's state)
-      const growthRateBA = computeStandBA(
-        speciesDataForBA(st),
-        st.ageYears,
-        st.siteType,
-        undefined,
-        st.areaHa,
-      );
-
-      const growthPerHa = getGrowthRate(
-        st.siteType, st.soilType, st.species,
-        st.ageYears, growthRateBA, null,
-        st.growthMultiplier,
-        st.areaHa > 0 ? st.volumeM3 / st.areaHa : undefined,
-        true,
-      );
-      const growthM3 = growthPerHa * st.areaHa;
-      if (st.volumeM3 > 0) {
-        st.valueEur = Math.round(st.valueEur * (1 + growthM3 / st.volumeM3));
-      }
-      st.volumeM3 += growthM3;
-      st.ageYears += 1;
-
-      // Update per-species volumes proportionally
-      if (st.speciesData.length > 0) {
-        const totalVol = st.speciesData.reduce((s, sp) => s + sp.volumeM3, 0);
-        if (totalVol > 0) {
-          const ratio = 1 + growthM3 / totalVol;
-          for (const sp of st.speciesData) {
-            sp.volumeM3 = Math.round(sp.volumeM3 * ratio * 10) / 10;
-          }
-        }
-      }
-
-      // Stand height from basal-area-weighted per-species heights
-      st.meanHeight = computeStandHeight(
-        speciesDataForBA(st),
-        st.ageYears,
-        st.siteType,
-        st.areaHa,
-      );
-
-      // Natural ingress: young stands gain stems from natural regeneration.
-      // Density-dependent cubic model: ingress = BASE × (1 − (stems/MAX)³).
-      // Ingress seedlings add volume so BA via speciesData reflects new stems.
-      if (st.stemCount > 0 && st.ageYears <= 10 && st.stemCount < MAX_STEMS_HA) {
-        const oldStemsPerHa = st.stemCount;
-        const densityRatio = st.stemCount / MAX_STEMS_HA;
-        const ingressRate = NATURAL_INGRESS_BASE_RATE * (1 - Math.pow(densityRatio, NATURAL_INGRESS_EXPONENT));
-        const ingressPerHa = Math.round(Math.min(
-          ingressRate,
-          MAX_STEMS_HA - st.stemCount,
-        ));
-        if (ingressPerHa > 0) {
-          st.stemCount = oldStemsPerHa + ingressPerHa;
-
-          // Add seedling volume to speciesData and stand total
-          const seedlingVolPerStem =
-            Math.PI * Math.pow(PLANTING_INITIAL_DIAMETER_CM / 200, 2) * PLANTING_INITIAL_HEIGHT_M;
-          const totalIngressVol = Math.round(ingressPerHa * seedlingVolPerStem * 1e4) / 1e4;
-          const totalSpeciesStems = st.speciesData.reduce((s, sd) => s + sd.stemCount, 0);
-          if (st.speciesData.length > 0) {
-            for (const sp of st.speciesData) {
-              const share = totalSpeciesStems > 0 ? sp.stemCount / totalSpeciesStems : 1 / st.speciesData.length;
-              sp.volumeM3 = Math.round((sp.volumeM3 + totalIngressVol * share) * 1e4) / 1e4;
-              sp.stemCount += Math.round(ingressPerHa * share);
-            }
-          }
-          st.volumeM3 += totalIngressVol;
-        }
-      }
-
-      // Compute stand BA and diameter from Tapio reference tables.
-      // Diameter from species×site×age, BA derived: BA = N × π × (D/200)².
-      st.meanDiameter = meanDiameter(st.species, st.siteType, st.ageYears);
-      const standBA = st.stemCount * Math.PI * Math.pow(st.meanDiameter / 200, 2);
     }
 
     // ── 8. CARRYOVER: unselected ops pushed to next year ──
@@ -1063,53 +925,7 @@ export function runScheduleEngine(
       stands: [],
     };
     for (const st of stands.values()) {
-      // Compute stand-level aggregates from Tapio reference tables.
-      const snapH = computeStandHeight(speciesDataForBA(st), st.ageYears, st.siteType, st.areaHa);
-      const snapD = meanDiameter(st.species, st.siteType, st.ageYears);
-      const snapBA = Math.round(st.stemCount * Math.PI * Math.pow(snapD / 200, 2) * 10) / 10;
-
-      // Use volRatio to ensure per-species volumes sum exactly to stand total
-      const rawTotalVol = st.speciesData.reduce((s, sp) => s + sp.volumeM3, 0);
-      const volRatio = rawTotalVol > 0 ? st.volumeM3 / rawTotalVol : 1;
-      const totalSpeciesStems = st.speciesData.reduce((s, sd) => s + sd.stemCount, 0);
-
-      // Per-species snapshots — each species gets its own Tapio height, diameter, BA
-      const speciesSnapshots: SpeciesSnapshot[] = st.speciesData.map(sp => {
-        const stemsPerHa =
-          totalSpeciesStems > 0
-            ? Math.round(sp.stemCount * st.stemCount / totalSpeciesStems)
-            : 0;
-        const sppVol = Math.round(sp.volumeM3 * volRatio);
-        const sppH = meanHeight(sp.species, st.siteType, st.ageYears);
-        const sppDiam = meanDiameter(sp.species, st.siteType, st.ageYears);
-        const sppBA = Math.round(stemsPerHa * Math.PI * Math.pow(sppDiam / 200, 2) * 10) / 10;
-        return {
-          species: sp.species,
-          volumeM3: sppVol,
-          logPct: sp.logPct,
-          stemCountPerHa: stemsPerHa,
-          meanHeight: sppH,
-          meanDiameter: sppDiam,
-          age: st.ageYears,
-          basalArea: sppBA,
-          areaHa: sp.areaHa ?? 0,
-        };
-      });
-
-      yearSnapshot.stands.push({
-        standId: st.standId,
-        areaHa: st.areaHa,
-        volumeM3: Math.round(st.volumeM3),
-        basalArea: snapBA,
-        stemCount: st.stemCount,
-        meanHeight: snapH,
-        meanDiameter: snapD,
-        ageYears: st.ageYears,
-        species: st.species,
-        siteType: st.siteType,
-        developmentClass: st.developmentClass,
-        speciesData: speciesSnapshots,
-      });
+      yearSnapshot.stands.push(snapshotState(st, yr, false));
     }
     simulationSnapshots.push(yearSnapshot);
   }

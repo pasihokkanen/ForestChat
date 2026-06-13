@@ -9,6 +9,9 @@
 //
 // Used by the /api/forest/[id]/simulate endpoint for on-demand simulation
 // when stand-level operations are edited.
+//
+// Also exported for reuse by schedule.ts so GROW and snapshot logic
+// is defined in exactly one place.
 
 import type { StandData, YearSnapshot, StandSnapshot, SpeciesSnapshot } from "./types";
 import { getGrowthRate } from "./chart-engine";
@@ -23,14 +26,16 @@ import {
 import {
   meanHeight,
   meanDiameter,
-  computeSpeciesBA,
   computeStandBA,
   computeStandHeight,
-  computeDiameter,
 } from "./tapio-growth";
 
-// Internal mutable stand state (mirrors SimStand subset, minus basalArea)
-interface SimState {
+// ═══════════════════════════════════════════════════════════════════════
+// Shared interface — any stand-like object that can be grown/snapshotted.
+// SimState (below) and schedule.ts's SimStand both satisfy this.
+// ═══════════════════════════════════════════════════════════════════════
+
+export interface GrowableStand {
   standId: string;
   areaHa: number;
   siteType: string;
@@ -43,17 +48,20 @@ interface SimState {
   meanHeight: number;
   meanDiameter: number;
   cleared: boolean;
-  speciesData: {
+  speciesData: Array<{
     species: string;
     volumeM3: number;
-    logPct: number;
+    logPct?: number;
     stemCount: number;
-    meanHeight: number;
-    meanDiameter: number;
-    age: number;
-    areaHa: number;
-  }[];
+    meanHeight?: number;
+    meanDiameter?: number;
+    age?: number;
+    areaHa?: number;
+  }>;
 }
+
+// Internal mutable stand state (mirrors GrowableStand, no extra fields)
+interface SimState extends GrowableStand {}
 
 /** DB operation shape (subset of fields we need) */
 export interface DBOperation {
@@ -90,11 +98,19 @@ function initState(stand: StandData): SimState {
 }
 
 /**
- * Build per-species aggregate maps for stand-level BA/height/diameter computation.
+ * Build per-species aggregate maps for BA/height/diameter computation.
  */
-function speciesForAgg(st: SimState): Array<{
+export function speciesForAgg(st: GrowableStand): Array<{
   volumeM3: number; species: string; stemCount: number; diameterCm: number;
 }> {
+  if (st.speciesData.length === 0) {
+    return [{
+      volumeM3: st.volumeM3,
+      species: st.species,
+      stemCount: st.stemCount,
+      diameterCm: st.meanDiameter,
+    }];
+  }
   return st.speciesData.map((sp) => ({
     volumeM3: sp.volumeM3,
     species: sp.species,
@@ -103,7 +119,17 @@ function speciesForAgg(st: SimState): Array<{
   }));
 }
 
-function snapshotState(st: SimState, year: number, _isInitial: boolean): StandSnapshot {
+/**
+ * Build a year snapshot from the current stand state.
+ * Computes stand-level aggregates from Tapio reference tables,
+ * with per-species snapshots that each get their own Tapio-anchored
+ * height, diameter, and basal area.
+ */
+export function snapshotState(
+  st: GrowableStand,
+  year: number,
+  _isInitial: boolean,
+): StandSnapshot {
   // Compute stand-level aggregates from Tapio reference tables.
   const standHeight = computeStandHeight(speciesForAgg(st), st.ageYears, st.siteType, st.areaHa);
   const standDiamCm = meanDiameter(st.species, st.siteType, st.ageYears);
@@ -127,7 +153,7 @@ function snapshotState(st: SimState, year: number, _isInitial: boolean): StandSn
     return {
       species: sp.species,
       volumeM3: sppVol,
-      logPct: sp.logPct,
+      logPct: sp.logPct ?? 0,
       stemCountPerHa: stemsPerHa,
       meanHeight: sppH,
       meanDiameter: sppDiam,
@@ -237,11 +263,22 @@ function applyOperation(st: SimState, op: DBOperation, year: number): void {
   }
 }
 
-function growStand(st: SimState): void {
-  // Cleared stands still age (bare ground gets older), but don't grow
+/**
+ * Advance a stand by one year: volume growth, age, height, natural ingress,
+ * and Tapio-anchored diameter + basal area.
+ *
+ * Returns the VMI volume growth (m³) so callers can update value-side fields
+ * (e.g., valueEur) proportionally. Ingress volume is NOT included — it is
+ * added directly to the stand's volumeM3 inside this function.
+ */
+export function growStand(
+  st: GrowableStand,
+  growthMultiplier = 1.0,
+): number {
+  // Cleared / invalid stands still age but don't grow
   if (st.cleared || st.areaHa <= 0) {
     st.ageYears += 1;
-    return;
+    return 0;
   }
 
   // Compute summed stand BA for growth rate input (from previous year's state).
@@ -256,7 +293,7 @@ function growStand(st: SimState): void {
   const growthPerHa = getGrowthRate(
     st.siteType, st.soilType, st.species,
     st.ageYears, prevStandBA, null,
-    1.0,
+    growthMultiplier,
     st.areaHa > 0 ? st.volumeM3 / st.areaHa : undefined,
     true,
   );
@@ -284,8 +321,7 @@ function growStand(st: SimState): void {
   );
 
   // Natural ingress: young stands gain stems from natural regeneration.
-  // Ingress seedlings add a tiny volume contribution so that BA computed
-  // from speciesData reflects the new stems (avoids D decreasing as N grows).
+  // Density-dependent cubic model: ingress = BASE × (1 − (stems/MAX)³).
   if (st.stemCount > 0 && st.ageYears <= 10 && st.stemCount < MAX_STEMS_HA) {
     const oldStemsPerHa = st.stemCount;
     const densityRatio = st.stemCount / MAX_STEMS_HA;
@@ -298,7 +334,6 @@ function growStand(st: SimState): void {
       st.stemCount = oldStemsPerHa + ingressPerHa;
 
       // Add seedling volume to speciesData so BA reflects new stems.
-      // Seedling volume per stem: π × (d/200)² × h (tiny cylinder).
       const seedlingVolPerStem =
         Math.PI * Math.pow(PLANTING_INITIAL_DIAMETER_CM / 200, 2) * PLANTING_INITIAL_HEIGHT_M;
       const totalIngressVol = Math.round(ingressPerHa * seedlingVolPerStem * 1e4) / 1e4;
@@ -318,7 +353,8 @@ function growStand(st: SimState): void {
   // Compute stand BA and diameter from Tapio reference tables.
   // Diameter from species×site×age, BA derived: BA = N × π × (D/200)².
   st.meanDiameter = meanDiameter(st.species, st.siteType, st.ageYears);
-  const standBA = st.stemCount * Math.PI * Math.pow(st.meanDiameter / 200, 2);
+
+  return growthM3;
 }
 
 /**
