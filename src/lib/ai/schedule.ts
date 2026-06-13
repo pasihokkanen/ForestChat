@@ -881,6 +881,18 @@ export function runScheduleEngine(
         if (st.basalArea === 0) st.basalArea = 2;
         if (st.volumeM3 === 0) st.volumeM3 = st.areaHa * 1;
         if (st.valueEur === 0) st.valueEur = Math.round(st.areaHa * 50);
+        // Reset speciesData to only the planted species with seedling values
+        st.speciesData = [{
+          species: plantSpecies,
+          volumeM3: st.volumeM3,
+          logPct: 0,
+          stemCount: density,
+          meanHeight: PLANTING_INITIAL_HEIGHT_M,
+          meanDiameter: PLANTING_INITIAL_DIAMETER_CM,
+          age: 0,
+          basalArea: st.basalArea,
+          areaHa: st.areaHa,
+        }];
       }
     }
 
