@@ -163,21 +163,55 @@ function applyOperation(st: SimState, op: DBOperation, year: number): void {
     st.meanHeight = 0;
     st.meanDiameter = 0;
     st.cleared = true;
+    st.speciesData = [];
   } else if (op.type === "selection_cutting" || op.type === "overstory_removal") {
+    const oldVol = st.volumeM3;
     st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
+    // Sync speciesData volumes proportionally
+    const volScale = oldVol > 0 ? st.volumeM3 / oldVol : 1;
+    for (const sp of st.speciesData) {
+      sp.volumeM3 = Math.round(sp.volumeM3 * volScale * 10) / 10;
+    }
     if (op.type === "overstory_removal") {
       st.volumeM3 = Math.max(st.volumeM3, st.areaHa * 1);
       st.developmentClass = "seedling";
     }
   } else if (op.type === "thinning" || op.type === "first_thinning") {
+    const oldVol = st.volumeM3;
+    const oldStems = st.stemCount;
     st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
     st.stemCount = Math.round(st.stemCount * (1 - pct));
+    // Sync speciesData volumes and stems proportionally
+    const volScale = oldVol > 0 ? st.volumeM3 / oldVol : 1;
+    const stemScale = oldStems > 0 ? st.stemCount / oldStems : 1;
+    for (const sp of st.speciesData) {
+      sp.volumeM3 = Math.round(sp.volumeM3 * volScale * 10) / 10;
+      sp.stemCount = Math.round(sp.stemCount * stemScale);
+    }
   } else if (op.type === "early_tending") {
+    const oldVol = st.volumeM3;
+    const oldStems = st.stemCount;
     st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
     st.stemCount = 3500; // Tapio early tending target
+    // Sync speciesData volumes and stems proportionally
+    const volScale = oldVol > 0 ? st.volumeM3 / oldVol : 1;
+    const stemScale = oldStems > 0 ? st.stemCount / oldStems : 1;
+    for (const sp of st.speciesData) {
+      sp.volumeM3 = Math.round(sp.volumeM3 * volScale * 10) / 10;
+      sp.stemCount = Math.round(sp.stemCount * stemScale);
+    }
   } else if (op.type === "tending") {
+    const oldVol = st.volumeM3;
+    const oldStems = st.stemCount;
     st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
     st.stemCount = 2000; // Tapio tending target
+    // Sync speciesData volumes and stems proportionally
+    const volScale = oldVol > 0 ? st.volumeM3 / oldVol : 1;
+    const stemScale = oldStems > 0 ? st.stemCount / oldStems : 1;
+    for (const sp of st.speciesData) {
+      sp.volumeM3 = Math.round(sp.volumeM3 * volScale * 10) / 10;
+      sp.stemCount = Math.round(sp.stemCount * stemScale);
+    }
   } else if (op.type.includes("planting")) {
     st.cleared = false;
     const plantSpecies = op.type.replace("_planting", "");
@@ -246,7 +280,9 @@ function growStand(st: SimState): void {
     st.siteType,
   );
 
-  // Natural ingress (unchanged from current model)
+  // Natural ingress: young stands gain stems from natural regeneration.
+  // Ingress seedlings add a tiny volume contribution so that BA computed
+  // from speciesData reflects the new stems (avoids D decreasing as N grows).
   if (st.stemCount > 0 && st.ageYears <= 10 && st.stemCount < MAX_STEMS_HA) {
     const oldStemsPerHa = st.stemCount;
     const densityRatio = st.stemCount / MAX_STEMS_HA;
@@ -257,6 +293,22 @@ function growStand(st: SimState): void {
     );
     if (ingressPerHa > 0) {
       st.stemCount = oldStemsPerHa + ingressPerHa;
+
+      // Add seedling volume to speciesData so BA reflects new stems.
+      // Seedling volume per stem: π × (d/200)² × h (tiny cylinder).
+      const seedlingVolPerStem =
+        Math.PI * Math.pow(PLANTING_INITIAL_DIAMETER_CM / 200, 2) * PLANTING_INITIAL_HEIGHT_M;
+      const totalIngressVol = Math.round(ingressPerHa * seedlingVolPerStem * 1e4) / 1e4;
+      const totalSpeciesStems = st.speciesData.reduce((s, sd) => s + sd.stemCount, 0);
+      if (st.speciesData.length > 0) {
+        // Distribute ingress volume and stems proportionally to existing species
+        for (const sp of st.speciesData) {
+          const share = totalSpeciesStems > 0 ? sp.stemCount / totalSpeciesStems : 1 / st.speciesData.length;
+          sp.volumeM3 = Math.round((sp.volumeM3 + totalIngressVol * share) * 1e4) / 1e4;
+          sp.stemCount += Math.round(ingressPerHa * share);
+        }
+      }
+      st.volumeM3 += totalIngressVol;
     }
   }
 

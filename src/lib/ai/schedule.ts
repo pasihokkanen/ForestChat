@@ -870,33 +870,71 @@ export function runScheduleEngine(
         st.cleared = true;
         st.regenDelayStarted = yr;
         st.spawnedTypes.clear();
+        st.speciesData = [];
       } else if (op.type === "selection_cutting") {
         const pct = op.removalFraction;
+        const oldVol = st.volumeM3;
         st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
         st.valueEur = Math.round(st.valueEur * (1 - pct));
+        // Sync speciesData volumes
+        const volScale = oldVol > 0 ? st.volumeM3 / oldVol : 1;
+        for (const sp of st.speciesData) {
+          sp.volumeM3 = Math.round(sp.volumeM3 * volScale * 10) / 10;
+        }
       } else if (op.type === "overstory_removal") {
         // Remove overstory trees — seedlings remain underneath.
-        // Unlike clearcut, the stand is NOT marked cleared — growth continues.
-        st.volumeM3 = st.areaHa * 1; // nominal seedling volume
+        st.volumeM3 = st.areaHa * 1;
         st.valueEur = Math.round(st.areaHa * 50);
         st.developmentClass = "seedling";
         st.spawnedTypes.clear();
+        // Scale speciesData to nominal seedling volume
+        const oldTotalVol = st.speciesData.reduce((s, sp) => s + sp.volumeM3, 0);
+        const volScale = oldTotalVol > 0 ? st.volumeM3 / oldTotalVol : 1;
+        for (const sp of st.speciesData) {
+          sp.volumeM3 = Math.round(sp.volumeM3 * volScale * 10) / 10;
+        }
       } else if (op.type === "thinning" || op.type === "first_thinning") {
-        // Use removalFraction from spawn time, applied to CURRENT volume.
         const pct = op.removalFraction;
+        const oldVol = st.volumeM3;
+        const oldStems = st.stemCount;
         st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
         st.valueEur = Math.round(st.valueEur * (1 - pct));
         st.stemCount = Math.round(st.stemCount * (1 - pct));
         st.spawnedTypes.delete(op.type);
         st.thinningCount++;
+        // Sync speciesData volumes and stems
+        const volScale = oldVol > 0 ? st.volumeM3 / oldVol : 1;
+        const stemScale = oldStems > 0 ? st.stemCount / oldStems : 1;
+        for (const sp of st.speciesData) {
+          sp.volumeM3 = Math.round(sp.volumeM3 * volScale * 10) / 10;
+          sp.stemCount = Math.round(sp.stemCount * stemScale);
+        }
       } else if (op.type === "early_tending") {
         const pct = op.removalFraction;
+        const oldVol = st.volumeM3;
+        const oldStems = st.stemCount;
         st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
         st.stemCount = EARLY_TENDING_TARGET_STEMS_HA;
+        // Sync speciesData volumes and stems
+        const volScale = oldVol > 0 ? st.volumeM3 / oldVol : 1;
+        const stemScale = oldStems > 0 ? st.stemCount / oldStems : 1;
+        for (const sp of st.speciesData) {
+          sp.volumeM3 = Math.round(sp.volumeM3 * volScale * 10) / 10;
+          sp.stemCount = Math.round(sp.stemCount * stemScale);
+        }
       } else if (op.type === "tending") {
         const pct = op.removalFraction;
+        const oldVol = st.volumeM3;
+        const oldStems = st.stemCount;
         st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
-        st.stemCount = 2000; // Tapio: 1800-2200 stems/ha after taimikonharvennus
+        st.stemCount = 2000;
+        // Sync speciesData volumes and stems
+        const volScale = oldVol > 0 ? st.volumeM3 / oldVol : 1;
+        const stemScale = oldStems > 0 ? st.stemCount / oldStems : 1;
+        for (const sp of st.speciesData) {
+          sp.volumeM3 = Math.round(sp.volumeM3 * volScale * 10) / 10;
+          sp.stemCount = Math.round(sp.stemCount * stemScale);
+        }
       } else if (op.type.includes("planting")) {
         st.cleared = false;
         st.regenDelayStarted = 0;
@@ -976,6 +1014,7 @@ export function runScheduleEngine(
 
       // Natural ingress: young stands gain stems from natural regeneration.
       // Density-dependent cubic model: ingress = BASE × (1 − (stems/MAX)³).
+      // Ingress seedlings add volume so BA via speciesData reflects new stems.
       if (st.stemCount > 0 && st.ageYears <= 10 && st.stemCount < MAX_STEMS_HA) {
         const oldStemsPerHa = st.stemCount;
         const densityRatio = st.stemCount / MAX_STEMS_HA;
@@ -986,6 +1025,20 @@ export function runScheduleEngine(
         ));
         if (ingressPerHa > 0) {
           st.stemCount = oldStemsPerHa + ingressPerHa;
+
+          // Add seedling volume to speciesData and stand total
+          const seedlingVolPerStem =
+            Math.PI * Math.pow(PLANTING_INITIAL_DIAMETER_CM / 200, 2) * PLANTING_INITIAL_HEIGHT_M;
+          const totalIngressVol = Math.round(ingressPerHa * seedlingVolPerStem * 1e4) / 1e4;
+          const totalSpeciesStems = st.speciesData.reduce((s, sd) => s + sd.stemCount, 0);
+          if (st.speciesData.length > 0) {
+            for (const sp of st.speciesData) {
+              const share = totalSpeciesStems > 0 ? sp.stemCount / totalSpeciesStems : 1 / st.speciesData.length;
+              sp.volumeM3 = Math.round((sp.volumeM3 + totalIngressVol * share) * 1e4) / 1e4;
+              sp.stemCount += Math.round(ingressPerHa * share);
+            }
+          }
+          st.volumeM3 += totalIngressVol;
         }
       }
 
