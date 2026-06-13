@@ -3,12 +3,9 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useForestStore } from "@/lib/store";
 import type { Compartment, CompartmentSpecies, Operation } from "@/types/database";
-import type { YearSnapshot } from "@/lib/ai/types";
 import { displayDevClass, displaySiteType, displaySpecies, displayOp, standListLabels } from "@/lib/i18n";
 import type maplibregl from "maplibre-gl";
-import SimulationView from "./SimulationView";
 import SimulationApiLoader from "./SimulationApiLoader";
-import type { PlannedOpForView } from "./SimulationView";
 
 type StandRowType = "stand" | "species" | "operation" | "empty" | "expandedContent";
 
@@ -86,20 +83,8 @@ export default function StandList({ map }: StandListProps) {
   const setPendingStandSelection = useForestStore((s) => s.setPendingStandSelection);
   const aiStandFilters = useForestStore((s) => s.aiStandFilters);
   const language = useForestStore((s) => s.language) ?? "en";
-  const planMetadata = useForestStore((s) => s.planMetadata);
   const forestId = useForestStore((s) => s.forest?.id ?? null);
   const L = standListLabels(language);
-
-  // Parse simulation snapshots from plan metadata
-  const simulationSnapshots = useMemo(() => {
-    if (!planMetadata?.simulation_data) return null;
-    try {
-      return JSON.parse(planMetadata.simulation_data) as YearSnapshot[];
-    } catch (e) {
-      console.error("Failed to parse simulation_data:", e);
-      return null;
-    }
-  }, [planMetadata?.simulation_data]);
 
   // ── State backed by module-level standPersist to survive tab switches ──
   const [expandedStands, setExpandedStandsRaw] = useState<Set<string>>(
@@ -692,23 +677,8 @@ export default function StandList({ map }: StandListProps) {
                           )}
                         </div>
 
-                        {/* Simulation — year blocks with inline operations */}
-                        {simulationSnapshots && simulationSnapshots.length > 0 ? (
-                          <SimulationView
-                            standId={row.data.stand_id}
-                            simulationSnapshots={simulationSnapshots}
-                            operations={opsForStand.map(op => ({
-                              year: op.year,
-                              type: op.type,
-                              removalPct: op.removal_pct ?? 0,
-                              incomeEur: op.income_eur ?? 0,
-                              costEur: op.cost_eur ?? 0,
-                              notes: op.notes ?? "",
-                            }))}
-                            language={language}
-                            labels={L}
-                          />
-                        ) : simulationSnapshots === null && forestId ? (
+                        {/* Simulation — computed on-demand from current operations */}
+                        {forestId ? (
                           <SimulationApiLoader
                             forestId={forestId}
                             standId={row.data.stand_id}

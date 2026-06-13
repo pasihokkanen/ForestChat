@@ -266,7 +266,7 @@ export async function generatePlan(
 
     // ── 4. Schedule ──
     const startYear = args.startYear ?? new Date().getFullYear();
-    const { years, summary, simulationSnapshots } = schedulePlan(
+    const { years, summary } = schedulePlan(
       forestStands,
       startYear,
       periodYears,
@@ -349,7 +349,6 @@ export async function generatePlan(
       annual_growth_m3: summary.annualGrowth,
       owner_stated_value_eur: null,
       goal,
-      simulation_data: JSON.stringify(simulationSnapshots),
     };
 
     const { data: existingMeta } = await supabase

@@ -78,7 +78,6 @@ export interface PlanMetadata {
   annual_growth_m3: number | null;
   owner_stated_value_eur: number | null;
   goal?: string | null;
-  simulation_data?: string | null;
   prices_id: string | null;
   created_at: string;
   updated_at: string;
