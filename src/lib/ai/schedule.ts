@@ -305,6 +305,7 @@ function spawnOperations(
           income_eur: 0,
           cost_eur: Math.round((COSTS[prepType] ?? 0) * s.areaHa),
           removal_m3: 0,
+          removalFraction: 0,
           notes: `Regeneration site prep after clearcut`,
           dueYear: year,
         });
@@ -320,6 +321,7 @@ function spawnOperations(
           income_eur: 0,
           cost_eur: Math.round((COSTS[plantType] ?? 0) * s.areaHa),
           removal_m3: 0,
+          removalFraction: 0,
           notes: `${regenSp} planting after clearcut`,
           dueYear: year,
         });
@@ -362,6 +364,7 @@ function spawnOperations(
             income_eur: Math.round(s.valueEur),
             cost_eur: 0,
             removal_m3: Math.round(s.volumeM3),
+            removalFraction: 1,
             notes: `Overstory removal (seed trees, ~${yearsElapsed}y since seed cut), age ${s.ageYears}y`,
             dueYear: year,
           });
@@ -395,6 +398,7 @@ function spawnOperations(
             income_eur: Math.round(s.valueEur * def.removalFraction),
             cost_eur: 0,
             removal_m3: Math.round(removal),
+            removalFraction: def.removalFraction,
             notes: `${opType === "selection_cutting" ? "Selection cutting (carbon storage)" : "Clearcut"} at age ${s.ageYears}y [${optMin}–${optMax}y]`,
             dueYear: year,
           });
@@ -450,6 +454,7 @@ function spawnOperations(
                 income_eur: Math.round(s.valueEur * removalFraction * ratio),
                 cost_eur: 0,
                 removal_m3: Math.round(removal),
+                removalFraction,
                 notes: `First thinning BA=${s.basalArea.toFixed(0)} ${Math.round(stemsPerHa)}→${target} stems/ha (${removalPct}%) age=${s.ageYears}y`,
                 dueYear: year,
               });
@@ -484,6 +489,7 @@ function spawnOperations(
               income_eur: Math.round(s.valueEur * removalFraction * ratio),
               cost_eur: 0,
               removal_m3: Math.round(removal),
+              removalFraction,
               notes: `Thinning BA=${s.basalArea.toFixed(0)}→${targetBA} m²/ha (${removalPct}%) age=${s.ageYears}y`,
               dueYear: year,
             });
@@ -513,6 +519,7 @@ function spawnOperations(
           income_eur: 0,
           cost_eur: Math.round(COSTS.early_tending * s.areaHa),
           removal_m3: removalM3,
+          removalFraction,
           notes: `Early tending: ${Math.round(stemsPerHa)}→${EARLY_TENDING_TARGET_STEMS_HA} stems/ha, h=${s.meanHeight.toFixed(1)}m${s.plantingYear > 0 ? ` (${year - s.plantingYear}y post-plant)` : ""}`,
           dueYear: year,
         });
@@ -530,6 +537,7 @@ function spawnOperations(
           income_eur: 0,
           cost_eur: Math.round(COSTS.tending * s.areaHa),
           removal_m3: removalM3,
+          removalFraction,
           notes: `Tending: ${Math.round(stemsPerHa)}→${targetStemsHa} stems/ha (too tall for early tending, h=${s.meanHeight.toFixed(1)}m)`,
           dueYear: year,
         });
@@ -786,11 +794,10 @@ export function runScheduleEngine(
         st.regenDelayStarted = yr;
         st.spawnedTypes.clear();
       } else if (op.type === "selection_cutting") {
-        const removal = op.removal_m3;
-        const pct = st.volumeM3 > 0 ? removal / st.volumeM3 : 0;
-        st.volumeM3 = Math.max(0, st.volumeM3 - removal);
-        st.basalArea = Math.max(0, st.basalArea * (1 - Math.min(pct, 1)));
-        st.valueEur = Math.max(0, Math.round(st.valueEur * (1 - Math.min(pct, 1))));
+        const pct = op.removalFraction;
+        st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
+        st.basalArea = Math.round(st.basalArea * (1 - pct) * 10) / 10;
+        st.valueEur = Math.round(st.valueEur * (1 - pct));
       } else if (op.type === "overstory_removal") {
         // Remove overstory trees — seedlings remain underneath.
         // Unlike clearcut, the stand is NOT marked cleared — growth continues.
@@ -800,26 +807,26 @@ export function runScheduleEngine(
         st.developmentClass = "seedling";
         st.spawnedTypes.clear();
       } else if (op.type === "thinning" || op.type === "first_thinning") {
-        const removal = op.removal_m3;
-        const pct = st.volumeM3 > 0 ? removal / st.volumeM3 : 0;
-        st.volumeM3 = Math.max(0, st.volumeM3 - removal);
-        st.basalArea = Math.max(0, st.basalArea * (1 - Math.min(pct, 1)));
-        st.valueEur = Math.max(0, Math.round(st.valueEur * (1 - Math.min(pct, 1))));
-        st.stemCount = Math.round(st.stemCount * (1 - Math.min(pct, 1)));
+        // Use removalFraction from spawn time, applied to CURRENT volume.
+        // This fixes carryover: even if the operation waited years, the
+        // correct fraction of current volume is removed.
+        const pct = op.removalFraction;
+        st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
+        st.basalArea = Math.round(st.basalArea * (1 - pct) * 10) / 10;
+        st.valueEur = Math.round(st.valueEur * (1 - pct));
+        st.stemCount = Math.round(st.stemCount * (1 - pct));
         st.spawnedTypes.delete(op.type);
         st.thinningCount++;
       } else if (op.type === "early_tending") {
-        const removal = op.removal_m3;
-        const volBefore = st.volumeM3;
-        st.volumeM3 = Math.max(0, st.volumeM3 - removal);
+        const pct = op.removalFraction;
+        st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
         st.stemCount = EARLY_TENDING_TARGET_STEMS_HA;
-        st.basalArea = Math.max(0, st.basalArea * (1 - Math.min(1, removal / Math.max(1, volBefore))));
+        st.basalArea = Math.round(st.basalArea * (1 - pct) * 10) / 10;
       } else if (op.type === "tending") {
-        const removal = op.removal_m3;
-        const volBefore = st.volumeM3;
-        st.volumeM3 = Math.max(0, st.volumeM3 - removal);
+        const pct = op.removalFraction;
+        st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
         st.stemCount = 2000; // Tapio: 1800-2200 stems/ha after taimikonharvennus
-        st.basalArea = Math.max(0, st.basalArea * (1 - Math.min(1, removal / Math.max(1, volBefore))));
+        st.basalArea = Math.round(st.basalArea * (1 - pct) * 10) / 10;
       } else if (op.type.includes("planting")) {
         st.cleared = false;
         st.regenDelayStarted = 0;

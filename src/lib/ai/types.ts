@@ -51,6 +51,10 @@ export interface PlannedOperation {
   income_eur: number;
   cost_eur: number;
   removal_m3: number;
+  /** Fraction of stand volume removed (0-1). Set at spawn time.
+   *  Used at apply time to recalculate removal from current volume,
+   *  so carryover ops don't use stale snapshots. */
+  removalFraction: number;
   notes: string;
   /** First year this operation became due (used for priority ordering) */
   dueYear?: number;

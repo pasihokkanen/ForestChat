@@ -42,6 +42,7 @@ function makeOp(
     income_eur: overrides?.income_eur ?? 0,
     cost_eur: overrides?.cost_eur ?? 0,
     removal_m3: overrides?.removal_m3 ?? 0,
+    removalFraction: overrides?.removalFraction ?? 0,
     notes: overrides?.notes ?? "",
     dueYear: overrides?.dueYear ?? 2026,
   };
