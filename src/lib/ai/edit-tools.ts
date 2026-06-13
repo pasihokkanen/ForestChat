@@ -12,6 +12,14 @@ import { COSTS, normalizeOperationType, getRemovalPct } from "./config";
 import { serverMsg } from "../i18n";
 import type { Language } from "../i18n";
 
+/** Clear simulation_data after any operation mutation — forces on-demand API fallback. */
+async function invalidateSimulation(supabase: SupabaseClient, forestId: string): Promise<void> {
+  await supabase
+    .from("plan_metadata")
+    .update({ simulation_data: null })
+    .eq("forest_id", forestId);
+}
+
 const VALID_TYPES = [
   "clear_cut",
   "thinning",
@@ -126,6 +134,8 @@ export async function addOperation(
 
   if (error) return { success: false, result: "", error: error.message };
 
+  await invalidateSimulation(supabase, forestId);
+
   const costLabel = language === "fi" ? "kulu" : "cost";
   const costInfo = costEur > 0 ? `, ${costLabel}: ${costEur.toLocaleString()} €` : "";
   return {
@@ -178,6 +188,7 @@ export async function removeOperations(
   if (count === 0) {
     return { success: true, result: serverMsg("noOperationsForStand", language, standLabel, yearClause, typeClause) };
   }
+  await invalidateSimulation(supabase, forestId);
   return { success: true, result: serverMsg("operationsRemoved", language, String(count), standLabel, yearClause, typeClause) };
 }
 
@@ -373,6 +384,8 @@ export async function batchUpdateOperations(
 
     if (updateError) throw new Error(updateError.message);
 
+    await invalidateSimulation(supabase, forestId);
+
     const summary = summaryParts.length > 0 ? ` (${summaryParts.join(", ")})` : "";
     return {
       success: true,
@@ -419,6 +432,8 @@ export async function clearPlan(
     .eq("created_by", "ai");
 
   if (error) return { success: false, result: "", error: error.message };
+
+  await invalidateSimulation(supabase, forestId);
 
   return {
     success: true,

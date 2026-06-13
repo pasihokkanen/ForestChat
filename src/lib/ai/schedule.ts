@@ -24,7 +24,7 @@ function dlog(msg: string) {
 // ═══════════════════════════════════════════════════════════════════════
 
 /** Planting density (stems/ha) by species. Source: Tapio Metsänhoidon suositukset. */
-const PLANTING_DENSITY: Record<string, number> = {
+export const PLANTING_DENSITY: Record<string, number> = {
   pine: 2200,
   spruce: 1650,
   silver_birch: 1600,
@@ -34,26 +34,19 @@ const PLANTING_DENSITY: Record<string, number> = {
 };
 
 /** Initial seedling height (m) after planting. */
-const PLANTING_INITIAL_HEIGHT_M = 0.3;
+export const PLANTING_INITIAL_HEIGHT_M = 0.3;
 
 /** Initial seedling diameter (cm) after planting. */
-const PLANTING_INITIAL_DIAMETER_CM = 0.5;
+export const PLANTING_INITIAL_DIAMETER_CM = 0.5;
 
-/** Natural ingress base rate: max stems/ha/year at zero density.
- *  Quadratic decline from this rate: ingress = RATE × (1 − (stems/MAX)³).
- *  Density-dependent: sparse stands get high ingress, dense stands get very low.
- *  Steep cubic exponent ensures post-early-tending stands (3500 stems/ha) won't
- *  re-trigger before height crosses the threshold — no history flags needed. */
-const NATURAL_INGRESS_BASE_RATE = 520;
+/** Natural ingress base rate: max stems/ha/year at zero density. */
+export const NATURAL_INGRESS_BASE_RATE = 520;
 
-/** Natural ingress exponent: controls how steeply ingress drops with density.
- *  Cubic (3.0) creates a sharp knee — fast ingress for sparse stands,
- *  very slow ingress near carrying capacity. */
-const NATURAL_INGRESS_EXPONENT = 3.0;
+/** Natural ingress exponent: controls how steeply ingress drops with density. */
+export const NATURAL_INGRESS_EXPONENT = 3.0;
 
-/** Natural ingress ceiling: carrying capacity (stems/ha).
- *  Ingress reaches zero at this density. */
-const MAX_STEMS_HA = 6000;
+/** Natural ingress ceiling: carrying capacity (stems/ha). */
+export const MAX_STEMS_HA = 6000;
 
 /** Early tending trigger: stems/ha must exceed this.
  *  Tapio: varhaisperkaus when stems > 4000/ha. */

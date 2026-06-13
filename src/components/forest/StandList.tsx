@@ -7,6 +7,7 @@ import type { YearSnapshot } from "@/lib/ai/types";
 import { displayDevClass, displaySiteType, displaySpecies, displayOp, standListLabels } from "@/lib/i18n";
 import type maplibregl from "maplibre-gl";
 import SimulationView from "./SimulationView";
+import SimulationApiLoader from "./SimulationApiLoader";
 import type { PlannedOpForView } from "./SimulationView";
 
 type StandRowType = "stand" | "species" | "operation" | "empty" | "expandedContent";
@@ -86,6 +87,7 @@ export default function StandList({ map }: StandListProps) {
   const aiStandFilters = useForestStore((s) => s.aiStandFilters);
   const language = useForestStore((s) => s.language) ?? "en";
   const planMetadata = useForestStore((s) => s.planMetadata);
+  const forestId = useForestStore((s) => s.forest?.id ?? null);
   const L = standListLabels(language);
 
   // Parse simulation snapshots from plan metadata
@@ -695,6 +697,21 @@ export default function StandList({ map }: StandListProps) {
                           <SimulationView
                             standId={row.data.stand_id}
                             simulationSnapshots={simulationSnapshots}
+                            operations={opsForStand.map(op => ({
+                              year: op.year,
+                              type: op.type,
+                              removalPct: op.removal_pct ?? 0,
+                              incomeEur: op.income_eur ?? 0,
+                              costEur: op.cost_eur ?? 0,
+                              notes: op.notes ?? "",
+                            }))}
+                            language={language}
+                            labels={L}
+                          />
+                        ) : simulationSnapshots === null && forestId ? (
+                          <SimulationApiLoader
+                            forestId={forestId}
+                            standId={row.data.stand_id}
                             operations={opsForStand.map(op => ({
                               year: op.year,
                               type: op.type,

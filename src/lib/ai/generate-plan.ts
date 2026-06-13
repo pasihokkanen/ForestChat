@@ -88,7 +88,7 @@ function computeStandValue(
 }
 
 /** Convert a DB Compartment into an enriched StandData. */
-function enrichCompartment(
+export function enrichCompartment(
   c: Compartment,
   speciesRows: CompartmentSpecies[],
   prices?: Record<string, Record<string, { tukki: number; kuitu: number }>>,
