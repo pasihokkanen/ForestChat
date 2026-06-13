@@ -96,33 +96,36 @@ function snapshotState(st: SimState, year: number, isInitial: boolean): StandSna
 
   const totalVol = st.speciesData.reduce((s, sp) => s + sp.volumeM3, 0);
   const volRatio = totalVol > 0 ? st.volumeM3 / totalVol : 1;
-  const totalBA = st.speciesData.reduce((s, sp) => s + sp.basalArea, 0);
-  const baRatio = totalBA > 0 ? st.basalArea / totalBA : 1;
   const totalSpeciesStems = st.speciesData.reduce((s, sd) => s + sd.stemCount, 0);
 
-  const speciesSnapshots: SpeciesSnapshot[] = st.speciesData.map((sp) => ({
-    species: sp.species,
-    volumeM3: Math.round(sp.volumeM3 * volRatio),
-    logPct: sp.logPct,
-    stemCountPerHa:
+  const speciesSnapshots: SpeciesSnapshot[] = st.speciesData.map((sp) => {
+    const stemsPerHa =
       totalSpeciesStems > 0
         ? Math.round(sp.stemCount * st.stemCount / totalSpeciesStems)
-        : 0,
-    meanHeight: Math.round((sp.meanHeight + heightDelta) * 10) / 10,
-    meanDiameter: Math.round((sp.meanDiameter + diameterDelta) * 10) / 10,
-    age: st.ageYears,
-    basalArea: Math.round(sp.basalArea * baRatio * 10) / 10,
-    areaHa: sp.areaHa ?? 0,
-  }));
+        : 0;
+    const diamCm = Math.round((sp.meanDiameter + diameterDelta) * 10) / 10;
+    return {
+      species: sp.species,
+      volumeM3: Math.round(sp.volumeM3 * volRatio),
+      logPct: sp.logPct,
+      stemCountPerHa: stemsPerHa,
+      meanHeight: Math.round((sp.meanHeight + heightDelta) * 10) / 10,
+      meanDiameter: diamCm,
+      age: st.ageYears,
+      basalArea: Math.round(stemsPerHa * Math.PI * Math.pow(diamCm / 200, 2) * 10) / 10,
+      areaHa: sp.areaHa ?? 0,
+    };
+  });
 
+  const standDiamCm = Math.round(st.meanDiameter * 10) / 10;
   return {
     standId: st.standId,
     areaHa: st.areaHa,
     volumeM3: Math.round(st.volumeM3),
-    basalArea: Math.round(st.basalArea * 10) / 10,
+    basalArea: Math.round(st.stemCount * Math.PI * Math.pow(standDiamCm / 200, 2) * 10) / 10,
     stemCount: st.stemCount,
     meanHeight: Math.round(st.meanHeight * 10) / 10,
-    meanDiameter: Math.round(st.meanDiameter * 10) / 10,
+    meanDiameter: standDiamCm,
     ageYears: st.ageYears,
     species: st.species,
     siteType: st.siteType,
