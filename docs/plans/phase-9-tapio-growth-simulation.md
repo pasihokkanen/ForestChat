@@ -16,8 +16,18 @@ validation with the summed stand BA input. Extend validation test to cover heigh
 
 **Tech Stack:** TypeScript, chart-engine.ts (getGrowthRate, densityFactor), schedule.ts, stand-simulator.ts
 
-**Version:** 1.2
+**Version:** 1.3
 **Date:** 2026-06-13
+
+**Changelog v1.3:**
+- Fixed: added `SEEDLING_DIAMETER_CM` default (2cm) so seedling BA fallback doesn't compute 0
+- Fixed: restored T5 assertion code block (accidentally dropped in v1.2)
+- Added: T2 calibration heuristic (what to adjust when validation fails)
+- Added: empty speciesData edge case pitfall to T3
+- Fixed: restored `volRatio` in snapshotState for exact per-species volume additivity
+- Added: T4 GROW code block (was bullet points only)
+- Added: T4 SimStand vs SimState type difference note
+- Noted: `computeStandDiameter` is a thin wrapper for API clarity
 
 **Changelog v1.2:**
 - **Per-species approach:** BA computed per-species (`Gᵢ = Vᵢ / (Hᵢ × ffᵢ)`), summed to stand (`G = Σ Gᵢ`). Stand height is basal-area-weighted (`H = Σ(Gᵢ×Hᵢ)/G`). Eliminates the stand vs per-species BA discrepancy.
@@ -298,9 +308,13 @@ export function formFactor(species: string): number {
   return ff;
 }
 
+/** Default planting diameter (cm) for seedling BA fallback (H < 1.3m or volume ≤ 0). */
+export const SEEDLING_DIAMETER_CM = 2.0;
+
 /**
  * Compute basal area (m²/ha) for a single species from its volume, height, and form factor.
- * For seedling stands (H < 1.3m or volume ≤ 0), falls back to stems×diameter formula.
+ * For seedling stands (H < 1.3m or volume ≤ 0), falls back to stems×diameter formula
+ * using SEEDLING_DIAMETER_CM as default when diameterCm is 0.
  */
 export function computeSpeciesBA(
   volumeM3: number,
@@ -310,7 +324,8 @@ export function computeSpeciesBA(
   diameterCm: number,
 ): number {
   if (volumeM3 <= 0 || heightM < 1.3) {
-    return Math.round(stemCount * Math.PI * Math.pow(diameterCm / 200, 2) * 10) / 10;
+    const d = diameterCm > 0 ? diameterCm : SEEDLING_DIAMETER_CM;
+    return Math.round(stemCount * Math.PI * Math.pow(d / 200, 2) * 10) / 10;
   }
   const f = formFactor(species);
   return Math.round(volumeM3 / (heightM * f) * 10) / 10;
@@ -364,6 +379,7 @@ export function computeStandHeight(
 
 /**
  * Stand mean diameter from aggregated BA and total stem count.
+ * Thin wrapper around computeDiameter() — kept as a separate export for API clarity.
  * D = 200 × √(G_stand / (N_stand × π))
  */
 export function computeStandDiameter(standBA: number, totalStems: number): number {
@@ -501,7 +517,15 @@ const densityFactor = (basalArea, siteType, developmentClass) => {
 2. Run `npx vitest run src/lib/ai/__tests__/tapio-validation.test.ts`
 3. If all 20 volume points pass (±8%): done
 4. If some points fail: adjust the bracket thresholds or values, re-run
-5. The bracket with the most impact is the 0.75-1.3→0.85 tier (covers most stands)
+5. The bracket with the most impact is the 0.55–0.95 tier (covers most stands)
+
+**Adjustment heuristic:**
+- **Volume too low at intermediate ages (20-60y):** Increase the middle density bracket factors (the 0.35–0.55 and 0.55–0.95 tiers). Stands spend most of their rotation in these brackets.
+- **Volume too high at maturity (80-100y):** Decrease the high-density bracket factor (0.95–1.10). Mature stands with BA near the expected level should not be over-boosted.
+- **Volume too low at all ages:** Increase all bracket factors by a uniform offset (e.g. +0.05).
+- **Volume too high at all ages:** Decrease all bracket factors uniformly.
+- **Seedling volume too low/high:** Adjust the BA=0 bracket (currently 0.45). This affects only ages 0-5 before form factor BA kicks in.
+- After each adjustment, re-run validation. Expect 2-3 iterations.
 
 **Verification:**
 - `npm run build` — no errors
@@ -624,7 +648,9 @@ function snapshotState(st: SimState, year: number, isInitial: boolean): StandSna
   const standHeight = computeStandHeight(speciesForAgg, st.ageYears, st.siteType);
   const standDiamCm = computeDiameter(standBA, st.stemCount);
 
-  const totalVol = st.speciesData.reduce((s, sp) => s + sp.volumeM3, 0);
+  // Use volRatio to ensure per-species volumes sum exactly to stand total
+  const rawTotalVol = st.speciesData.reduce((s, sp) => s + sp.volumeM3, 0);
+  const volRatio = rawTotalVol > 0 ? st.volumeM3 / rawTotalVol : 1;
   const totalSpeciesStems = st.speciesData.reduce((s, sd) => s + sd.stemCount, 0);
 
   // Per-species snapshots — each species gets its own Tapio height and BA
@@ -633,12 +659,13 @@ function snapshotState(st: SimState, year: number, isInitial: boolean): StandSna
       totalSpeciesStems > 0
         ? Math.round(sp.stemCount * st.stemCount / totalSpeciesStems)
         : 0;
+    const sppVol = Math.round(sp.volumeM3 * volRatio);
     const sppH = meanHeight(sp.species, st.siteType, st.ageYears);
-    const sppBA = computeSpeciesBA(sp.volumeM3, sppH, sp.species, stemsPerHa, 0);
+    const sppBA = computeSpeciesBA(sppVol, sppH, sp.species, stemsPerHa, 0);
     const sppDiam = computeDiameter(sppBA, stemsPerHa);
     return {
       species: sp.species,
-      volumeM3: sp.volumeM3,
+      volumeM3: sppVol,
       logPct: sp.logPct,
       stemCountPerHa: stemsPerHa,
       meanHeight: sppH,
@@ -688,6 +715,13 @@ consistent. Per-species growth rate differentiation is explicitly out of scope (
 returns the same value as `meanHeight("pine", site, age)` because all BA comes from pine.
 For mixed stands, the more voluminous species with larger BA dominates the weighted height.
 
+💡 **Pitfall:** If `st.speciesData` is empty (stand loaded from DB without per-species breakdown),
+`computeStandBA` returns 0 and `computeStandHeight` falls back to `meanHeight(st.species, ...)`.
+This produces inconsistent stand-level values (BA=0 but height=species-level). Ensure
+`speciesData` is populated before GROW runs — planting always creates a species entry,
+but DB-loaded stands may need a pre-population step. For stands with no species breakdown,
+fallback to treating the main species as 100% of volume/stems.
+
 ---
 
 ### T4: Replace GROW in schedule.ts
@@ -696,27 +730,82 @@ For mixed stands, the more voluminous species with larger BA dominates the weigh
 
 **File:** Modify `src/lib/ai/schedule.ts`
 
+**Type difference:** `schedule.ts` uses `SimStand` (no `.cleared` or `.areaHa` fields), while
+`stand-simulator.ts` uses `SimState`. The GROW logic is identical except: (a) stands are iterated
+in a loop rather than called as a function, (b) `SimStand` doesn't track `developmentClass` directly,
+and (c) the simulation loop has additional spawning/snapshot bookkeeping around GROW.
+Adjust the per-species volume update and stand height computation accordingly.
+
 **Implementation:**
 
-The changes mirror T3 but in the schedule engine's GROW loop (lines ~849-922):
+The GROW section of the schedule engine loop mirrors T3's `growStand()`:
+
+```typescript
+// In the GROW section of the simulation loop (replaces lines ~849-922):
+for (const st of stands) {
+  // Skip cleared stands (volumeM3 === 0 && stemCount === 0)
+  if (st.volumeM3 <= 0 && st.stemCount <= 0) continue;
+
+  // Compute summed stand BA for growth rate input (previous year's state)
+  const prevStandBA = computeStandBA(
+    st.speciesData.map(sp => ({ volumeM3: sp.volumeM3, species: sp.species, stemCount: sp.stemCount, diameterCm: 0 })),
+    st.ageYears,
+    st.siteType,
+  );
+
+  const growthPerHa = getGrowthRate(
+    st.siteType, st.soilType, st.species,
+    st.ageYears, prevStandBA, null,
+    regionFactor, volumeM3PerHa,
+    true,
+  );
+  st.volumeM3 += growthPerHa;
+  st.ageYears += 1;
+
+  // Update per-species volumes proportionally
+  if (st.speciesData.length > 0) {
+    const totalVol = st.speciesData.reduce((s, sp) => s + sp.volumeM3, 0);
+    if (totalVol > 0) {
+      const ratio = 1 + growthPerHa / totalVol;
+      for (const sp of st.speciesData) {
+        sp.volumeM3 = Math.round(sp.volumeM3 * ratio * 10) / 10;
+      }
+    }
+  }
+
+  // Stand height from basal-area-weighted per-species heights
+  st.meanHeight = computeStandHeight(
+    st.speciesData.map(sp => ({ volumeM3: sp.volumeM3, species: sp.species, stemCount: sp.stemCount, diameterCm: 0 })),
+    st.ageYears,
+    st.siteType,
+  );
+
+  // ... ingress logic unchanged ...
+
+  // Compute stand BA and diameter from species aggregates
+  const standBA = computeStandBA(
+    st.speciesData.map(sp => ({ volumeM3: sp.volumeM3, species: sp.species, stemCount: sp.stemCount, diameterCm: 0 })),
+    st.ageYears,
+    st.siteType,
+  );
+  st.meanDiameter = computeDiameter(standBA, st.stemCount);
+
+  // ... existing snapshot collection code ...
+}
+```
+
+Additionally:
 
 1. **Import** `meanHeight`, `computeSpeciesBA`, `computeStandBA`, `computeStandHeight`, `computeDiameter` from `./tapio-growth`
-2. **Replace** the GROW loop:
-   - Remove height/diameter proxy (age-bracket `heightGrowth` computation, `st.meanHeight += heightGrowth`, `st.meanDiameter += heightGrowth * 0.7`)
-   - Remove proportional BA scaling (`st.basalArea = st.basalArea * (1 + ratio)`)
-   - Add: per-species volume update (proportional to stand growth)
-   - Add: `st.meanHeight = computeStandHeight(speciesData, st.ageYears, st.siteType)` (BA-weighted)
-   - Add: compute summed stand BA for next year's growth rate input
-3. **Keep** ingress logic unchanged
-4. **Update** snapshot code (year-0 and year-loop snapshots) to use `computeStandBA`/`computeStandHeight`/`computeDiameter`
-   instead of the old heightDelta/diameterDelta/baRatio pattern
-5. **Remove** `st.basalArea` manipulations from `applyOperation` section for all op types:
+2. **Update snapshot code** (year-0 and year-loop snapshots) to use `computeStandBA`/`computeStandHeight`/`computeDiameter`
+   instead of the old heightDelta/diameterDelta/baRatio pattern — same as T3's `snapshotState()`.
+3. **Remove** `st.basalArea` manipulations from `applyOperation` section for all op types:
    - `clear_cut`: remove `st.basalArea = 0`
    - `selection_cutting`/`overstory_removal`: remove BA scaling
    - `thinning`/`first_thinning`: remove BA scaling
    - `early_tending`/`tending`: remove BA scaling
    - `planting`: remove `st.basalArea = 2` and `if (st.basalArea === 0) st.basalArea = 2`
-6. **Update spawning thresholds** — the `spawnOperations()` function checks `st.basalArea >= thinThresh`
+4. **Update spawning thresholds** — the `spawnOperations()` function checks `st.basalArea >= thinThresh`
    to decide whether to spawn thinnings. Since `st.basalArea` is no longer mutated, these checks
    must use dynamically computed stand BA (sum of per-species BAs):
    ```typescript
@@ -736,9 +825,8 @@ The changes mirror T3 but in the schedule engine's GROW loop (lines ~849-922):
    removalFraction = (currentBA - targetBA) / Math.max(1, currentBA);
    ```
    And update `getGrowthRate()` calls inside `spawnOperations()` to pass computed stand BA instead of `st.basalArea`.
-7. **Keep** `st.basalArea` field on `SimStand` but deprecate it — it's no longer mutated,
-   only used as a throughput for `getGrowthRate()`. Compute it inline before calling
-   `getGrowthRate()`:
+5. **Keep** `st.basalArea` field on `SimStand` but deprecate it — it's no longer mutated.
+   Compute it inline before calling `getGrowthRate()`:
    ```typescript
    const growthRateBA = computeStandBA(
      st.speciesData.map(sp => ({ volumeM3: sp.volumeM3, species: sp.species, stemCount: sp.stemCount, diameterCm: 0 })),
@@ -797,6 +885,22 @@ so all three dimensions are verified against published Tapio reference data.
    ```
 
 4. Add assertion blocks for BA and height:
+   ```typescript
+   if (entry.baRange) {
+     const ba = milestones.basalAreas.get(entry.age);
+     expect(ba).toBeDefined();
+     const [baLow, baHigh] = entry.baRange;
+     expect(ba!).toBeGreaterThanOrEqual(baLow * 0.85);
+     expect(ba!).toBeLessThanOrEqual(baHigh * 1.15);
+   }
+   if (entry.heightRange) {
+     const h = milestones.heights.get(entry.age);
+     expect(h).toBeDefined();
+     const [hLow, hHigh] = entry.heightRange;
+     expect(h!).toBeGreaterThanOrEqual(hLow * 0.85);
+     expect(h!).toBeLessThanOrEqual(hHigh * 1.15);
+   }
+   ```
 
 5. The simulation now uses `computeStandBA()` and `computeStandHeight()` instead of a hardcoded `matureBa`.
    Remove the `matureBa` field from `SimConfig` — BA is computed from per-species volume and height each year.
