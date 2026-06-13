@@ -14,6 +14,7 @@ import { getGrowthRate } from "./chart-engine";
 import { getStrategy, type SchedulingStrategy } from "./strategies";
 import {
   meanHeight,
+  meanDiameter,
   computeSpeciesBA,
   computeStandBA,
   computeStandHeight,
@@ -732,10 +733,9 @@ export function runScheduleEngine(
       stands: [],
     };
     for (const st of stands.values()) {
-      const speciesForAgg0 = speciesDataForBA(st);
-      const y0BA = computeStandBA(speciesForAgg0, st.ageYears, st.siteType, undefined, st.areaHa);
-      const y0H = computeStandHeight(speciesForAgg0, st.ageYears, st.siteType, st.areaHa);
-      const y0D = computeDiameter(y0BA, st.stemCount);
+      const y0H = computeStandHeight(speciesDataForBA(st), st.ageYears, st.siteType, st.areaHa);
+      const y0D = meanDiameter(st.species, st.siteType, st.ageYears);
+      const y0BA = Math.round(st.stemCount * Math.PI * Math.pow(y0D / 200, 2) * 10) / 10;
 
       year0Snapshot.stands.push({
         standId: st.standId,
@@ -749,28 +749,21 @@ export function runScheduleEngine(
         species: st.species,
         siteType: st.siteType,
         developmentClass: st.developmentClass,
-        speciesData: st.speciesData.map(sp => ({
+        speciesData: st.speciesData.map(sp => {
+          const spDiam = meanDiameter(sp.species, st.siteType, st.ageYears);
+          const spBA = Math.round(sp.stemCount * Math.PI * Math.pow(spDiam / 200, 2) * 10) / 10;
+          return {
           species: sp.species,
           volumeM3: Math.round(sp.volumeM3),
           logPct: sp.logPct,
           stemCountPerHa: sp.stemCount,
           meanHeight: meanHeight(sp.species, st.siteType, st.ageYears),
-          meanDiameter: computeDiameter(
-            computeSpeciesBA(
-              (st.areaHa > 0 ? sp.volumeM3 / st.areaHa : sp.volumeM3),
-              meanHeight(sp.species, st.siteType, st.ageYears),
-              sp.species, sp.stemCount, 0,
-            ),
-            sp.stemCount,
-          ),
+          meanDiameter: spDiam,
           age: sp.age,
-          basalArea: computeSpeciesBA(
-            (st.areaHa > 0 ? sp.volumeM3 / st.areaHa : sp.volumeM3),
-            meanHeight(sp.species, st.siteType, st.ageYears),
-            sp.species, sp.stemCount, 0,
-          ),
+          basalArea: spBA,
           areaHa: sp.areaHa ?? 0,
-        })),
+          };
+        }),
       });
     }
     simulationSnapshots.push(year0Snapshot);
@@ -1055,15 +1048,10 @@ export function runScheduleEngine(
         }
       }
 
-      // Compute stand BA and diameter from species aggregates
-      const standBA = computeStandBA(
-        speciesDataForBA(st),
-        st.ageYears,
-        st.siteType,
-        undefined,
-        st.areaHa,
-      );
-      st.meanDiameter = computeDiameter(standBA, st.stemCount);
+      // Compute stand BA and diameter from Tapio reference tables.
+      // Diameter from species×site×age, BA derived: BA = N × π × (D/200)².
+      st.meanDiameter = meanDiameter(st.species, st.siteType, st.ageYears);
+      const standBA = st.stemCount * Math.PI * Math.pow(st.meanDiameter / 200, 2);
     }
 
     // ── 8. CARRYOVER: unselected ops pushed to next year ──
@@ -1075,18 +1063,17 @@ export function runScheduleEngine(
       stands: [],
     };
     for (const st of stands.values()) {
-      // Compute stand-level aggregates from species data
-      const speciesForAgg = speciesDataForBA(st);
-      const snapBA = computeStandBA(speciesForAgg, st.ageYears, st.siteType, undefined, st.areaHa);
-      const snapH = computeStandHeight(speciesForAgg, st.ageYears, st.siteType, st.areaHa);
-      const snapD = computeDiameter(snapBA, st.stemCount);
+      // Compute stand-level aggregates from Tapio reference tables.
+      const snapH = computeStandHeight(speciesDataForBA(st), st.ageYears, st.siteType, st.areaHa);
+      const snapD = meanDiameter(st.species, st.siteType, st.ageYears);
+      const snapBA = Math.round(st.stemCount * Math.PI * Math.pow(snapD / 200, 2) * 10) / 10;
 
       // Use volRatio to ensure per-species volumes sum exactly to stand total
       const rawTotalVol = st.speciesData.reduce((s, sp) => s + sp.volumeM3, 0);
       const volRatio = rawTotalVol > 0 ? st.volumeM3 / rawTotalVol : 1;
       const totalSpeciesStems = st.speciesData.reduce((s, sd) => s + sd.stemCount, 0);
 
-      // Per-species snapshots — each species gets its own Tapio height and BA
+      // Per-species snapshots — each species gets its own Tapio height, diameter, BA
       const speciesSnapshots: SpeciesSnapshot[] = st.speciesData.map(sp => {
         const stemsPerHa =
           totalSpeciesStems > 0
@@ -1094,9 +1081,8 @@ export function runScheduleEngine(
             : 0;
         const sppVol = Math.round(sp.volumeM3 * volRatio);
         const sppH = meanHeight(sp.species, st.siteType, st.ageYears);
-        const sppVolPerHa = st.areaHa > 0 ? sppVol / st.areaHa : sppVol;
-        const sppBA = computeSpeciesBA(sppVolPerHa, sppH, sp.species, stemsPerHa, 0);
-        const sppDiam = computeDiameter(sppBA, stemsPerHa);
+        const sppDiam = meanDiameter(sp.species, st.siteType, st.ageYears);
+        const sppBA = Math.round(stemsPerHa * Math.PI * Math.pow(sppDiam / 200, 2) * 10) / 10;
         return {
           species: sp.species,
           volumeM3: sppVol,

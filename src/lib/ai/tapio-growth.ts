@@ -100,6 +100,108 @@ export function meanHeight(
 }
 
 /**
+ * Mean diameter at reference age (cm) by species × site type.
+ * Derived from Tapio BA reference tables and thinning stem targets.
+ * Reference age is 80 years for most species, 70 for herb-rich spruce,
+ * 100 for xeric pine.
+ *
+ * Source: D = 200 × √(BA / (N × π)) using TAPIO_BA_REF midpoints
+ * and Tapio post-thinning stem targets per species × site.
+ */
+export const D_REF: Record<string, Record<string, number>> = {
+  pine: {
+    "herb-rich heath": 22,
+    mesic: 20,
+    "sub-xeric": 17,
+    xeric: 15,
+  },
+  spruce: {
+    "herb-rich heath": 23,
+    mesic: 22,
+    "sub-xeric": 19,
+  },
+  silver_birch: {
+    "herb-rich heath": 23,
+    mesic: 20,
+    "sub-xeric": 17,
+  },
+  downy_birch: {
+    "herb-rich heath": 20,
+    mesic: 18,
+    "sub-xeric": 15,
+  },
+  larch: {
+    "herb-rich heath": 24,
+    mesic: 21,
+    "sub-xeric": 19,
+  },
+  grey_alder: {
+    "herb-rich heath": 18,
+    mesic: 16,
+    "sub-xeric": 14,
+  },
+};
+
+/**
+ * Diameter development as percentage of reference diameter at given age.
+ * Derived from Tapio BA reference midpoints ÷ expected stem counts.
+ * Diameter develops faster than height in relative terms — trees thicken
+ * more rapidly in youth compared to their final diameter.
+ */
+const DIAMETER_PCT: [number, number][] = [
+  [5, 5],
+  [10, 15],
+  [15, 25],
+  [20, 40],
+  [25, 52],
+  [30, 62],
+  [40, 73],
+  [50, 84],
+  [60, 94],
+  [70, 97],
+  [80, 100],
+  [90, 100],
+  [100, 100],
+];
+
+/**
+ * Mean diameter (cm) at given age for a species × site type combination.
+ * Uses D_REF × DIAMETER_PCT with linear interpolation.
+ */
+export function meanDiameter(
+  species: string,
+  siteType: string,
+  ageYears: number,
+): number {
+  const dRef = D_REF[species]?.[siteType];
+  if (!dRef) {
+    console.warn(`tapio-growth: unknown species/site "${species}/${siteType}" for diameter, falling back to pine/mesic`);
+    return meanDiameter("pine", "mesic", ageYears);
+  }
+
+  // Interpolate diameter percentage from the development curve
+  let pct = 0;
+  for (let i = 0; i < DIAMETER_PCT.length; i++) {
+    const [age, value] = DIAMETER_PCT[i];
+    if (ageYears <= age) {
+      if (i === 0) {
+        pct = value * (ageYears / age);
+      } else {
+        const [prevAge, prevValue] = DIAMETER_PCT[i - 1];
+        const t = (ageYears - prevAge) / (age - prevAge);
+        pct = prevValue + t * (value - prevValue);
+      }
+      break;
+    }
+    if (i === DIAMETER_PCT.length - 1) {
+      pct = value;
+    }
+  }
+
+  return Math.round((dRef * pct) / 100 * 10) / 10;
+}
+
+/**
  * Form factor (f in V = BA × H × f) by species.
  * Pine 0.50, spruce 0.45, birch 0.42. Others default to pine.
  */
