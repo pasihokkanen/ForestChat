@@ -1,14 +1,17 @@
 // src/lib/ai/forest-state.ts
 //
-// Forest State Estimator — projects compartment state year by year,
-// accounting for natural growth (VMI13 with species×age×density multipliers)
-// and operations (thinning, clearcut, regeneration).
+// Forest State Estimator — delegates to stand-simulator.ts for
+// Tapio-anchored height/diameter/BA growth simulation.
+// Projects compartment state year by year, accounting for growth
+// and operations.
 //
 // Returns per-stand, per-year state snapshots that consumers can aggregate.
 
-import { getGrowthRate } from "./chart-engine";
+import { simulateStand } from "./stand-simulator";
+import type { DBOperation } from "./stand-simulator";
+import type { StandData } from "./types";
 
-// ── Input types (minimal — both DB Compartment and StandData satisfy) ──
+// ── Input types (unchanged public API) ──
 
 export interface CompartmentInput {
   id: string;
@@ -32,7 +35,7 @@ export interface OperationInput {
   removal_pct: number; // 0–100
 }
 
-// ── Output types ──
+// ── Output types (unchanged public API) ──
 
 export interface StandYearState {
   standId: string;
@@ -53,60 +56,11 @@ export interface StandYearState {
 
 export type ForestStateTimeline = Map<string, StandYearState[]>;
 
-// ── Internal mutable state ──
-
-interface MutableStand {
-  standId: string;
-  areaHa: number;
-  siteType: string;
-  soilType: string;
-  mainSpecies: string;
-  volumeM3: number;
-  ageYears: number;
-  basalArea: number;
-  developmentClass: string;
-  /** True after a clearcut if no regeneration has been scheduled yet.
-   *  While cleared, growth is zero. */
-  cleared: boolean;
-  growthMultiplier: number;
-}
-
-// ── Helpers ──
-
-const HARVEST_OPS = new Set([
-  "clear_cut", "thinning", "first_thinning", "selection_cutting",
-  "tending", "early_tending",
-]);
-
-const REGEN_OPS = new Set([
-  "spruce_planting", "pine_planting", "birch_planting",
-  "site_prep", "ditch_mounding", "scalping",
-]);
-
-function toMutable(c: CompartmentInput): MutableStand {
-  return {
-    standId: c.stand_id,
-    areaHa: c.area_ha ?? 0,
-    siteType: c.site_type ?? "",
-    soilType: c.soil_type ?? "",
-    mainSpecies: c.main_species ?? "",
-    volumeM3: c.volume_m3 ?? 0,
-    ageYears: c.age_years ?? 0,
-    basalArea: c.basal_area ?? 0,
-    developmentClass: c.development_class ?? "",
-    cleared: false,
-    growthMultiplier: c.growth_multiplier ?? 1.0,
-  };
-}
-
 // ── Main function ──
 
 /**
- * Project compartment states year by year, applying growth and operations.
- *
- * Growth is computed with getGrowthRate() each year based on the stand's
- * current age, volume, and basal area — so it evolves as the stand ages
- * and as operations change its structure.
+ * Project compartment states year by year using the Tapio-anchored
+ * stand-simulator engine.
  *
  * @param compartments  Current (year-zero) compartment data
  * @param operations    All planned operations (may span multiple years)
@@ -120,115 +74,108 @@ export function estimateForestState(
   startYear: number,
   endYear: number,
 ): ForestStateTimeline {
-  // Index operations by (compartment_id, year) for O(1) lookup
-  const opMap = new Map<string, OperationInput[]>();
-  for (const op of operations) {
-    const key = `${op.compartment_id}:${op.year}`;
-    const list = opMap.get(key);
-    if (list) list.push(op);
-    else opMap.set(key, [op]);
-  }
-
-  // Initialize mutable stands
-  const stands = new Map<string, MutableStand>();
-  for (const c of compartments) {
-    const ms = toMutable(c);
-    if (ms.areaHa <= 0 || ms.volumeM3 <= 0) continue;
-    stands.set(c.id, ms);
-  }
-
+  const periodYears = endYear - startYear + 1;
   const timeline: ForestStateTimeline = new Map();
-  // Pre-initialize arrays
-  for (const standId of stands.keys()) {
-    timeline.set(standId, []);
+
+  // Index operations by compartment ID
+  const opsByCompartment = new Map<string, OperationInput[]>();
+  for (const op of operations) {
+    const list = opsByCompartment.get(op.compartment_id) ?? [];
+    list.push(op);
+    opsByCompartment.set(op.compartment_id, list);
   }
 
-  // Year-by-year simulation
-  for (let yr = startYear; yr <= endYear; yr++) {
-    for (const [compartmentId, s] of stands) {
-      // ── 1. Compute growth rate from CURRENT state ──
-      let growthM3PerHa = 0;
-      let growthM3 = 0;
+  for (const c of compartments) {
+    const areaHa = c.area_ha ?? 0;
+    const volumeM3 = c.volume_m3 ?? 0;
 
-      if (!s.cleared && s.areaHa > 0) {
-        growthM3PerHa = getGrowthRate(
-          s.siteType,
-          s.soilType,
-          s.mainSpecies,
-          s.ageYears,
-          s.basalArea,
-          s.developmentClass,
-          s.growthMultiplier,
-          s.volumeM3 / (s.areaHa || 1),
-          true  // forPlanning
-        );
-        growthM3 = growthM3PerHa * s.areaHa;
-      }
+    // Skip invalid compartments (same filter as old code)
+    if (areaHa <= 0 || volumeM3 <= 0) {
+      continue;
+    }
 
-      // ── 2. Apply growth ──
-      s.volumeM3 += growthM3;
-      s.ageYears += 1;
+    // Build StandData from CompartmentInput
+    const standData: StandData = {
+      standId: c.stand_id,
+      areaHa,
+      siteType: c.site_type ?? "",
+      soilType: c.soil_type ?? "",
+      mainSpecies: c.main_species ?? "",
+      developmentClass: c.development_class ?? "",
+      volumeM3,
+      ageYears: c.age_years ?? 0,
+      ba: c.basal_area ?? 0,
+      stemCount: 0,
+      meanHeight: 0,
+      meanDiameter: 0,
+      valueEur: 0,
+      speciesData: [],
+      site_class: c.site_type ?? "",
+      is_peatland: c.soil_type === "peatland",
+      annual_growth: 0,
+      logM3: 0,
+      pulpM3: 0,
+      drainageStatus: "",
+    };
 
-      // ── 3. Apply operations this year ──
+    // Convert operations for this compartment to DBOperation format
+    const compOps: DBOperation[] = (opsByCompartment.get(c.id) ?? []).map((op) => ({
+      type: op.type,
+      year: op.year,
+      removal_pct: op.removal_pct,
+    }));
+
+    // Simulate
+    const snapshots = simulateStand(
+      standData,
+      compOps,
+      startYear,
+      periodYears,
+      c.growth_multiplier ?? 1.0,
+    );
+
+    // Build StandYearState[] from snapshots.
+    // snapshots[0] = pre-simulation (year = startYear - 1)
+    // snapshots[1+] = years startYear … endYear
+    const states: StandYearState[] = [];
+    for (let i = 1; i < snapshots.length; i++) {
+      const yr = startYear + i - 1;
+      const snap = snapshots[i].stands[0];
+      const prevSnap = snapshots[i - 1].stands[0];
+
+      // Compute harvest from operations at this year
+      const yearOps = compOps.filter((op) => op.year === yr);
       let harvestM3 = 0;
       let operationType: string | null = null;
-
-      const opsThisYear = opMap.get(`${compartmentId}:${yr}`) ?? [];
-      for (const op of opsThisYear) {
-        // Record the operation type (first non-clearcut, or clearcut if present)
+      for (const op of yearOps) {
         if (!operationType || op.type === "clear_cut") {
           operationType = op.type;
         }
-
-        if (HARVEST_OPS.has(op.type)) {
-          const pct = Math.min(op.removal_pct, 100) / 100;
-
-          if (op.type === "clear_cut") {
-            harvestM3 += s.volumeM3;
-            s.volumeM3 = 0;
-            s.basalArea = 0;
-            s.ageYears = 0;
-            s.cleared = true;
-          } else {
-            // thinning, first_thinning, selection_cutting
-            const removed = s.volumeM3 * pct;
-            harvestM3 += removed;
-            s.volumeM3 -= removed;
-            // Reduce basal area proportionally to volume removed
-            s.basalArea = Math.max(0, s.basalArea * (1 - pct));
-          }
-        }
-
-        // Regeneration: un-clears the stand so growth resumes.
-        // Reset development class and seed initial basal area for the new stand.
-        if (REGEN_OPS.has(op.type)) {
-          s.cleared = false;
-          // Set development class based on planted species
-          if (op.type === "spruce_planting") s.developmentClass = "seedling_spruce";
-          else if (op.type === "pine_planting") s.developmentClass = "seedling_pine";
-          else if (op.type === "birch_planting") s.developmentClass = "seedling_birch";
-          else if (!s.developmentClass || s.developmentClass === "") s.developmentClass = "seedling";
-          // Seed minimum basal area (m²/ha) for newly planted seedlings
-          if (s.basalArea === 0) s.basalArea = 2;
-          // Seed minimum volume (m³) so growth doesn't start from absolute zero
-          if (s.volumeM3 === 0) s.volumeM3 = s.areaHa * 1;
+        const pct = (op.removal_pct ?? 0) / 100;
+        if (op.type === "clear_cut") {
+          harvestM3 += prevSnap.volumeM3;
+        } else {
+          harvestM3 += prevSnap.volumeM3 * pct;
         }
       }
 
-      // ── 4. Record state snapshot (end-of-year) ──
-      const snapshot: StandYearState = {
-        standId: s.standId,
+      // Derive growth: current volume − (previous volume − harvest)
+      const growthM3 = snap.volumeM3 - (prevSnap.volumeM3 - harvestM3);
+      const growthM3PerHa = areaHa > 0 ? growthM3 / areaHa : 0;
+
+      states.push({
+        standId: snap.standId,
         year: yr,
-        volumeM3: Math.round(s.volumeM3 * 100) / 100,
-        ageYears: s.ageYears,
+        volumeM3: Math.round(snap.volumeM3 * 100) / 100,
+        ageYears: snap.ageYears,
         growthM3PerHa: Math.round(growthM3PerHa * 100) / 100,
         growthM3: Math.round(growthM3 * 100) / 100,
         harvestM3: Math.round(harvestM3 * 100) / 100,
         operationType,
-      };
-
-      timeline.get(compartmentId)!.push(snapshot);
+      });
     }
+
+    timeline.set(c.id, states);
   }
 
   return timeline;

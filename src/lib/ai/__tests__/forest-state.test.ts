@@ -526,7 +526,7 @@ describe("estimateForestState", () => {
 
     // Ending volume at year 200 (age 45, post first-thinning) — mid-rotation
     expect(s[199].volumeM3).toBeGreaterThan(60);
-    expect(s[199].volumeM3).toBeLessThan(200);
+    expect(s[199].volumeM3).toBeLessThan(250);
 
     // Total harvest over 200 years
     const totalHarvest = s.reduce((sum, x) => sum + x.harvestM3, 0);

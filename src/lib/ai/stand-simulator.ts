@@ -275,9 +275,8 @@ export function growStand(
   st: GrowableStand,
   growthMultiplier = 1.0,
 ): number {
-  // Cleared / invalid stands still age but don't grow
+  // Cleared / invalid stands don't grow
   if (st.cleared || st.areaHa <= 0) {
-    st.ageYears += 1;
     return 0;
   }
 
@@ -369,6 +368,7 @@ export function simulateStand(
   operations: DBOperation[],
   startYear: number,
   periodYears: number,
+  growthMultiplier = 1.0,
 ): YearSnapshot[] {
   const state = initState(initialStand);
   const snapshots: YearSnapshot[] = [];
@@ -395,7 +395,7 @@ export function simulateStand(
     }
 
     // GROW
-    growStand(state);
+    growStand(state, growthMultiplier);
 
     // Snapshot
     snapshots.push({
