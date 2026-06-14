@@ -84,10 +84,7 @@ describe("schedulePlan (Phase 7b rewrite — dynamic spawning)", () => {
     expect(allRegen.length).toBeGreaterThan(0);
   });
 
-  // SKIPPED: carbon_storage selection_cutting requires volumeCapM3 > operation removal.
-  // At age >= optMax+15 (old stand), Tapio growth is near-zero → cap ≈ 0 → no ops selected.
-  // Needs a minimum volume cap floor (e.g., 5 m³/y) to allow harvesting old stands.
-  it.skip("carbon_storage spawns selection_cutting instead of clear_cut", () => {
+  it("carbon_storage spawns selection_cutting instead of clear_cut", () => {
     // spruce on mesic: optMin=65, optMax=85 → optMax+15=100.
     // age 100 with 400 stems on mesic still has trace growth → cap > 0.
     const stand = makeStand({

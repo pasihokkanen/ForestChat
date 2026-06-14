@@ -118,7 +118,10 @@ export const carbonStorageStrategy: SchedulingStrategy = {
 
     for (const op of candidates) {
       const vol = op.removal_m3;
-      if (used + vol <= volumeCapM3 || vol === 0) {
+      // Always allow at least one selection_cutting through, even over cap.
+      // Over-mature stands must be harvested regardless of current growth.
+      const isFirstHarvest = scheduled.length === 0 && op.type === "selection_cutting";
+      if (used + vol <= volumeCapM3 || vol === 0 || isFirstHarvest) {
         scheduled.push(op);
         used += vol;
       } else {
