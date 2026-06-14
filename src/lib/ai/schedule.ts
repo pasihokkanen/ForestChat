@@ -41,22 +41,57 @@ export const PLANTING_INITIAL_HEIGHT_M = 0.3;
 /** Initial seedling diameter (cm) after planting. */
 export const PLANTING_INITIAL_DIAMETER_CM = 0.5;
 
-/** Natural ingress base rate: max stems/ha/year at zero density. */
-export const NATURAL_INGRESS_BASE_RATE = 520;
+/** Natural ingress base rate (stems/ha/year at zero density), by site class.
+ *  Fertile sites get heavy birch/rowan ingress; poor sites are sparse.
+ *  Midpoints of Tapio-informed windows. */
+export const NATURAL_INGRESS_BASE_RATE: Record<string, number> = {
+  "herb-rich heath": 700,
+  mesic: 520,
+  "sub-xeric": 400,
+  xeric: 250,
+  peatland: 350,
+};
 
 /** Natural ingress exponent: controls how steeply ingress drops with density. */
 export const NATURAL_INGRESS_EXPONENT = 3.0;
 
-/** Natural ingress ceiling: carrying capacity (stems/ha). */
-export const MAX_STEMS_HA = 6000;
+/** Maximum natural carrying capacity (stems/ha), by site class.
+ *  Fertile sites support denser stands before self-thinning. */
+export const MAX_STEMS_HA: Record<string, number> = {
+  "herb-rich heath": 6500,
+  mesic: 6000,
+  "sub-xeric": 5000,
+  xeric: 4000,
+  peatland: 5000,
+};
+
+/** Age limit for natural ingress (years), by site class.
+ *  On fertile sites competition continues longer before canopy closure. */
+export const NATURAL_INGRESS_MAX_AGE: Record<string, number> = {
+  "herb-rich heath": 12,
+  mesic: 12,
+  "sub-xeric": 10,
+  xeric: 10,
+  peatland: 10,
+};
 
 /** Early tending trigger: stems/ha must exceed this.
- *  Tapio: varhaisperkaus when stems > 4000/ha. */
-const EARLY_TENDING_STEM_THRESHOLD = 4000;
+ *  Tapio: varhaisperkaus when stems > 4000-5000/ha (conifers), > 3000-4000/ha (birch/alder).
+ *  Midpoints used. */
+const EARLY_TENDING_STEM_THRESHOLD: Record<string, number> = {
+  pine: 4500, spruce: 4500, larch: 4500,
+  silver_birch: 3500, downy_birch: 3500, birch: 3500,
+  grey_alder: 3500,
+};
 
 /** Tending (taimikonharvennus) trigger: stems/ha must exceed this.
- *  Tapio: taimikonharvennus when stems > 2000-2500/ha. Midpoint 2250 → rounded to 2500. */
-const TENDING_STEM_THRESHOLD = 2500;
+ *  Tapio: pine/spruce 2000-2500 → mid 2250, birch 1600-2000 → mid 1800.
+ *  Larch ~2000, grey alder ~1600. */
+const TENDING_STEM_THRESHOLD: Record<string, number> = {
+  pine: 2250, spruce: 2250, larch: 2000,
+  silver_birch: 1800, downy_birch: 1800, birch: 1800,
+  grey_alder: 1600,
+};
 
 /** Early tending height thresholds (m). Source: Tapio (varhaisperkaus < 1m pine, < 1.5m spruce). */
 // Tapio upper bounds: below = varhaisperkaus (early_tending)
@@ -86,11 +121,34 @@ const TENDING_MIN_HEIGHT: Record<string, number> = {
   larch: 3.5,
 };
 
-/** Target stems/ha after early tending. Drop to 3250 so height outpaces ingress re-trigger. */
-const EARLY_TENDING_TARGET_STEMS_HA = 3250;
+/** Tending (taimikonharvennus) maximum height (m). Tapio upper bounds.
+ *  Above this height the stand enters thinning phase — tending is no longer appropriate.
+ *  Pine: 4m, spruce: 5m, birch: 6m, larch: 5m. */
+const TENDING_MAX_HEIGHT: Record<string, number> = {
+  pine: 4.0,
+  spruce: 5.0,
+  silver_birch: 6.0,
+  downy_birch: 6.0,
+  birch: 6.0,
+  larch: 5.0,
+};
 
-/** Target stems/ha after tending (taimikonharvennus). Tapio: 1800-2000. Lower bound 1800. */
-const TENDING_TARGET_STEMS_HA = 1800;
+/** Target stems/ha after early tending, by species.
+ *  Tapio: conifers 3000-3500 → mid 3250, birch/alder 2500-3000 → mid 2750. */
+const EARLY_TENDING_TARGET_STEMS_HA: Record<string, number> = {
+  pine: 3250, spruce: 3250, larch: 3250,
+  silver_birch: 2750, downy_birch: 2750, birch: 2750,
+  grey_alder: 2750,
+};
+
+/** Target stems/ha after tending (taimikonharvennus), by species.
+ *  Tapio: pine 1800-2200 → mid 2000, spruce 1800-2000 → mid 1900,
+ *  birch 1600, larch 1800, grey alder 1600. */
+const TENDING_TARGET_STEMS_HA: Record<string, number> = {
+  pine: 2000, spruce: 1900, larch: 1800,
+  silver_birch: 1600, downy_birch: 1600, birch: 1600,
+  grey_alder: 1600,
+};
 
 // ═══════════════════════════════════════════════════════════════════════
 // Tapio first thinning targets (ensiharvennus harvennusmallit)
@@ -486,10 +544,16 @@ function spawnOperations(
     const etMaxHeight = EARLY_TENDING_MAX_HEIGHT[s.species] ?? 1.5;
     const tendMinHeight = TENDING_MIN_HEIGHT[s.species] ?? 3.5;
 
+    const etTriggerStems = EARLY_TENDING_STEM_THRESHOLD[s.species] ?? 4500;
+    const etTargetStems = EARLY_TENDING_TARGET_STEMS_HA[s.species] ?? 3250;
+    const tendTriggerStems = TENDING_STEM_THRESHOLD[s.species] ?? 2250;
+    const tendTargetStems = TENDING_TARGET_STEMS_HA[s.species] ?? 2000;
+    const tendMaxHeight = TENDING_MAX_HEIGHT[s.species] ?? 5.0;
+
     // Early tending: very dense + still short
-    if (stemsPerHa > EARLY_TENDING_STEM_THRESHOLD && s.meanHeight < etMaxHeight) {
+    if (stemsPerHa > etTriggerStems && s.meanHeight < etMaxHeight) {
       const removalFraction = stemsPerHa > 0
-        ? Math.min(1, Math.max(0, (stemsPerHa - EARLY_TENDING_TARGET_STEMS_HA) / stemsPerHa))
+        ? Math.min(1, Math.max(0, (stemsPerHa - etTargetStems) / stemsPerHa))
         : 0;
       const removalM3 = Math.round(s.volumeM3 * removalFraction);
       spawned.push({
@@ -500,15 +564,15 @@ function spawnOperations(
         cost_eur: Math.round(COSTS.early_tending * s.areaHa),
         removal_m3: removalM3,
         removalFraction,
-        notes: `Early tending: ${Math.round(stemsPerHa)}→${EARLY_TENDING_TARGET_STEMS_HA} stems/ha, h=${s.meanHeight.toFixed(1)}m${s.plantingYear > 0 ? ` (${year - s.plantingYear}y post-plant)` : ""}`,
+        notes: `Early tending: ${Math.round(stemsPerHa)}→${etTargetStems} stems/ha, h=${s.meanHeight.toFixed(1)}m${s.plantingYear > 0 ? ` (${year - s.plantingYear}y post-plant)` : ""}`,
         dueYear: year,
       });
     }
 
     // Tending (taimikonharvennus): moderately dense + tall enough
-    if (stemsPerHa > TENDING_STEM_THRESHOLD && s.meanHeight >= tendMinHeight) {
+    if (stemsPerHa > tendTriggerStems && s.meanHeight >= tendMinHeight && s.meanHeight <= tendMaxHeight) {
       const removalFraction = stemsPerHa > 0
-        ? Math.min(1, Math.max(0, (stemsPerHa - TENDING_TARGET_STEMS_HA) / stemsPerHa))
+        ? Math.min(1, Math.max(0, (stemsPerHa - tendTargetStems) / stemsPerHa))
         : 0;
       const removalM3 = Math.round(s.volumeM3 * removalFraction);
       spawned.push({
@@ -519,7 +583,7 @@ function spawnOperations(
         cost_eur: Math.round(COSTS.tending * s.areaHa),
         removal_m3: removalM3,
         removalFraction,
-        notes: `Tending: ${Math.round(stemsPerHa)}→${TENDING_TARGET_STEMS_HA} stems/ha (h=${s.meanHeight.toFixed(1)}m)`,
+        notes: `Tending: ${Math.round(stemsPerHa)}→${tendTargetStems} stems/ha (h=${s.meanHeight.toFixed(1)}m)`,
         dueYear: year,
       });
     }
@@ -822,7 +886,7 @@ export function runScheduleEngine(
         const oldVol = st.volumeM3;
         const oldStems = st.stemCount;
         st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
-        st.stemCount = EARLY_TENDING_TARGET_STEMS_HA;
+        st.stemCount = EARLY_TENDING_TARGET_STEMS_HA[st.species] ?? 3250;
         st.basalArea = st.stemCount * Math.PI * Math.pow(st.meanDiameter / 200, 2);
         // Sync speciesData volumes and stems
         const volScale = oldVol > 0 ? st.volumeM3 / oldVol : 1;
@@ -836,7 +900,7 @@ export function runScheduleEngine(
         const oldVol = st.volumeM3;
         const oldStems = st.stemCount;
         st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
-        st.stemCount = TENDING_TARGET_STEMS_HA;
+        st.stemCount = TENDING_TARGET_STEMS_HA[st.species] ?? 2000;
         st.basalArea = st.stemCount * Math.PI * Math.pow(st.meanDiameter / 200, 2);
         // Sync speciesData volumes and stems
         const volScale = oldVol > 0 ? st.volumeM3 / oldVol : 1;

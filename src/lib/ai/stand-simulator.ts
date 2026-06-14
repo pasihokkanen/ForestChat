@@ -21,6 +21,7 @@ import {
   NATURAL_INGRESS_BASE_RATE,
   NATURAL_INGRESS_EXPONENT,
   MAX_STEMS_HA,
+  NATURAL_INGRESS_MAX_AGE,
 } from "./schedule";
 import {
   meanHeight,
@@ -296,13 +297,18 @@ export function growStand(
 
   // Natural ingress: young stands gain stems from natural regeneration.
   // Density-dependent cubic model: ingress = BASE × (1 − (stems/MAX)³).
-  if (st.stemCount > 0 && st.ageYears <= 10 && st.stemCount < MAX_STEMS_HA) {
+  // Parameters vary by site class — fertile sites get heavier ingress.
+  const siteClass = st.siteType || "mesic";
+  const maxStems = MAX_STEMS_HA[siteClass] ?? 6000;
+  const baseRate = NATURAL_INGRESS_BASE_RATE[siteClass] ?? 520;
+  const maxAge = NATURAL_INGRESS_MAX_AGE[siteClass] ?? 10;
+  if (st.stemCount > 0 && st.ageYears <= maxAge && st.stemCount < maxStems) {
     const oldStemsPerHa = st.stemCount;
-    const densityRatio = st.stemCount / MAX_STEMS_HA;
+    const densityRatio = st.stemCount / maxStems;
     const ingressRate =
-      NATURAL_INGRESS_BASE_RATE * (1 - Math.pow(densityRatio, NATURAL_INGRESS_EXPONENT));
+      baseRate * (1 - Math.pow(densityRatio, NATURAL_INGRESS_EXPONENT));
     const ingressPerHa = Math.round(
-      Math.min(ingressRate, MAX_STEMS_HA - st.stemCount),
+      Math.min(ingressRate, maxStems - st.stemCount),
     );
     if (ingressPerHa > 0) {
       st.stemCount = oldStemsPerHa + ingressPerHa;
