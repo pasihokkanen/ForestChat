@@ -370,8 +370,13 @@ export async function generatePlan(
       .eq("created_by", "ai")
       .gte("year", startYear);
     if (allPlanOps.length > 0) {
-      const { error: insertError } = await supabase.from("operations").insert(allPlanOps);
-      if (insertError) throw new Error(`Failed to insert operations: ${insertError.message}`);
+      // Batch insert in chunks of 1000 to avoid payload limits
+      const BATCH_SIZE = 1000;
+      for (let i = 0; i < allPlanOps.length; i += BATCH_SIZE) {
+        const batch = allPlanOps.slice(i, i + BATCH_SIZE);
+        const { error: insertError } = await supabase.from("operations").insert(batch);
+        if (insertError) throw new Error(`Failed to insert operations batch ${i / BATCH_SIZE + 1}: ${insertError.message}`);
+      }
     }
 
     // ── 8. Build summary message ──

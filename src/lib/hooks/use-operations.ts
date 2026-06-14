@@ -39,7 +39,8 @@ export function useOperations(
           .select("*")
           .eq("forest_id", forestId)
           .order("year", { ascending: true })
-          .order("compartment_id", { ascending: true });
+          .order("compartment_id", { ascending: true })
+          .limit(50000);  // 100-year plans with many stands can exceed Supabase default 1000
 
         if (cancelled) return;
 
