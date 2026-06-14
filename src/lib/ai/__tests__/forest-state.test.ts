@@ -446,7 +446,7 @@ describe("estimateForestState", () => {
     const ccIndices: number[] = [];
     for (let i = 1; i < snapshots.length; i++) {
       const snap = snapshots[i].stands[0];
-      if (snap.volumeM3 === 0 && snap.ageYears === 0) {
+      if (snap.volumeM3 === 0 && snap.ageYears === 0 && snap.stemCount === 0) {
         ccIndices.push(i);
       }
     }

@@ -246,7 +246,6 @@ function applyOperation(st: SimState, op: DBOperation, year: number): void {
     st.meanHeight = PLANTING_INITIAL_HEIGHT_M;
     st.meanDiameter = PLANTING_INITIAL_DIAMETER_CM;
     st.ageYears = 0;
-    if (st.volumeM3 === 0) st.volumeM3 = st.areaHa * 1;
     st.speciesData = [
       {
         species: plantSpecies,
