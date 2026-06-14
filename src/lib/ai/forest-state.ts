@@ -10,6 +10,7 @@
 import { simulateStand } from "./stand-simulator";
 import type { DBOperation } from "./stand-simulator";
 import type { StandData } from "./types";
+import { meanDiameter } from "./tapio-growth";
 
 // ── Input types (unchanged public API) ──
 
@@ -95,22 +96,37 @@ export function estimateForestState(
     }
 
     // Build StandData from CompartmentInput
+    const ba = c.basal_area ?? 0;
+    const gm = c.growth_multiplier ?? 1.0;
+    const species = c.main_species ?? "pine";
+    const site = c.site_type ?? "mesic";
+    const age = c.age_years ?? 0;
+
+    // Derive stem count from BA and Tapio diameter when BA is known
+    let stemCount = 0;
+    if (ba > 0 && age > 0) {
+      const d = meanDiameter(species, site, age, gm);
+      if (d > 0) {
+        stemCount = Math.round(ba / (Math.PI * Math.pow(d / 200, 2)));
+      }
+    }
+
     const standData: StandData = {
       standId: c.stand_id,
       areaHa,
-      siteType: c.site_type ?? "",
+      siteType: site,
       soilType: c.soil_type ?? "",
-      mainSpecies: c.main_species ?? "",
+      mainSpecies: species,
       developmentClass: c.development_class ?? "",
       volumeM3,
-      ageYears: c.age_years ?? 0,
-      ba: c.basal_area ?? 0,
-      stemCount: 0,
+      ageYears: age,
+      ba,
+      stemCount,
       meanHeight: 0,
       meanDiameter: 0,
       valueEur: 0,
       speciesData: [],
-      site_class: c.site_type ?? "",
+      site_class: site,
       is_peatland: c.soil_type === "peatland",
       annual_growth: 0,
       logM3: 0,
@@ -131,7 +147,7 @@ export function estimateForestState(
       compOps,
       startYear,
       periodYears,
-      c.growth_multiplier ?? 1.0,
+      gm,
     );
 
     // Build StandYearState[] from snapshots.

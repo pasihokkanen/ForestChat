@@ -12,8 +12,7 @@ import type { StandData, PlannedOperation, PlanGoal, YearPlan, PlanSummary, Spec
 import { getOptimalAge, THINNING_BA, MIN_AGE_FIRST_THINNING, MIN_AGE_THINNING, getPrices, COSTS, OPERATION_DEFAULTS } from "./config";
 import { getGrowthRate } from "./chart-engine";
 import { getStrategy, type SchedulingStrategy } from "./strategies";
-import { computeStandBA } from "./tapio-growth";
-import { type GrowableStand, growStand, snapshotState, speciesForAgg } from "./stand-simulator";
+import { type GrowableStand, growStand, snapshotState } from "./stand-simulator";
 import * as fs from "fs";
 
 const DEBUG_LOG = "/tmp/schedule-debug.log";
@@ -408,14 +407,8 @@ function spawnOperations(
     const minFirstAge = MIN_AGE_FIRST_THINNING?.[s.species] ?? 30;
     const minThinAge = MIN_AGE_THINNING?.[s.species] ?? 40;
 
-    // Compute current stand BA for threshold checks (dynamic, not stale field)
-    const currentBA = computeStandBA(
-      speciesForAgg(s),
-      s.ageYears,
-      s.siteType,
-      undefined,
-      s.areaHa,
-    );
+    // Use Tapio-anchored basal area (N×π×(D/200)²), kept in sync by GROW/APPLY
+    const currentBA = s.basalArea;
 
     // Step 7: Peatland thinning cap — Tapio recommends max 1-2 thinning passes
     if (s.soilType === "peatland" && s.thinningCount >= 2) {
@@ -808,6 +801,7 @@ export function runScheduleEngine(
         st.stemCount = 0;
         st.meanHeight = 0;
         st.meanDiameter = 0;
+        st.basalArea = 0;
         st.cleared = true;
         st.regenDelayStarted = yr;
         st.spawnedTypes.clear();
@@ -841,6 +835,7 @@ export function runScheduleEngine(
         st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
         st.valueEur = Math.round(st.valueEur * (1 - pct));
         st.stemCount = Math.round(st.stemCount * (1 - pct));
+        st.basalArea = st.stemCount * Math.PI * Math.pow(st.meanDiameter / 200, 2);
         st.spawnedTypes.delete(op.type);
         st.thinningCount++;
         // Sync speciesData volumes and stems
@@ -856,6 +851,7 @@ export function runScheduleEngine(
         const oldStems = st.stemCount;
         st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
         st.stemCount = EARLY_TENDING_TARGET_STEMS_HA;
+        st.basalArea = st.stemCount * Math.PI * Math.pow(st.meanDiameter / 200, 2);
         // Sync speciesData volumes and stems
         const volScale = oldVol > 0 ? st.volumeM3 / oldVol : 1;
         const stemScale = oldStems > 0 ? st.stemCount / oldStems : 1;
@@ -869,6 +865,7 @@ export function runScheduleEngine(
         const oldStems = st.stemCount;
         st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
         st.stemCount = 2000;
+        st.basalArea = st.stemCount * Math.PI * Math.pow(st.meanDiameter / 200, 2);
         // Sync speciesData volumes and stems
         const volScale = oldVol > 0 ? st.volumeM3 / oldVol : 1;
         const stemScale = oldStems > 0 ? st.stemCount / oldStems : 1;
@@ -889,6 +886,7 @@ export function runScheduleEngine(
         st.meanHeight = PLANTING_INITIAL_HEIGHT_M;
         st.meanDiameter = PLANTING_INITIAL_DIAMETER_CM;
         st.ageYears = 0;
+        st.basalArea = density * Math.PI * Math.pow(PLANTING_INITIAL_DIAMETER_CM / 200, 2);
         if (st.volumeM3 === 0) st.volumeM3 = st.areaHa * 1;
         if (st.valueEur === 0) st.valueEur = Math.round(st.areaHa * 50);
         // Reset speciesData to only the planted species with seedling values
@@ -914,6 +912,8 @@ export function runScheduleEngine(
       if (growthM3 > 0 && oldVol > 0) {
         st.valueEur = Math.round(st.valueEur * (1 + growthM3 / oldVol));
       }
+      // Keep basalArea in sync with Tapio diameter + current stem count
+      st.basalArea = st.stemCount * Math.PI * Math.pow(st.meanDiameter / 200, 2);
     }
 
     // ── 8. CARRYOVER: unselected ops pushed to next year ──

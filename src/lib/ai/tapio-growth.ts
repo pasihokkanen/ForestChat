@@ -66,11 +66,12 @@ export function meanHeight(
   species: string,
   siteType: string,
   ageYears: number,
+  growthMultiplier = 1.0,
 ): number {
   const h100 = H100[species]?.[siteType];
   if (!h100) {
     console.warn(`tapio-growth: unknown species/site "${species}/${siteType}", falling back to pine/mesic`);
-    return meanHeight("pine", "mesic", ageYears);
+    return meanHeight("pine", "mesic", ageYears, growthMultiplier);
   }
 
   // Interpolate height percentage from the standard curve
@@ -96,7 +97,10 @@ export function meanHeight(
 
   // Convert dominant height to mean height
   const ratio = ageYears < 30 ? 0.88 : 0.92;
-  return Math.round(hdom * ratio * 10) / 10;
+  const raw = hdom * ratio;
+  // Regional scaling: H ∝ growthMultiplier^(1/3) so volume ∝ growthMultiplier
+  const scale = Math.cbrt(growthMultiplier);
+  return Math.round(raw * scale * 10) / 10;
 }
 
 /**
@@ -110,35 +114,35 @@ export function meanHeight(
  */
 export const D_REF: Record<string, Record<string, number>> = {
   pine: {
-    "herb-rich heath": 22,
-    mesic: 20,
-    "sub-xeric": 17,
-    xeric: 15,
+    "herb-rich heath": 29,
+    mesic: 27,
+    "sub-xeric": 21,
+    xeric: 17,
   },
   spruce: {
-    "herb-rich heath": 23,
-    mesic: 22,
-    "sub-xeric": 19,
+    "herb-rich heath": 31,
+    mesic: 29,
+    "sub-xeric": 25,
   },
   silver_birch: {
-    "herb-rich heath": 23,
-    mesic: 20,
-    "sub-xeric": 17,
+    "herb-rich heath": 31,
+    mesic: 27,
+    "sub-xeric": 21,
   },
   downy_birch: {
-    "herb-rich heath": 20,
-    mesic: 18,
-    "sub-xeric": 15,
-  },
-  larch: {
-    "herb-rich heath": 24,
-    mesic: 21,
+    "herb-rich heath": 27,
+    mesic: 24,
     "sub-xeric": 19,
   },
+  larch: {
+    "herb-rich heath": 32,
+    mesic: 28,
+    "sub-xeric": 23,
+  },
   grey_alder: {
-    "herb-rich heath": 18,
-    mesic: 16,
-    "sub-xeric": 14,
+    "herb-rich heath": 24,
+    mesic: 22,
+    "sub-xeric": 17,
   },
 };
 
@@ -172,11 +176,12 @@ export function meanDiameter(
   species: string,
   siteType: string,
   ageYears: number,
+  growthMultiplier = 1.0,
 ): number {
   const dRef = D_REF[species]?.[siteType];
   if (!dRef) {
     console.warn(`tapio-growth: unknown species/site "${species}/${siteType}" for diameter, falling back to pine/mesic`);
-    return meanDiameter("pine", "mesic", ageYears);
+    return meanDiameter("pine", "mesic", ageYears, growthMultiplier);
   }
 
   // Interpolate diameter percentage from the development curve
@@ -198,7 +203,10 @@ export function meanDiameter(
     }
   }
 
-  return Math.round((dRef * pct) / 100 * 10) / 10;
+  const raw = (dRef * pct) / 100;
+  // Regional scaling: D ∝ growthMultiplier^(1/3) so volume ∝ growthMultiplier
+  const scale = Math.cbrt(growthMultiplier);
+  return Math.round(raw * scale * 10) / 10;
 }
 
 /**
@@ -270,6 +278,7 @@ export function computeStandBA(
   siteType: string,
   fallbackSpecies?: string,
   areaHa?: number,
+  growthMultiplier = 1.0,
 ): number {
   if (speciesData.length === 0) {
     return 0;
@@ -277,7 +286,7 @@ export function computeStandBA(
   const area = (areaHa && areaHa > 0) ? areaHa : 1;
   return Math.round(
     speciesData.reduce((sum, sp) => {
-      const h = meanHeight(sp.species, siteType, standAge);
+      const h = meanHeight(sp.species, siteType, standAge, growthMultiplier);
       const volPerHa = sp.volumeM3 / area;
       return sum + computeSpeciesBA(volPerHa, h, sp.species, sp.stemCount, sp.diameterCm);
     }, 0) * 10,
@@ -295,18 +304,19 @@ export function computeStandHeight(
   standAge: number,
   siteType: string,
   areaHa?: number,
+  growthMultiplier = 1.0,
 ): number {
   let totalBA = 0;
   let weightedSum = 0;
   const area = (areaHa && areaHa > 0) ? areaHa : 1;
   for (const sp of speciesData) {
-    const h = meanHeight(sp.species, siteType, standAge);
+    const h = meanHeight(sp.species, siteType, standAge, growthMultiplier);
     const volPerHa = sp.volumeM3 / area;
     const ba = computeSpeciesBA(volPerHa, h, sp.species, sp.stemCount, sp.diameterCm);
     totalBA += ba;
     weightedSum += ba * h;
   }
-  if (totalBA <= 0) return meanHeight(speciesData[0]?.species ?? "pine", siteType, standAge);
+  if (totalBA <= 0) return meanHeight(speciesData[0]?.species ?? "pine", siteType, standAge, growthMultiplier);
   return Math.round((weightedSum / totalBA) * 10) / 10;
 }
 
