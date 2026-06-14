@@ -34,24 +34,42 @@ export function useOperations(
     const fetchOperations = async () => {
       try {
         const supabase = createClient();
-        const { data: result, error: fetchError } = await supabase
-          .from("operations")
-          .select("*")
-          .eq("forest_id", forestId)
-          .order("year", { ascending: true })
-          .order("compartment_id", { ascending: true })
-          .limit(50000);  // 100-year plans with many stands can exceed Supabase default 1000
+        const PAGE_SIZE = 1000;
+
+        // Paginate: Supabase PostgREST max-rows caps .limit() at 1000 server-side.
+        // Use .range() to fetch all pages until an empty/incomplete page signals end.
+        let allOps: Operation[] = [];
+        let from = 0;
+
+        while (true) {
+          const to = from + PAGE_SIZE - 1;
+          const { data: result, error: fetchError } = await supabase
+            .from("operations")
+            .select("*")
+            .eq("forest_id", forestId)
+            .order("year", { ascending: true })
+            .order("compartment_id", { ascending: true })
+            .range(from, to);
+
+          if (cancelled) return;
+
+          if (fetchError) {
+            setError(fetchError.message);
+            setData([]);
+            return;
+          }
+
+          const page = (result as Operation[]) ?? [];
+          allOps = allOps.concat(page);
+
+          // Stop when page is smaller than PAGE_SIZE (last page or no more rows)
+          if (page.length < PAGE_SIZE) break;
+          from += PAGE_SIZE;
+        }
 
         if (cancelled) return;
-
-        if (fetchError) {
-          setError(fetchError.message);
-          setData([]);
-        } else {
-          const ops = (result as Operation[]) ?? [];
-          setData(ops);
-          useForestStore.getState().setOperations(ops);
-        }
+        setData(allOps);
+        useForestStore.getState().setOperations(allOps);
       } catch (err: unknown) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : "Unknown error");
