@@ -10,9 +10,10 @@
 
 import type { StandData, PlannedOperation, PlanGoal, YearPlan, PlanSummary, SpeciesDatum, YearSnapshot, StandSnapshot, SpeciesSnapshot } from "./types";
 import { getOptimalAge, THINNING_BA, MIN_AGE_FIRST_THINNING, MIN_AGE_THINNING, getPrices, COSTS, OPERATION_DEFAULTS } from "./config";
-import { getGrowthRate } from "./chart-engine";
+import { computeTapioAnnualGrowth } from "./tapio-growth";
 import { getStrategy, type SchedulingStrategy } from "./strategies";
 import { type GrowableStand, growStand, snapshotState } from "./stand-simulator";
+import { formFactor } from "./tapio-growth";
 import * as fs from "fs";
 
 const DEBUG_LOG = "/tmp/schedule-debug.log";
@@ -53,6 +54,10 @@ export const MAX_STEMS_HA = 6000;
  *  Tapio: varhaisperkaus when stems > 4000/ha. */
 const EARLY_TENDING_STEM_THRESHOLD = 4000;
 
+/** Tending (taimikonharvennus) trigger: stems/ha must exceed this.
+ *  Tapio: taimikonharvennus when stems > 2000-2500/ha. Midpoint 2250 → rounded to 2500. */
+const TENDING_STEM_THRESHOLD = 2500;
+
 /** Early tending height thresholds (m). Source: Tapio (varhaisperkaus < 1m pine, < 1.5m spruce). */
 // Tapio upper bounds: below = varhaisperkaus (early_tending)
 // Pine: varhaisperkaus at 0.5-1.0m → upper bound 1.0m
@@ -81,9 +86,11 @@ const TENDING_MIN_HEIGHT: Record<string, number> = {
   larch: 3.5,
 };
 
-/** Target stems/ha after early tending. Drops below 4000 so ingress can't re-trigger
- *  immediately (takes 2+ years → height crosses threshold → switches to tending). */
-const EARLY_TENDING_TARGET_STEMS_HA = 3500;
+/** Target stems/ha after early tending. Drop to 3250 so height outpaces ingress re-trigger. */
+const EARLY_TENDING_TARGET_STEMS_HA = 3250;
+
+/** Target stems/ha after tending (taimikonharvennus). Tapio: 1800-2000. Lower bound 1800. */
+const TENDING_TARGET_STEMS_HA = 1800;
 
 // ═══════════════════════════════════════════════════════════════════════
 // Tapio first thinning targets (ensiharvennus harvennusmallit)
@@ -169,15 +176,10 @@ interface SimStand {
   ageYears: number;
   basalArea: number;
   valueEur: number;
-  cleared: boolean;
   /** Original development class from DB (seed_tree, shelterwood, etc.) */
   developmentClass: string;
-  /** Year when clearcut happened (0 = not cleared). Used for regen delay timing. */
-  regenDelayStarted: number;
   /** Year when seed_tree/shelterwood stand was first seen (0 = not applicable). */
   overstoryStarted: number;
-  /** Set of operation types already spawned for this stand (prevents duplicates). */
-  spawnedTypes: Set<string>;
   growthMultiplier: number;
   /** Year when stand was planted (0 = not planted). Used for post-planting tending chain. */
   plantingYear: number;
@@ -258,7 +260,6 @@ function spawnOperations(
         `[SPAWN yr=${year}] stand=${s.standId} age=${s.ageYears}y vol=${s.volumeM3.toFixed(0)}m³ ` +
         `ba=${s.basalArea.toFixed(1)} devClass=${s.developmentClass} species=${s.species} ` +
         `siteClass=${s.siteClass} soilType=${s.soilType} optMin=${optMin} ccEligible=${s.ageYears >= optMin} ` +
-        `spawnedTypes=[${[...s.spawnedTypes].join(",")}] ` +
         `${isProblem ? "⚠ PROBLEM_STAND" : ""}`,
       );
 
@@ -274,52 +275,44 @@ function spawnOperations(
       }
     }
 
-    // ── Regeneration chain (cleared stands) ──
-    if (s.cleared) {
+    // ── Regeneration chain (no stems, no volume → freshly cleared) ──
+    if (s.stemCount === 0 && s.volumeM3 === 0) {
       const delay = strategy.regenDelayYears();
-      const waitYears = year - s.regenDelayStarted;
-      if (waitYears < delay) continue;
-      if (waitYears > delay + 2) continue; // don't keep spawning years later
+      if (s.ageYears < delay) continue;
+      // stemCount=0 && volumeM3=0 means site was clearcut — site prep + planting needed.
+      // After planting APPLY sets stemCount > 0, so these stop spawning naturally.
 
       const rs = makeMinimalStand(s);
       const regenSp = strategy.regenerationSpecies(rs);
       const isPeat = s.soilType === "peatland";
-      const sitePrepKey = "spawned_site_prep";
-      const plantKey = "spawned_planting";
+      const prepType = isPeat ? "ditch_mounding"
+        : goal === "carbon_storage" ? "scalping"
+        : "site_prep";
 
-      if (!s.spawnedTypes.has(sitePrepKey)) {
-        const prepType = isPeat ? "ditch_mounding"
-          : goal === "carbon_storage" ? "scalping"
-          : "site_prep";
-        s.spawnedTypes.add(sitePrepKey);
-        spawned.push({
-          stand: rs,
-          type: prepType,
-          year,
-          income_eur: 0,
-          cost_eur: Math.round((COSTS[prepType] ?? 0) * s.areaHa),
-          removal_m3: 0,
-          removalFraction: 0,
-          notes: `Regeneration site prep after clearcut`,
-          dueYear: year,
-        });
-      }
+      spawned.push({
+        stand: rs,
+        type: prepType,
+        year,
+        income_eur: 0,
+        cost_eur: Math.round((COSTS[prepType] ?? 0) * s.areaHa),
+        removal_m3: 0,
+        removalFraction: 0,
+        notes: `Regeneration site prep after clearcut`,
+        dueYear: year,
+      });
 
-      if (!s.spawnedTypes.has(plantKey)) {
-        const plantType = `${regenSp}_planting`;
-        s.spawnedTypes.add(plantKey);
-        spawned.push({
-          stand: rs,
-          type: plantType,
-          year,
-          income_eur: 0,
-          cost_eur: Math.round((COSTS[plantType] ?? 0) * s.areaHa),
-          removal_m3: 0,
-          removalFraction: 0,
-          notes: `${regenSp} planting after clearcut`,
-          dueYear: year,
-        });
-      }
+      const plantType = `${regenSp}_planting`;
+      spawned.push({
+        stand: rs,
+        type: plantType,
+        year,
+        income_eur: 0,
+        cost_eur: Math.round((COSTS[plantType] ?? 0) * s.areaHa),
+        removal_m3: 0,
+        removalFraction: 0,
+        notes: `${regenSp} planting after clearcut`,
+        dueYear: year,
+      });
       continue;
     }
 
@@ -333,37 +326,35 @@ function spawnOperations(
     if (hasOverstory) {
       if (s.volumeM3 < 30) {
         // Volume too low — seed trees have done their job.
-        // Transition to regeneration: mark as cleared so the regen chain
+        // Transition to regeneration: set stemCount=0 so the regen chain
         // at the top of spawnOperations picks it up next year.
-        if (!s.cleared) {
-          s.cleared = true;
-          s.regenDelayStarted = year;
+        if (s.stemCount > 0) {
+          s.stemCount = 0;
+          s.ageYears = 0;
         }
         continue; // skip clearcut, overstory_removal, thinning, tending
       }
-      if (!s.spawnedTypes.has("overstory_removal")) {
-        // First time seeing this stand — record the year
-        if (s.overstoryStarted === 0) {
-          s.overstoryStarted = year;
-        }
-        // Check if enough time has passed for seedlings to establish
-        const delay = strategy.overstoryDelayYears();
-        const yearsElapsed = year - s.overstoryStarted;
-        if (yearsElapsed >= delay && s.volumeM3 > 0) {
-          s.spawnedTypes.add("overstory_removal");
-          spawned.push({
-            stand: makeMinimalStand(s),
-            type: "overstory_removal",
-            year,
-            income_eur: Math.round(s.valueEur),
-            cost_eur: 0,
-            removal_m3: Math.round(s.volumeM3),
-            removalFraction: 1,
-            notes: `Overstory removal (seed trees, ~${yearsElapsed}y since seed cut), age ${s.ageYears}y`,
-            dueYear: year,
-          });
-          continue;
-        }
+      // Overstory removal — spawn once. After APPLY, developmentClass→"seedling" prevents re-trigger.
+      // First time seeing this stand — record the year
+      if (s.overstoryStarted === 0) {
+        s.overstoryStarted = year;
+      }
+      // Check if enough time has passed for seedlings to establish
+      const delay = strategy.overstoryDelayYears();
+      const yearsElapsed = year - s.overstoryStarted;
+      if (yearsElapsed >= delay && s.volumeM3 > 0) {
+        spawned.push({
+          stand: makeMinimalStand(s),
+          type: "overstory_removal",
+          year,
+          income_eur: Math.round(s.valueEur),
+          cost_eur: 0,
+          removal_m3: Math.round(s.volumeM3),
+          removalFraction: 1,
+          notes: `Overstory removal (seed trees, ~${yearsElapsed}y since seed cut), age ${s.ageYears}y`,
+          dueYear: year,
+        });
+        continue;
       }
       continue; // skip clearcut and thinning for overstory stands
     }
@@ -378,25 +369,23 @@ function spawnOperations(
 
     if (ccEligible && s.volumeM3 > 10) {
       // Step 1: Clearcut-eligible → always skip thinning, even if clearcut not spawned
-      if (!s.spawnedTypes.has("clear_cut")) {
-        const opType = goal === "carbon_storage" ? "selection_cutting" : "clear_cut";
-        const def = OPERATION_DEFAULTS[opType];
-        const removal = s.volumeM3 * def.removalFraction;
-        // Step 8: Peatland minimum harvest volume — Tapio recommends ≥40 m³/ha
-        if (s.soilType !== "peatland" || removal / s.areaHa >= 40) {
-          s.spawnedTypes.add("clear_cut");
-          spawned.push({
-            stand: makeMinimalStand(s),
-            type: opType,
-            year,
-            income_eur: Math.round(s.valueEur * def.removalFraction),
-            cost_eur: 0,
-            removal_m3: Math.round(removal),
-            removalFraction: def.removalFraction,
-            notes: `${opType === "selection_cutting" ? "Selection cutting (carbon storage)" : "Clearcut"} at age ${s.ageYears}y [${optMin}–${optMax}y]`,
-            dueYear: year,
-          });
-        }
+      // Clearcut: after APPLY, age=0 → can't re-fire until regrown to optMin
+      const opType = goal === "carbon_storage" ? "selection_cutting" : "clear_cut";
+      const def = OPERATION_DEFAULTS[opType];
+      const removal = s.volumeM3 * def.removalFraction;
+      // Step 8: Peatland minimum harvest volume — Tapio recommends ≥40 m³/ha
+      if (s.soilType !== "peatland" || removal / s.areaHa >= 40) {
+        spawned.push({
+          stand: makeMinimalStand(s),
+          type: opType,
+          year,
+          income_eur: Math.round(s.valueEur * def.removalFraction),
+          cost_eur: 0,
+          removal_m3: Math.round(removal),
+          removalFraction: def.removalFraction,
+          notes: `${opType === "selection_cutting" ? "Selection cutting (carbon storage)" : "Clearcut"} at age ${s.ageYears}y [${optMin}–${optMax}y]`,
+          dueYear: year,
+        });
       }
       continue; // Step 1: skip thinning — this stand is clearcut-ready
     }
@@ -416,7 +405,7 @@ function spawnOperations(
       // Fall through to tending checks
     } else {
       // First thinning check
-      if (currentBA >= firstThinThresh && s.ageYears >= minFirstAge && !s.spawnedTypes.has("first_thinning")) {
+      if (currentBA >= firstThinThresh && s.ageYears >= minFirstAge) {
         // Step 9: First thinning volume threshold — Tapio: ≥50 m³/ha standing volume
         const m3PerHa = s.volumeM3 / s.areaHa;
         if (m3PerHa >= 50) {
@@ -426,22 +415,18 @@ function spawnOperations(
           const stemsPerHa = s.stemCount; // already per-hectare
 
           // Only spawn first_thinning if current stems exceed Tapio target.
-          // Stands already at/below target are optimally thinned — skip.
-          // (This is math, not a guard: (stems-target)/stems would be ≤0)
           if (stemsPerHa > target) {
             let removalFraction: number;
             if (stemsPerHa > target + 50) {
-              // Stand is dense enough: use stem-count-target-driven removal
               removalFraction = (stemsPerHa - target) / Math.max(1, stemsPerHa);
               removalFraction = Math.min(FIRST_THINNING_MAX_REMOVAL, Math.max(FIRST_THINNING_MIN_REMOVAL, removalFraction));
             } else {
-              // Stand slightly above target: use minimum removal
               removalFraction = FIRST_THINNING_MIN_REMOVAL;
             }
             const removal = s.volumeM3 * removalFraction;
             // Step 8: Peatland min harvest volume
             if (s.soilType !== "peatland" || removal / s.areaHa >= 40) {
-              s.spawnedTypes.add("first_thinning");
+
               const ratio = thinningPriceRatio(s.species, "first_thinning");
               const removalPct = Math.round(removalFraction * 100);
               spawned.push({
@@ -460,7 +445,7 @@ function spawnOperations(
         }
       }
       // Regular thinning check (also runs if first_thinning was ineligible or skipped)
-      if (currentBA >= thinThresh && s.ageYears >= minThinAge && !s.spawnedTypes.has("thinning")) {
+      if (currentBA >= thinThresh && s.ageYears >= minThinAge) {
         const m3PerHa = s.volumeM3 / s.areaHa;
         if (m3PerHa >= 50) {
           // Tapio-driven removal: calculate fraction from BA target
@@ -476,7 +461,7 @@ function spawnOperations(
           const removal = s.volumeM3 * removalFraction;
           // Step 8: Peatland min harvest volume
           if (s.soilType !== "peatland" || removal / s.areaHa >= 40) {
-            s.spawnedTypes.add("thinning");
+
             const ratio = thinningPriceRatio(s.species, "thinning");
             const removalPct = Math.round(removalFraction * 100);
             spawned.push({
@@ -496,49 +481,48 @@ function spawnOperations(
     }
 
     // ── Tending eligibility (stem-count- and height-driven, Tapio thresholds) ──
-    // Three zones: height < etMax → early_tending; etMax ≤ h < tendMin → nothing;
-    // height ≥ tendMin → tending. No history flags needed.
+    // Two independent checks: early_tending (high N, low H) and tending (moderate N, tall H).
+    // No history flags needed — purely state-driven.
     const stemsPerHa = s.stemCount; // already per-hectare
     const etMaxHeight = EARLY_TENDING_MAX_HEIGHT[s.species] ?? 1.5;
     const tendMinHeight = TENDING_MIN_HEIGHT[s.species] ?? 3.5;
 
-    if (stemsPerHa > EARLY_TENDING_STEM_THRESHOLD) {
-      if (s.meanHeight < etMaxHeight) {
-        // Early tending needed — stand is too dense and still short
-        const removalFraction = stemsPerHa > 0
-          ? Math.min(1, Math.max(0, (stemsPerHa - EARLY_TENDING_TARGET_STEMS_HA) / stemsPerHa))
-          : 0;
-        const removalM3 = Math.round(s.volumeM3 * removalFraction);
-        spawned.push({
-          stand: makeMinimalStand(s),
-          type: "early_tending",
-          year,
-          income_eur: 0,
-          cost_eur: Math.round(COSTS.early_tending * s.areaHa),
-          removal_m3: removalM3,
-          removalFraction,
-          notes: `Early tending: ${Math.round(stemsPerHa)}→${EARLY_TENDING_TARGET_STEMS_HA} stems/ha, h=${s.meanHeight.toFixed(1)}m${s.plantingYear > 0 ? ` (${year - s.plantingYear}y post-plant)` : ""}`,
-          dueYear: year,
-        });
-      } else if (s.meanHeight >= tendMinHeight) {
-        // Stand is too dense AND tall enough for tending (taimikonharvennus)
-        const targetStemsHa = 2000; // Tapio: 1800-2200 after taimikonharvennus
-        const removalFraction = stemsPerHa > 0
-          ? Math.min(1, Math.max(0, (stemsPerHa - targetStemsHa) / stemsPerHa))
-          : 0;
-        const removalM3 = Math.round(s.volumeM3 * removalFraction);
-        spawned.push({
-          stand: makeMinimalStand(s),
-          type: "tending",
-          year,
-          income_eur: 0,
-          cost_eur: Math.round(COSTS.tending * s.areaHa),
-          removal_m3: removalM3,
-          removalFraction,
-          notes: `Tending: ${Math.round(stemsPerHa)}→${targetStemsHa} stems/ha (too tall for early tending, h=${s.meanHeight.toFixed(1)}m)`,
-          dueYear: year,
-        });
-      }
+    // Early tending: very dense + still short
+    if (stemsPerHa > EARLY_TENDING_STEM_THRESHOLD && s.meanHeight < etMaxHeight) {
+      const removalFraction = stemsPerHa > 0
+        ? Math.min(1, Math.max(0, (stemsPerHa - EARLY_TENDING_TARGET_STEMS_HA) / stemsPerHa))
+        : 0;
+      const removalM3 = Math.round(s.volumeM3 * removalFraction);
+      spawned.push({
+        stand: makeMinimalStand(s),
+        type: "early_tending",
+        year,
+        income_eur: 0,
+        cost_eur: Math.round(COSTS.early_tending * s.areaHa),
+        removal_m3: removalM3,
+        removalFraction,
+        notes: `Early tending: ${Math.round(stemsPerHa)}→${EARLY_TENDING_TARGET_STEMS_HA} stems/ha, h=${s.meanHeight.toFixed(1)}m${s.plantingYear > 0 ? ` (${year - s.plantingYear}y post-plant)` : ""}`,
+        dueYear: year,
+      });
+    }
+
+    // Tending (taimikonharvennus): moderately dense + tall enough
+    if (stemsPerHa > TENDING_STEM_THRESHOLD && s.meanHeight >= tendMinHeight) {
+      const removalFraction = stemsPerHa > 0
+        ? Math.min(1, Math.max(0, (stemsPerHa - TENDING_TARGET_STEMS_HA) / stemsPerHa))
+        : 0;
+      const removalM3 = Math.round(s.volumeM3 * removalFraction);
+      spawned.push({
+        stand: makeMinimalStand(s),
+        type: "tending",
+        year,
+        income_eur: 0,
+        cost_eur: Math.round(COSTS.tending * s.areaHa),
+        removal_m3: removalM3,
+        removalFraction,
+        notes: `Tending: ${Math.round(stemsPerHa)}→${TENDING_TARGET_STEMS_HA} stems/ha (h=${s.meanHeight.toFixed(1)}m)`,
+        dueYear: year,
+      });
     }
   }
 
@@ -612,18 +596,15 @@ export interface ScheduleResult {
 
 /**
  * Compute current total annual growth from live stand states.
- * Uses VMI13 base rates × species × growth multiplier (forPlanning=true).
+ * Uses Tapio-anchored growth model (H100/D_REF curves).
  */
 function computeAnnualGrowth(stands: Map<string, SimStand>): number {
   let total = 0;
   for (const st of stands.values()) {
-    if (!st.cleared && st.areaHa > 0) {
-      const gPerHa = getGrowthRate(
-        st.siteType, st.soilType, st.species,
-        st.ageYears, st.basalArea, null,
-        st.growthMultiplier,
-        st.areaHa > 0 ? st.volumeM3 / st.areaHa : undefined,
-        true,
+    if (st.stemCount > 0 && st.areaHa > 0) {
+      const gPerHa = computeTapioAnnualGrowth(
+        st.species, st.siteType, st.ageYears,
+        st.stemCount, st.growthMultiplier,
       );
       total += gPerHa * st.areaHa;
     }
@@ -668,11 +649,8 @@ export function runScheduleEngine(
       ageYears: k.ageYears,
       basalArea: k.ba,
       valueEur: k.valueEur,
-      cleared: false,
       developmentClass: k.developmentClass,
-      regenDelayStarted: 0,
       overstoryStarted: 0,
-      spawnedTypes: new Set(),
       growthMultiplier,
       plantingYear: 0,
       thinningCount: 0,
@@ -700,34 +678,20 @@ export function runScheduleEngine(
     simulationSnapshots.push(year0Snapshot);
   }
 
-  // ── DEBUG: one-time diagnostic — carrying-capacity cap impact ──
+  // ── DEBUG: one-time Tapio growth diagnostic ──
   {
-    let cappedCount = 0;
-    let zeroGrowthCount = 0;
     let totalGrowth = 0;
+    let noGrowthCount = 0;
     for (const st of stands.values()) {
-      if (st.cleared || st.areaHa <= 0) continue;
-      const gPerHa = getGrowthRate(
-        st.siteType, st.soilType, st.species,
-        st.ageYears, st.basalArea, null,
-        st.growthMultiplier,
-        st.areaHa > 0 ? st.volumeM3 / st.areaHa : undefined,
-        true,
+      if (st.stemCount <= 0 || st.areaHa <= 0) continue;
+      const gPerHa = computeTapioAnnualGrowth(
+        st.species, st.siteType, st.ageYears,
+        st.stemCount, st.growthMultiplier,
       );
       totalGrowth += gPerHa * st.areaHa;
-      if (gPerHa < 0.01) zeroGrowthCount++;
-      else if (st.volumeM3 > 0) {
-        const gUncapped = getGrowthRate(
-          st.siteType, st.soilType, st.species,
-          st.ageYears, st.basalArea, null,
-          st.growthMultiplier,
-          undefined,
-          true,
-        );
-        if (gUncapped > gPerHa * 1.01) cappedCount++;
-      }
+      if (gPerHa < 0.01) noGrowthCount++;
     }
-    dlog(`[INIT] ${stands.size} stands  totalGrowth=${totalGrowth.toFixed(0)} m³/y  capped=${cappedCount}  zeroGrowth=${zeroGrowthCount}`);
+    dlog(`[INIT] ${stands.size} stands  totalGrowth=${totalGrowth.toFixed(0)} m³/y  noGrowth=${noGrowthCount}`);
   }
 
   for (let yr = startYear; yr <= endYear; yr++) {
@@ -802,9 +766,7 @@ export function runScheduleEngine(
         st.meanHeight = 0;
         st.meanDiameter = 0;
         st.basalArea = 0;
-        st.cleared = true;
-        st.regenDelayStarted = yr;
-        st.spawnedTypes.clear();
+
         st.speciesData = [];
       } else if (op.type === "selection_cutting") {
         const pct = op.removalFraction;
@@ -821,7 +783,6 @@ export function runScheduleEngine(
         st.volumeM3 = st.areaHa * 1;
         st.valueEur = Math.round(st.areaHa * 50);
         st.developmentClass = "seedling";
-        st.spawnedTypes.clear();
         // Scale speciesData to nominal seedling volume
         const oldTotalVol = st.speciesData.reduce((s, sp) => s + sp.volumeM3, 0);
         const volScale = oldTotalVol > 0 ? st.volumeM3 / oldTotalVol : 1;
@@ -836,7 +797,7 @@ export function runScheduleEngine(
         st.valueEur = Math.round(st.valueEur * (1 - pct));
         st.stemCount = Math.round(st.stemCount * (1 - pct));
         st.basalArea = st.stemCount * Math.PI * Math.pow(st.meanDiameter / 200, 2);
-        st.spawnedTypes.delete(op.type);
+
         st.thinningCount++;
         // Sync speciesData volumes and stems
         const volScale = oldVol > 0 ? st.volumeM3 / oldVol : 1;
@@ -864,7 +825,7 @@ export function runScheduleEngine(
         const oldVol = st.volumeM3;
         const oldStems = st.stemCount;
         st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
-        st.stemCount = 2000;
+        st.stemCount = TENDING_TARGET_STEMS_HA;
         st.basalArea = st.stemCount * Math.PI * Math.pow(st.meanDiameter / 200, 2);
         // Sync speciesData volumes and stems
         const volScale = oldVol > 0 ? st.volumeM3 / oldVol : 1;
@@ -874,9 +835,7 @@ export function runScheduleEngine(
           sp.stemCount = Math.round(sp.stemCount * stemScale);
         }
       } else if (op.type.includes("planting")) {
-        st.cleared = false;
-        st.regenDelayStarted = 0;
-        st.spawnedTypes.clear();
+
         st.plantingYear = yr;
         // Tapio initial seedling state
         const plantSpecies = op.type.replace("_planting", "");
@@ -913,7 +872,13 @@ export function runScheduleEngine(
         st.valueEur = Math.round(st.valueEur * (1 + growthM3 / oldVol));
       }
       // Keep basalArea in sync with Tapio diameter + current stem count
-      st.basalArea = st.stemCount * Math.PI * Math.pow(st.meanDiameter / 200, 2);
+      if (st.stemCount > 0) {
+        st.basalArea = st.stemCount * Math.PI * Math.pow(st.meanDiameter / 200, 2);
+      } else if (st.volumeM3 > 0 && st.meanHeight > 0) {
+        // Estimate BA from volume for stands without stem count data
+        const f = formFactor(st.species);
+        st.basalArea = st.volumeM3 / (st.meanHeight * f * st.areaHa);
+      }
     }
 
     // ── 8. CARRYOVER: unselected ops pushed to next year ──

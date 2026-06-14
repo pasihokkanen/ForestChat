@@ -43,7 +43,7 @@ export function getPrices(tier: string, species: string): { tukki: number; kuitu
 // [min, max]
 export const OPTIMAL_AGES: Record<string, Record<string, [number, number]>> = {
   pine:        { "herb-rich heath": [55, 70], mesic: [65, 90], "sub-xeric": [75, 100], xeric: [90, 120] },
-  spruce:      { "herb-rich heath": [50, 65], mesic: [60, 80], "sub-xeric": [65, 85] },
+  spruce:      { "herb-rich heath": [60, 75], mesic: [70, 90], "sub-xeric": [75, 95] },
   downy_birch: { mesic: [45, 65], "sub-xeric": [50, 70] },
   silver_birch:{ "herb-rich heath": [45, 60], mesic: [50, 65] },
 };
@@ -197,29 +197,6 @@ export const COSTS: Record<string, number> = {
   early_tending: 630,
   tending: 900,
   pre_clearance: 720,
-};
-
-// ─── Growth rates (m³/ha/y) — Luke VMI13, Väli-Suomi ───
-export const GROWTH_MINERAL: Record<string, number> = {
-  lehtomainen: 7.0,
-  "herb-rich heath": 7.0,
-  tuore: 5.5,
-  mesic: 5.5,
-  kuivahko: 3.25,
-  "sub-xeric": 3.25,
-  kuiva: 1.3,
-  xeric: 1.3,
-};
-
-export const GROWTH_PEATLAND: Record<string, number> = {
-  lehtomainen: 6.25,
-  "herb-rich heath": 6.25,
-  tuore: 5.5,
-  mesic: 5.5,
-  kuivahko: 3.25,
-  "sub-xeric": 3.25,
-  kuiva: 1.5,
-  xeric: 1.5,
 };
 
 // ─── Site classification mapping ───

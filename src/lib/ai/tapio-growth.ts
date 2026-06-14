@@ -11,9 +11,9 @@ export const H100: Record<string, Record<string, number>> = {
     xeric: 18,
   },
   spruce: {
-    "herb-rich heath": 32,
-    mesic: 29,
-    "sub-xeric": 25,
+    "herb-rich heath": 28,
+    mesic: 24,
+    "sub-xeric": 21,
   },
   silver_birch: {
     "herb-rich heath": 29,
@@ -114,15 +114,15 @@ export function meanHeight(
  */
 export const D_REF: Record<string, Record<string, number>> = {
   pine: {
-    "herb-rich heath": 29,
-    mesic: 27,
-    "sub-xeric": 21,
+    "herb-rich heath": 28,
+    mesic: 26,
+    "sub-xeric": 24,
     xeric: 17,
   },
   spruce: {
-    "herb-rich heath": 31,
-    mesic: 29,
-    "sub-xeric": 25,
+    "herb-rich heath": 28,
+    mesic: 26,
+    "sub-xeric": 23,
   },
   silver_birch: {
     "herb-rich heath": 31,
@@ -214,7 +214,7 @@ export function meanDiameter(
  * Pine 0.50, spruce 0.45, birch 0.42. Others default to pine.
  */
 const FORM_FACTOR: Record<string, number> = {
-  pine: 0.50,
+  pine: 0.47,
   spruce: 0.45,
   silver_birch: 0.42,
   downy_birch: 0.42,
@@ -261,6 +261,48 @@ export function computeSpeciesBA(
 export function computeDiameter(ba: number, stemCount: number): number {
   if (stemCount <= 0 || ba <= 0) return 0;
   return Math.round(200 * Math.sqrt(ba / (stemCount * Math.PI)) * 10) / 10;
+}
+
+/**
+ * Standing volume (m³/ha) from the Tapio-anchored formula.
+ *
+ *   V = N × π × (D/200)² × H × f
+ *
+ * H and D are pulled from the H100/D_REF curves for the given
+ * species × site type × age combination. Regional growth multiplier
+ * scales H and D via cbrt so volume scales linearly with the multiplier.
+ *
+ * Pure function — no side effects, no stand state needed.
+ */
+export function computeTapioVolume(
+  species: string,
+  siteType: string,
+  ageYears: number,
+  stemCount: number,
+  growthMultiplier = 1.0,
+): number {
+  if (stemCount <= 0 || ageYears < 0) return 0;
+  const h = meanHeight(species, siteType, ageYears, growthMultiplier);
+  const d = meanDiameter(species, siteType, ageYears, growthMultiplier);
+  const f = formFactor(species);
+  return stemCount * Math.PI * Math.pow(d / 200, 2) * h * f;
+}
+
+/**
+ * Annual volume increment (m³/ha/y) as the difference between successive
+ * Tapio volumes at ages t and t+1. Positive for growing stands, 0 for
+ * mature/senescent stands where the curve flattens.
+ */
+export function computeTapioAnnualGrowth(
+  species: string,
+  siteType: string,
+  ageYears: number,
+  stemCount: number,
+  growthMultiplier = 1.0,
+): number {
+  const cur = computeTapioVolume(species, siteType, ageYears, stemCount, growthMultiplier);
+  const next = computeTapioVolume(species, siteType, ageYears + 1, stemCount, growthMultiplier);
+  return Math.max(0, next - cur);
 }
 
 /**

@@ -8,8 +8,6 @@ import {
   MIN_AGE_FIRST_THINNING,
   MIN_AGE_THINNING,
   COSTS,
-  GROWTH_MINERAL,
-  GROWTH_PEATLAND,
   GROWTH_REGION_MULTIPLIERS,
   PRICE_REGION_MULTIPLIERS,
   classifySite,
@@ -86,18 +84,6 @@ describe("Forestry Config", () => {
     expect(COSTS.early_tending).toBe(630);
     expect(COSTS.scalping).toBe(450);
     expect(COSTS.ditch_mounding).toBe(720);
-  });
-
-  it("GROWTH_MINERAL has correct rates", () => {
-    expect(GROWTH_MINERAL["herb-rich heath"]).toBe(7.0);
-    expect(GROWTH_MINERAL.mesic).toBe(5.5);
-    expect(GROWTH_MINERAL["sub-xeric"]).toBe(3.25);
-    expect(GROWTH_MINERAL.xeric).toBe(1.3);
-  });
-
-  it("GROWTH_PEATLAND has correct rates", () => {
-    expect(GROWTH_PEATLAND["herb-rich heath"]).toBe(6.25);
-    expect(GROWTH_PEATLAND.mesic).toBe(5.5);
   });
 
   it("GROWTH_REGION_MULTIPLIERS has all 9 regions", () => {

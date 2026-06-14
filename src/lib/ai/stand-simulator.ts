@@ -46,7 +46,6 @@ export interface GrowableStand {
   stemCount: number;
   meanHeight: number;
   meanDiameter: number;
-  cleared: boolean;
   /** Regional growth multiplier (1.0 = Central Finland, 0.55 = Lapland, 1.10 = South) */
   growthMultiplier: number;
   speciesData: Array<{
@@ -84,7 +83,6 @@ function initState(stand: StandData): SimState {
     stemCount: stand.stemCount,
     meanHeight: stand.meanHeight,
     meanDiameter: stand.meanDiameter,
-    cleared: false,
     growthMultiplier: 1.0,
     speciesData: stand.speciesData.map((sp) => ({
       species: sp.species,
@@ -191,7 +189,6 @@ function applyOperation(st: SimState, op: DBOperation, year: number): void {
     st.stemCount = 0;
     st.meanHeight = 0;
     st.meanDiameter = 0;
-    st.cleared = true;
     st.speciesData = [];
   } else if (op.type === "selection_cutting" || op.type === "overstory_removal") {
     const oldVol = st.volumeM3;
@@ -221,7 +218,7 @@ function applyOperation(st: SimState, op: DBOperation, year: number): void {
     const oldVol = st.volumeM3;
     const oldStems = st.stemCount;
     st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
-    st.stemCount = 3500; // Tapio early tending target
+    st.stemCount = 3250; // Tapio early tending target (midpoint 3000-3500)
     // Sync speciesData volumes and stems proportionally
     const volScale = oldVol > 0 ? st.volumeM3 / oldVol : 1;
     const stemScale = oldStems > 0 ? st.stemCount / oldStems : 1;
@@ -233,7 +230,7 @@ function applyOperation(st: SimState, op: DBOperation, year: number): void {
     const oldVol = st.volumeM3;
     const oldStems = st.stemCount;
     st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
-    st.stemCount = 2000; // Tapio tending target
+    st.stemCount = 1800; // Tapio tending target (lower bound 1800)
     // Sync speciesData volumes and stems proportionally
     const volScale = oldVol > 0 ? st.volumeM3 / oldVol : 1;
     const stemScale = oldStems > 0 ? st.stemCount / oldStems : 1;
@@ -242,7 +239,6 @@ function applyOperation(st: SimState, op: DBOperation, year: number): void {
       sp.stemCount = Math.round(sp.stemCount * stemScale);
     }
   } else if (op.type.includes("planting")) {
-    st.cleared = false;
     const plantSpecies = op.type.replace("_planting", "");
     st.species = plantSpecies;
     const density = PLANTING_DENSITY[plantSpecies] ?? 1800;
@@ -278,8 +274,8 @@ export function growStand(
   st: GrowableStand,
   _growthMultiplier = 1.0,
 ): number {
-  // Cleared / invalid stands don't grow
-  if (st.cleared || st.areaHa <= 0) {
+  // Dead stands (no stems AND no volume) don't grow
+  if ((st.stemCount <= 0 && st.volumeM3 <= 0) || st.areaHa <= 0) {
     return 0;
   }
 

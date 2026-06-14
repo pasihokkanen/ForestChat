@@ -13,7 +13,7 @@ import { serverMsg } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
 import { getPricesForRegion } from "./price-fetcher";
 import { classifySite, detectPeatland, PRICES, getRemovalPct } from "./config";
-import { getGrowthRate } from "./chart-engine";
+import { computeTapioAnnualGrowth } from "./tapio-growth";
 
 interface GeneratePlanArgs {
   periodYears?: number;
@@ -154,13 +154,10 @@ export function enrichCompartment(
     speciesData,
   };
 
-  // Compute per-hectare growth rate
-  const growthPerHa = getGrowthRate(
-    siteType, soilType, stand.mainSpecies,
-    c.age_years, c.basal_area, c.development_class ?? null,
-    growthMultiplier,
-    undefined, // currentVolumeM3PerHa
-    true,      // forPlanning: VMI13 base × speciesFactor × growthMultiplier
+  // Compute per-hectare growth rate using Tapio model
+  const growthPerHa = computeTapioAnnualGrowth(
+    stand.mainSpecies, siteType, stand.ageYears,
+    stemsPerHa, growthMultiplier,
   );
   stand.annual_growth = growthPerHa * stand.areaHa;
 

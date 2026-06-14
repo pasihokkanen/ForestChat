@@ -7,6 +7,7 @@
 // deterministically via the authenticated Supabase client (RLS applies).
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { computeTapioAnnualGrowth, meanDiameter } from "./tapio-growth";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -91,216 +92,6 @@ interface ComputedFieldDef {
   compute: (row: Record<string, unknown>) => number;
 }
 
-// Luke VMI13 + Tapio growth rates (m³/ha/y) for Väli-Suomi (Ähtäri zone).
-// Source: build_plan_v3_fixed.py — Luke VMI13 (2019–2023) published ranges.
-//
-// These are forest-level AVERAGES. Per-stand multipliers (species, age,
-// density) redistribute growth between compartments while preserving the
-// aggregate total. Each multiplier self-normalizes so the area-weighted
-// mean across the forest is ~1.0 — no net change to total growth.
-const GROWTH_MINERAL: Record<string, number> = {
-  "herb-rich heath": 7.0,  // OMT — VMI range 6.0–8.0
-  mesic: 5.5,              // MT  — VMI range 4.5–6.5
-  "sub-xeric": 3.25,       // VT  — VMI range 2.5–4.0
-  xeric: 1.3,              // CT  — VMI range 0.5–1.5
-};
-const GROWTH_PEATLAND: Record<string, number> = {
-  "herb-rich heath": 6.25, // OMT peatland — VMI range 5.0–7.5
-  mesic: 5.5,              // MT peatland — similar to mineral
-  "sub-xeric": 3.25,       // VT peatland — VMI range 2.5–4.0
-  xeric: 1.5,              // CT peatland — VMI range 0.5–2.0
-};
-const GROWTH_DEFAULT = 3.0; // fallback for unknown site/soil combos
-
-// Expected basal area (m²/ha) by site type — used for density factor.
-// Calibrated to actual DB means for this forest (161 compartments).
-const EXPECTED_BA: Record<string, number> = {
-  "herb-rich heath": 23,
-  mesic: 20,
-  "sub-xeric": 17,
-  xeric: 14,
-};
-
-// ─── Multiplier functions ───────────────────────────────────────────
-
-/**
- * Species factor: adjusts base growth for tree species.
- *
- * General principle: spruce thrives on fertile sites, pine on poor sites,
- * birch grows slower than conifers on average.
- *
- *   Spruce on herb-rich:      1.18  (+18% — optimal conditions)
- *   Spruce on mesic:          1.08  (+8% — good conditions)
- *   Spruce on sub-xeric/xeric:0.95  (−5% — struggles on dry/poor soil)
- *   Pine on mesic/herb-rich:  0.95  (−5% — outcompeted by spruce)
- *   Pine on sub-xeric/xeric:  1.05  (+5% — drought-tolerant, dominates)
- *   Birch (any site):          0.88–0.92 (−8-12% — naturally slower)
- *   Others (larch, alder):     1.0   (neutral)
- */
-function speciesFactor(species: string, siteType: string): number {
-  const isHerbRich = siteType === "herb-rich heath";
-  const isGood = isHerbRich || siteType === "mesic";
-  const sp = (species ?? "").toLowerCase();
-  const raw: Record<string, number> = {
-    pine: isGood ? 0.95 : 1.05,
-    spruce: isHerbRich ? 1.24 : isGood ? 1.08 : 0.95,
-    silver_birch: isHerbRich ? 0.95 : 0.92,
-    downy_birch: isHerbRich ? 0.93 : 0.90,
-    larch: 1.02,
-    grey_alder: 0.88,
-  };
-  return (raw[sp] ?? 1.0);
-}
-
-/**
- * Age factor: growth curve over a stand's lifetime.
- *
- * Young stands haven't reached full canopy closure yet; very old stands
- * slow down as trees senesce. Peak growth occurs at 40–60 years.
- *
- * Scaled so peak ≈ 0.52 — combined with species×density, the full
- * multiplier stack targets Tapio yield tables (not VMI13 average, which
- * already bakes in these effects).
- *
- *   Age   5:  0.25  — seedling, canopy forming
- *   Age  20:  0.40  — sapling, rapid growth
- *   Age  40:  0.50  — approaching peak
- *   Age  60:  0.48  — peak, full canopy
- *   Age  80:  0.40  — mature, slowing
- *   Age 100:  0.30  — over-mature
- *   Age 120:  0.20  — senescent
- */
-function ageFactor(ageYears: number | null): number {
-  if (ageYears == null) return 0.48;
-  const a = ageYears;
-  let raw: number;
-  if (a < 20)       raw = 0.28 + 0.010 * a;           // 0.28 → 0.48 (dampened young ramp)
-  else if (a < 55)  raw = 0.50 + 0.001 * (a - 20);    // 0.50 → 0.535, gentle rise
-  else if (a < 85)  raw = 0.535 - 0.005 * (a - 55);   // 0.535 → 0.385
-  else              raw = 0.385 - 0.004 * (a - 85);    // 0.385 → 0.245
-  return raw;
-}
-
-/**
- * Density factor: stocking level relative to site-type expectation.
- *
- * Compares actual basal_area to the expected BA for the site type.
- * Understocked stands don't use full site potential; overstocked stands
- * experience competition that reduces individual tree growth.
- *
- * Scaled so fully-stocked stands (75-130%) yield ~0.85 — combined with
- * species×age, targets Tapio rather than raw VMI13.
- *
- *   BA = 0  (seedling):  0.45  — growing, just not measured yet
- *   BA = 0  (open_area): 0.20  — genuinely unstocked
- *   <50% of expected:    0.55  — understocked
- *   50-75%:              0.70  — below normal
- *   75-130%:             0.85  — NORMAL, fully stocked
- *   130-150%:            0.78  — dense, slight competition
- *   >150%:               0.65  — overstocked, significant competition
- */
-function densityFactor(
-  basalArea: number | null,
-  siteType: string,
-  developmentClass: string | null
-): number {
-  if (basalArea == null || basalArea === 0) {
-    if (developmentClass && developmentClass.includes("seedling")) return 0.43;
-    if (developmentClass === "open_area") return 0.20;
-    return 0.38;  // slightly lowered: herb-rich young stands overshoot at 0.40
-  }
-  const expected = EXPECTED_BA[siteType] ?? 20;
-  const density = basalArea / expected;
-  // Phase 9 recalibrated brackets: dynamic BA (computed from V/(H×f)) is ~30%
-  // lower than old proportional BA, so density ratios shift down. Brackets
-  // shifted up to maintain Tapio-consistent effective multiplier (~0.43).
-  let raw: number;
-  if (density < 0.35)      raw = 0.72;  // was <0.5→0.55
-  else if (density < 0.55) raw = 0.87;  // was 0.5-0.75→0.70
-  else if (density < 0.95) raw = 0.95;  // was 0.75-1.3→0.85
-  else if (density < 1.10) raw = 0.83;  // was 1.3-1.5→0.78
-  else                     raw = 0.68;  // was 0.65
-  return raw;
-}
-
-/**
- * Compute per-hectare annual growth (m³/ha/y) for a single compartment.
- *
- * Starts from the site-type + soil-type VMI13 base rate, then applies
- * species, age, and density multipliers. Each multiplier is a raw factor
- * (no forest-specific normalization). An optional growthMultiplier applies
- * location-specific scaling (0.55 Lappi → 1.10 Etelä-Suomi).
- *
- * Used by the growth_m3_per_ha computed field — no DB column needed.
- */
-
-/** Map Finnish/classified site types to the English keys used by
- *  GROWTH_MINERAL, GROWTH_PEATLAND, EXPECTED_BA, and MAX_YIELD.
- *  classifySite() may return Finnish terms (tuore, kuivahko, etc.)
- *  from user-supplied or 3rd-party data. */
-function normalizeSiteType(raw: string): string {
-  const s = raw.toLowerCase();
-  if (s.includes("lehto") || s.includes("lehtomainen") || s.includes("ruoho")) return "herb-rich heath";
-  if (s.includes("tuore") || s.includes("mustikka")) return "mesic";
-  if (s.includes("kuivahko") || s.includes("puolukka")) return "sub-xeric";
-  if (s.includes("kuiva") || s.includes("karu") || s.includes("varpu")) return "xeric";
-  // Already English — pass through
-  if (s === "mesic" || s === "sub-xeric" || s === "xeric" || s === "herb-rich heath" || s.includes("herb-rich")) return s;
-  return s; // unknown, pass through to GROWTH_DEFAULT fallback
-}
-
-export function getGrowthRate(
-  siteType: string,
-  soilType: string,
-  species: string,
-  ageYears: number | null,
-  basalArea: number | null,
-  developmentClass: string | null,
-  growthMultiplier = 1.0,
-  /** Current standing volume (m³/ha). When provided, growth tapers as
-   *  the stand approaches the site's carrying capacity. */
-  currentVolumeM3PerHa?: number,
-  /** When true, returns VMI13-anchored growth for plan generation
-   *  (skips Tapio-calibrated age/density factors). Default: false
-   *  (Tapio yield table compatible). */
-  forPlanning = false,
-): number {
-  const engSite = normalizeSiteType(siteType || "");
-  const table = soilType === "peatland" ? GROWTH_PEATLAND : GROWTH_MINERAL;
-  const base = table[engSite] ?? GROWTH_DEFAULT;
-  const sf = speciesFactor(species, engSite);
-  // For plan generation: VMI13 base rates already include average age
-  // and density effects across the forest. Only apply species adjustment
-  // (per-stand species differs from VMI13 dominant-species baseline).
-  // For Tapio yield validation: apply full multiplier stack.
-  const af = forPlanning ? 1.0 : ageFactor(ageYears);
-  const df = forPlanning ? 1.0 : densityFactor(basalArea, engSite, developmentClass);
-  let growth = base * sf * af * df * growthMultiplier;
-
-  // ── Carrying-capacity cap ──
-  // Growth tapers when standing volume approaches the site's maximum yield.
-  // Skipped for forPlanning=true: VMI13 base rates already represent Finnish
-  // averages across all stocking levels — an additional cap double-penalizes
-  // normal stands (e.g. sub-xeric at 141 m³/ha would have zero growth).
-  if (!forPlanning && currentVolumeM3PerHa != null && currentVolumeM3PerHa > 0) {
-    const MAX_YIELD: Record<string, number> = {
-      "herb-rich heath": 380,
-      mesic: 220,
-      "sub-xeric": 140,
-      xeric: 80,
-    };
-    const maxYield = (MAX_YIELD[engSite] ?? 180) * growthMultiplier;
-    const threshold = 0.75 * maxYield;
-    if (currentVolumeM3PerHa > threshold) {
-      const excess = (currentVolumeM3PerHa - threshold) / (maxYield - threshold);
-      const capFactor = Math.max(0, 1 - excess);
-      growth *= capFactor;
-    }
-  }
-
-  return growth;
-}
-
 const COMPUTED_FIELDS: Record<string, ComputedFieldDef> = {
   removal_m3: {
     sources: ["volume_m3", "removal_pct"],
@@ -337,18 +128,19 @@ const COMPUTED_FIELDS: Record<string, ComputedFieldDef> = {
       basal_area: "source",
       development_class: "source",
     },
-    compute: (row) =>
-      getGrowthRate(
-        (row.site_type as string) ?? "",
-        (row.soil_type as string) ?? "",
-        (row.main_species as string) ?? "",
-        row.age_years as number | null,
-        row.basal_area as number | null,
-        row.development_class as string | null,
-        1.0,        // growthMultiplier (default)
-        undefined,  // currentVolumeM3PerHa
-        true        // forPlanning
-      ),
+    compute: (row) => {
+      const species = (row.main_species as string) ?? "pine";
+      const siteType = (row.site_type as string) ?? "mesic";
+      const age = (row.age_years as number) ?? 0;
+      const ba = row.basal_area as number | null;
+      const d = meanDiameter(species, siteType, age);
+      const stems = (ba && ba > 0 && d > 0)
+        ? Math.round(ba / (Math.PI * Math.pow(d / 200, 2)))
+        : 0;
+      return stems > 0
+        ? computeTapioAnnualGrowth(species, siteType, age, stems, 1.0)
+        : 0;
+    },
   },
   // Total annual growth per compartment = growth_m3_per_ha × area_ha.
   // Depends on growth_m3_per_ha (computed first via chaining).

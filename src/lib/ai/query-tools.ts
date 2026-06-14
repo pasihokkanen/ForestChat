@@ -8,7 +8,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Compartment, Operation } from "@/types/database";
 import { serverMsg } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
-import { getGrowthRate } from "./chart-engine";
+import { computeTapioAnnualGrowth } from "./tapio-growth";
 
 // ── Module-level constants (reused by searchStands and queryOperations) ──
 
@@ -263,7 +263,7 @@ export async function planSummary(
 
     const { data: compData } = await supabase
       .from("compartments")
-      .select("area_ha, volume_m3, site_type, soil_type, main_species, age_years, basal_area, development_class")
+      .select("area_ha, volume_m3, site_type, soil_type, main_species, age_years, basal_area, development_class, stem_count_per_ha")
       .eq("forest_id", forestId);
     const compartments = (compData as Array<{
       area_ha: number | null;
@@ -274,6 +274,7 @@ export async function planSummary(
       age_years: number | null;
       basal_area: number | null;
       development_class: string | null;
+      stem_count_per_ha: number | null;
     }>) ?? [];
 
     const totalArea = compartments.reduce((s, c) => s + (c.area_ha ?? 0), 0);
@@ -281,11 +282,14 @@ export async function planSummary(
     const annualGrowth = compartments.reduce((s, c) => {
       const area = c.area_ha ?? 0;
       if (area <= 0) return s;
-      return s + getGrowthRate(
-        c.site_type ?? "", c.soil_type ?? "", c.main_species ?? "",
-        c.age_years, c.basal_area, c.development_class ?? null,
-        1.0, undefined, true  // growthMultiplier, currentVolumeM3PerHa, forPlanning
-      ) * area;
+      const stems = c.stem_count_per_ha ?? 0;
+      const gPerHa = stems > 0
+        ? computeTapioAnnualGrowth(
+            c.main_species ?? "pine", c.site_type ?? "mesic",
+            c.age_years ?? 0, stems, 1.0,
+          )
+        : 0;
+      return s + gPerHa * area;
     }, 0);
 
     const p1Ops = operations.filter((o) => o.year >= 2026 && o.year <= 2035);
