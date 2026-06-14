@@ -208,6 +208,23 @@ export function normalizeOperationType(input: string): string {
   return FINNISH_TO_SYSTEM[input.toLowerCase()] ?? input;
 }
 
+// ─── Clearcut readiness thresholds (Tapio uudistuskypsyys) ───
+// Mean diameter (DBH cm) minimum for clearcut eligibility.
+// Thresholds are 100% of the Tapio model's diameter at optMin + 5 years.
+// A stand that grows slower will hit the threshold later → clearcut defers
+// naturally, and the plan stays viable. No epsilon needed.
+// See D_REF * DIAMETER_PCT at optMin+5 for each species/site combination.
+export const CLEARCUT_MIN_DIAMETER: Record<string, Record<string, number>> = {
+  pine:        { "herb-rich heath": 26.3, mesic: 25.2, "sub-xeric": 24.0, xeric: 17.0 },
+  spruce:      { "herb-rich heath": 26.7, mesic: 25.6, "sub-xeric": 23.0 },
+  downy_birch: { mesic: 20.2, "sub-xeric": 16.9 },
+  silver_birch:{ "herb-rich heath": 26.0, mesic: 24.0 },
+};
+
+/** Minimum standing volume per hectare for clearcut economic viability.
+ *  Tapio generally recommends ≥150 m³/ha for a commercially viable clearcut. */
+export const CLEARCUT_MIN_VOLUME_PER_HA = 140;
+
 // ─── Silvicultural costs (€/ha) ───
 export const COSTS: Record<string, number> = {
   site_prep: 540,

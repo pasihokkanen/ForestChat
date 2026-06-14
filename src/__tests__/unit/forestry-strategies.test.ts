@@ -25,7 +25,7 @@ function makeStand(overrides: Partial<StandData> & { standId: string }): StandDa
     volumeM3: overrides.volumeM3 ?? 200,
     stemCount: overrides.stemCount ?? 0,
     meanHeight: overrides.meanHeight ?? 0,
-    meanDiameter: overrides.meanDiameter ?? 0,
+    meanDiameter: overrides.meanDiameter ?? 30,
     speciesData: overrides.speciesData ?? [],
   };
 }
@@ -160,7 +160,7 @@ describe("schedulePlan with strategies", () => {
 
   it("carbon_storage spawns selection_cutting not clear_cut", () => {
     const stand = makeStand({
-      standId: "cs1", volumeM3: 50, valueEur: 3000,
+      standId: "cs1", volumeM3: 6000, valueEur: 300000,
       ageYears: 130, ba: 30, siteType: "sub-xeric", site_class: "kuivahko",
       areaHa: 40,
     });

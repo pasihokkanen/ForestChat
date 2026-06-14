@@ -22,7 +22,7 @@ function makeStand(overrides: Partial<StandData> & { standId: string }): StandDa
     volumeM3: overrides.volumeM3 ?? 200,
     stemCount: overrides.stemCount ?? 600,
     meanHeight: overrides.meanHeight ?? 0,
-    meanDiameter: overrides.meanDiameter ?? 0,
+    meanDiameter: overrides.meanDiameter ?? 30,
     speciesData: overrides.speciesData ?? [],
   };
 }
@@ -43,10 +43,10 @@ describe("schedulePlan (Phase 7b rewrite — dynamic spawning)", () => {
   });
 
   it("spawns a clear_cut for an over-age stand", () => {
-    // mesic ceiling=220, volPerHa=10 → well under. Large area → cap fits 100 m³ removal.
+    // mesic ceiling=220, volPerHa=160 → well under. Large area → cap fits 1600 m³ removal.
     const stand = makeStand({
       standId: "1",
-      volumeM3: 100, valueEur: 5000, areaHa: 10,
+      volumeM3: 1600, valueEur: 80000, areaHa: 10,
       ageYears: 100, ba: 25,
       siteType: "mesic", site_class: "tuore",
       annual_growth: 5.5,
@@ -74,7 +74,7 @@ describe("schedulePlan (Phase 7b rewrite — dynamic spawning)", () => {
   it("spawns regeneration ops after clearcut", () => {
     const stand = makeStand({
       standId: "3",
-      volumeM3: 100, valueEur: 5000, areaHa: 10,
+      volumeM3: 1600, valueEur: 80000, areaHa: 10,
       ageYears: 100, ba: 25,
       siteType: "mesic", site_class: "tuore",
       annual_growth: 5.5,
@@ -89,8 +89,8 @@ describe("schedulePlan (Phase 7b rewrite — dynamic spawning)", () => {
     // age 100 with 400 stems on mesic still has trace growth → cap > 0.
     const stand = makeStand({
       standId: "cs1",
-      volumeM3: 300,
-      valueEur: 15000,
+      volumeM3: 1600,
+      valueEur: 80000,
       areaHa: 10,
       ageYears: 100,
       ba: 30,

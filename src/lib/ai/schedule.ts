@@ -9,7 +9,7 @@
 // on-demand from the current simulated state.
 
 import type { StandData, PlannedOperation, PlanGoal, YearPlan, PlanSummary, SpeciesDatum, YearSnapshot, StandSnapshot, SpeciesSnapshot } from "./types";
-import { getOptimalAge, THINNING_BA, MIN_AGE_FIRST_THINNING, MIN_AGE_THINNING, COSTS, OPERATION_DEFAULTS, computeOperationValue } from "./config";
+import { getOptimalAge, THINNING_BA, MIN_AGE_FIRST_THINNING, MIN_AGE_THINNING, COSTS, OPERATION_DEFAULTS, computeOperationValue, CLEARCUT_MIN_DIAMETER, CLEARCUT_MIN_VOLUME_PER_HA } from "./config";
 import { computeTapioAnnualGrowth } from "./tapio-growth";
 import { getStrategy, type SchedulingStrategy } from "./strategies";
 import { type GrowableStand, growStand, snapshotState } from "./stand-simulator";
@@ -356,13 +356,21 @@ function spawnOperations(
 
     // ── Clearcut eligibility ──
     const [optMin, optMax] = getOptimalAge(s.species, s.siteClass);
-    const ccEligible = goal === "carbon_storage"
+    const ccAgeEligible = goal === "carbon_storage"
       ? s.ageYears >= optMax + 15  // only significantly over-mature
       : s.developmentClass === "mature_thinning"
         ? s.ageYears >= optMin + 10  // buffer: don't clearcut borderline mature_thinning
         : s.ageYears >= optMin;
+    // Multi-metric gate: age alone is not enough — stand must be merchantable.
+    // Tapio uudistuskypsyys requires sufficient diameter and volume/hectare.
+    const minDiam = CLEARCUT_MIN_DIAMETER[s.species]?.[s.siteClass]
+      ?? CLEARCUT_MIN_DIAMETER[s.species]?.mesic
+      ?? 26;  // conservative fallback
+    const ccReady = ccAgeEligible
+      && s.meanDiameter >= minDiam                           // DBH threshold
+      && s.volumeM3 / s.areaHa >= CLEARCUT_MIN_VOLUME_PER_HA; // economic volume
 
-    if (ccEligible && s.volumeM3 > 10) {
+    if (ccReady && s.volumeM3 > 10) {
       // Step 1: Clearcut-eligible → always skip thinning, even if clearcut not spawned
       // Clearcut: after APPLY, age=0 → can't re-fire until regrown to optMin
       const opType = goal === "carbon_storage" ? "selection_cutting" : "clear_cut";
@@ -422,18 +430,18 @@ function spawnOperations(
             // Step 8: Peatland min harvest volume
             if (s.soilType !== "peatland" || removal / s.areaHa >= 40) {
 
-              spawned.push({
-                stand: makeMinimalStand(s),
-                type: "first_thinning",
-                year,
-                income_eur: computeOperationValue(s.volumeM3, s.species, "first_thinning", removalFraction),
-                cost_eur: 0,
-                removal_m3: Math.round(removal),
-                removalFraction,
-                notes: `First thinning BA=${currentBA.toFixed(0)} ${Math.round(stemsPerHa)}→${target} stems/ha (${Math.round(removalFraction * 100)}%) age=${s.ageYears}y`,
-                dueYear: year,
-              });
-            }
+                spawned.push({
+                  stand: makeMinimalStand(s),
+                  type: "first_thinning",
+                  year,
+                  income_eur: computeOperationValue(s.volumeM3, s.species, "first_thinning", removalFraction),
+                  cost_eur: 0,
+                  removal_m3: Math.round(removal),
+                  removalFraction,
+                  notes: `First thinning BA=${currentBA.toFixed(0)} ${Math.round(stemsPerHa)}→${target} stems/ha (${Math.round(removalFraction * 100)}%) age=${s.ageYears}y`,
+                  dueYear: year,
+                });
+              }
           }
         }
       }
@@ -455,18 +463,18 @@ function spawnOperations(
           // Step 8: Peatland min harvest volume
           if (s.soilType !== "peatland" || removal / s.areaHa >= 40) {
 
-            spawned.push({
-              stand: makeMinimalStand(s),
-              type: "thinning",
-              year,
-              income_eur: computeOperationValue(s.volumeM3, s.species, "thinning", removalFraction),
-              cost_eur: 0,
-              removal_m3: Math.round(removal),
-              removalFraction,
-              notes: `Thinning BA=${currentBA.toFixed(0)}→${targetBA} m²/ha (${Math.round(removalFraction * 100)}%) age=${s.ageYears}y`,
-              dueYear: year,
-            });
-          }
+              spawned.push({
+                stand: makeMinimalStand(s),
+                type: "thinning",
+                year,
+                income_eur: computeOperationValue(s.volumeM3, s.species, "thinning", removalFraction),
+                cost_eur: 0,
+                removal_m3: Math.round(removal),
+                removalFraction,
+                notes: `Thinning BA=${currentBA.toFixed(0)}→${targetBA} m²/ha (${Math.round(removalFraction * 100)}%) age=${s.ageYears}y`,
+                dueYear: year,
+              });
+            }
         }
       }
     }

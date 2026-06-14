@@ -336,12 +336,12 @@ describe("estimateForestState", () => {
     return all;
   }
 
-  it("scheduler spawns a complete lifecycle with 2 regenerations over 200 years", () => {
+  it("scheduler spawns a complete lifecycle with 2 regenerations over 250 years", () => {
     // Use maximum_growth_no_cap so the volume cap never limits spawning.
     const { yearPlans, overspillOps, simulationSnapshots } = runScheduleEngine(
       [LIFECYCLE_STAND],
       1,
-      200,
+      250,
       "maximum_growth_no_cap",
     );
 
@@ -436,11 +436,11 @@ describe("estimateForestState", () => {
       removal_pct: Math.round(op.removalFraction * 100),
     }));
 
-    const snapshots = simulateStand(LIFECYCLE_STAND, dbOps, 1, 200);
+    const snapshots = simulateStand(LIFECYCLE_STAND, dbOps, 1, 250);
 
     // snapshots[0] = year 0 (pre-simulation)
-    // snapshots[1..200] = years 1..200
-    expect(snapshots).toHaveLength(201);
+    // snapshots[1..250] = years 1..250
+    expect(snapshots).toHaveLength(251);
 
     // Track rotations by detecting clearcuts
     const ccIndices: number[] = [];
