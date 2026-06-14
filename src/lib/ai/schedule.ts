@@ -9,7 +9,7 @@
 // on-demand from the current simulated state.
 
 import type { StandData, PlannedOperation, PlanGoal, YearPlan, PlanSummary, SpeciesDatum, YearSnapshot, StandSnapshot, SpeciesSnapshot } from "./types";
-import { getOptimalAge, THINNING_BA, MIN_AGE_FIRST_THINNING, MIN_AGE_THINNING, getPrices, COSTS, OPERATION_DEFAULTS } from "./config";
+import { getOptimalAge, THINNING_BA, MIN_AGE_FIRST_THINNING, MIN_AGE_THINNING, COSTS, OPERATION_DEFAULTS, computeOperationValue } from "./config";
 import { computeTapioAnnualGrowth } from "./tapio-growth";
 import { getStrategy, type SchedulingStrategy } from "./strategies";
 import { type GrowableStand, growStand, snapshotState } from "./stand-simulator";
@@ -225,15 +225,6 @@ function makeMinimalStand(s: SimStand): StandData {
 }
 
 /** Get the price ratio of a thinning tier vs clearcut tier for a species. */
-function thinningPriceRatio(species: string, tier: "first_thinning" | "thinning"): number {
-  const sp = species === "birch" ? "silver_birch" : species;
-  const tp = getPrices(tier, sp);
-  const cp = getPrices("clear_cut", sp);
-  const tSum = tp.tukki + tp.kuitu;
-  const cSum = cp.tukki + cp.kuitu;
-  return cSum > 0 ? tSum / cSum : 0.7;
-}
-
 // ═══════════════════════════════════════════════════════════════════════
 // Operation Spawning
 // ═══════════════════════════════════════════════════════════════════════
@@ -347,7 +338,7 @@ function spawnOperations(
           stand: makeMinimalStand(s),
           type: "overstory_removal",
           year,
-          income_eur: Math.round(s.valueEur),
+          income_eur: computeOperationValue(s.volumeM3, s.species, "clear_cut", 1),
           cost_eur: 0,
           removal_m3: Math.round(s.volumeM3),
           removalFraction: 1,
@@ -379,7 +370,7 @@ function spawnOperations(
           stand: makeMinimalStand(s),
           type: opType,
           year,
-          income_eur: Math.round(s.valueEur * def.removalFraction),
+          income_eur: computeOperationValue(s.volumeM3, s.species, opType === "selection_cutting" ? "thinning" : "clear_cut", def.removalFraction),
           cost_eur: 0,
           removal_m3: Math.round(removal),
           removalFraction: def.removalFraction,
@@ -427,17 +418,15 @@ function spawnOperations(
             // Step 8: Peatland min harvest volume
             if (s.soilType !== "peatland" || removal / s.areaHa >= 40) {
 
-              const ratio = thinningPriceRatio(s.species, "first_thinning");
-              const removalPct = Math.round(removalFraction * 100);
               spawned.push({
                 stand: makeMinimalStand(s),
                 type: "first_thinning",
                 year,
-                income_eur: Math.round(s.valueEur * removalFraction * ratio),
+                income_eur: computeOperationValue(s.volumeM3, s.species, "first_thinning", removalFraction),
                 cost_eur: 0,
                 removal_m3: Math.round(removal),
                 removalFraction,
-                notes: `First thinning BA=${currentBA.toFixed(0)} ${Math.round(stemsPerHa)}→${target} stems/ha (${removalPct}%) age=${s.ageYears}y`,
+                notes: `First thinning BA=${currentBA.toFixed(0)} ${Math.round(stemsPerHa)}→${target} stems/ha (${Math.round(removalFraction * 100)}%) age=${s.ageYears}y`,
                 dueYear: year,
               });
             }
@@ -462,17 +451,15 @@ function spawnOperations(
           // Step 8: Peatland min harvest volume
           if (s.soilType !== "peatland" || removal / s.areaHa >= 40) {
 
-            const ratio = thinningPriceRatio(s.species, "thinning");
-            const removalPct = Math.round(removalFraction * 100);
             spawned.push({
               stand: makeMinimalStand(s),
               type: "thinning",
               year,
-              income_eur: Math.round(s.valueEur * removalFraction * ratio),
+              income_eur: computeOperationValue(s.volumeM3, s.species, "thinning", removalFraction),
               cost_eur: 0,
               removal_m3: Math.round(removal),
               removalFraction,
-              notes: `Thinning BA=${currentBA.toFixed(0)}→${targetBA} m²/ha (${removalPct}%) age=${s.ageYears}y`,
+              notes: `Thinning BA=${currentBA.toFixed(0)}→${targetBA} m²/ha (${Math.round(removalFraction * 100)}%) age=${s.ageYears}y`,
               dueYear: year,
             });
           }
@@ -761,7 +748,6 @@ export function runScheduleEngine(
       if (op.type === "clear_cut") {
         st.volumeM3 = 0;
         st.ageYears = 0;
-        st.valueEur = 0;
         st.stemCount = 0;
         st.meanHeight = 0;
         st.meanDiameter = 0;
@@ -772,7 +758,6 @@ export function runScheduleEngine(
         const pct = op.removalFraction;
         const oldVol = st.volumeM3;
         st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
-        st.valueEur = Math.round(st.valueEur * (1 - pct));
         // Sync speciesData volumes
         const volScale = oldVol > 0 ? st.volumeM3 / oldVol : 1;
         for (const sp of st.speciesData) {
@@ -781,7 +766,6 @@ export function runScheduleEngine(
       } else if (op.type === "overstory_removal") {
         // Remove overstory trees — seedlings remain underneath.
         st.volumeM3 = st.areaHa * 1;
-        st.valueEur = Math.round(st.areaHa * 50);
         st.developmentClass = "seedling";
         // Scale speciesData to nominal seedling volume
         const oldTotalVol = st.speciesData.reduce((s, sp) => s + sp.volumeM3, 0);
@@ -794,7 +778,6 @@ export function runScheduleEngine(
         const oldVol = st.volumeM3;
         const oldStems = st.stemCount;
         st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
-        st.valueEur = Math.round(st.valueEur * (1 - pct));
         st.stemCount = Math.round(st.stemCount * (1 - pct));
         st.basalArea = st.stemCount * Math.PI * Math.pow(st.meanDiameter / 200, 2);
 
@@ -846,8 +829,6 @@ export function runScheduleEngine(
         st.meanDiameter = PLANTING_INITIAL_DIAMETER_CM;
         st.ageYears = 0;
         st.basalArea = density * Math.PI * Math.pow(PLANTING_INITIAL_DIAMETER_CM / 200, 2);
-        if (st.volumeM3 === 0) st.volumeM3 = st.areaHa * 1;
-        if (st.valueEur === 0) st.valueEur = Math.round(st.areaHa * 50);
         // Reset speciesData to only the planted species with seedling values
         st.speciesData = [{
           species: plantSpecies,
@@ -866,11 +847,7 @@ export function runScheduleEngine(
     // ── 7. GROW: simulate one year of growth on ALL stands ──
     for (const st of stands.values()) {
       // growStand handles cleared/invalid stands (ages but returns 0 growth)
-      const oldVol = st.volumeM3;
-      const growthM3 = growStand(st, st.growthMultiplier);
-      if (growthM3 > 0 && oldVol > 0) {
-        st.valueEur = Math.round(st.valueEur * (1 + growthM3 / oldVol));
-      }
+      growStand(st, st.growthMultiplier);
       // Keep basalArea in sync with Tapio diameter + current stem count
       if (st.stemCount > 0) {
         st.basalArea = st.stemCount * Math.PI * Math.pow(st.meanDiameter / 200, 2);
@@ -980,7 +957,6 @@ export function schedulePlan(
 
   // Compute summary with live annual growth average
   const totalVolume = forestStands.reduce((s, k) => s + k.volumeM3, 0);
-  const totalValue = forestStands.reduce((s, k) => s + k.valueEur, 0);
   const avgAnnualGrowth = annualGrowthHistory.length > 0
     ? annualGrowthHistory.reduce((a, b) => a + b, 0) / annualGrowthHistory.length
     : 0;
@@ -988,7 +964,7 @@ export function schedulePlan(
   const summary: PlanSummary = {
     totalVolume,
     annualGrowth: Math.round(avgAnnualGrowth),
-    stumpageValue: totalValue,
+    stumpageValue: totalIncome,  // computed from volumes × prices at operation time
     averageHarvestPerYear: periodYears > 0 ? harvestTotal / periodYears : 0,
     harvestVsGrowth:
       avgAnnualGrowth > 0

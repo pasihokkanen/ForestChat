@@ -39,6 +39,27 @@ export function getPrices(tier: string, species: string): { tukki: number; kuitu
   return (PRICES[tier]?.[key] ?? PRICES[tier]?.pine ?? { tukki: 70, kuitu: 20 }) as { tukki: number; kuitu: number };
 }
 
+/**
+ * Compute operation revenue (€) from stand volume and known wood prices.
+ * Uses 60/40 log/pulp split for pure stands (matching computeStandValue default).
+ * @param volumeM3 Standing volume before operation (m³)
+ * @param species Tree species
+ * @param tier Price tier ("clear_cut" | "thinning" | "first_thinning")
+ * @param removalFraction Fraction of volume removed (0–1)
+ */
+export function computeOperationValue(
+  volumeM3: number,
+  species: string,
+  tier: string,
+  removalFraction: number,
+): number {
+  const p = getPrices(tier, species);
+  const removedM3 = volumeM3 * removalFraction;
+  const logM3 = removedM3 * 0.6;
+  const pulpM3 = removedM3 - logM3;
+  return Math.round(logM3 * p.tukki + pulpM3 * p.kuitu);
+}
+
 // ─── Optimal rotation ages (Väli-Suomi, ~62-63°N) ───
 // [min, max]
 export const OPTIMAL_AGES: Record<string, Record<string, [number, number]>> = {
