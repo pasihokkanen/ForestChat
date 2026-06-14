@@ -5,35 +5,35 @@
 /** Dominant height at 100 years (m) — midpoints of Tapio ranges. */
 export const H100: Record<string, Record<string, number>> = {
   pine: {
-    "herb-rich heath": 28,
-    mesic: 26,
-    "sub-xeric": 22,
-    xeric: 18,
+    "herb-rich heath": 27,
+    mesic: 25,
+    "sub-xeric": 21,
+    xeric: 17,
   },
   spruce: {
-    "herb-rich heath": 28,
-    mesic: 24,
-    "sub-xeric": 21,
-  },
-  silver_birch: {
-    "herb-rich heath": 29,
-    mesic: 26,
-    "sub-xeric": 22,
-  },
-  downy_birch: {
-    "herb-rich heath": 26,
+    "herb-rich heath": 27,
     mesic: 23,
     "sub-xeric": 20,
   },
+  silver_birch: {
+    "herb-rich heath": 28,
+    mesic: 25,
+    "sub-xeric": 21,
+  },
+  downy_birch: {
+    "herb-rich heath": 25,
+    mesic: 22,
+    "sub-xeric": 19,
+  },
   larch: {
-    "herb-rich heath": 30,
-    mesic: 27,
-    "sub-xeric": 24,
+    "herb-rich heath": 29,
+    mesic: 26,
+    "sub-xeric": 23,
   },
   grey_alder: {
-    "herb-rich heath": 24,
-    mesic: 21,
-    "sub-xeric": 18,
+    "herb-rich heath": 23,
+    mesic: 20,
+    "sub-xeric": 17,
   },
 };
 
@@ -211,22 +211,22 @@ export function meanDiameter(
 
 /**
  * Form factor (f in V = BA × H × f) by species.
- * Pine 0.50, spruce 0.45, birch 0.42. Others default to pine.
+ * Conservative Finnish norms: pine 0.44, spruce 0.43, birch 0.40.
  */
 const FORM_FACTOR: Record<string, number> = {
-  pine: 0.47,
-  spruce: 0.45,
-  silver_birch: 0.42,
-  downy_birch: 0.42,
-  larch: 0.48,
-  grey_alder: 0.44,
+  pine: 0.44,
+  spruce: 0.43,
+  silver_birch: 0.40,
+  downy_birch: 0.40,
+  larch: 0.45,
+  grey_alder: 0.41,
 };
 
 export function formFactor(species: string): number {
   const ff = FORM_FACTOR[species];
   if (ff === undefined) {
     console.warn(`tapio-growth: unknown species "${species}" for form factor, falling back to pine`);
-    return 0.50;
+    return 0.48;
   }
   return ff;
 }
