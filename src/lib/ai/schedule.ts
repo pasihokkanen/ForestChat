@@ -191,6 +191,8 @@ interface SimStand {
   meanHeight: number;
   /** Mean diameter (cm) of dominant species. */
   meanDiameter: number;
+  /** Year when stand was clearcut (0 = not clearcut). Used for regen delay timing. */
+  clearYear: number;
   /** Per-species breakdown (kept for potential future use, not mutated by simulation). */
   speciesData: SpeciesDatum[];
 }
@@ -269,7 +271,9 @@ function spawnOperations(
     // ── Regeneration chain (no stems, no volume → freshly cleared) ──
     if (s.stemCount === 0 && s.volumeM3 === 0) {
       const delay = strategy.regenDelayYears();
-      if (s.ageYears < delay) continue;
+      // Use clearYear (set at clearcut time) instead of ageYears —
+      // growStand never increments age on dead stands (stemCount=0, volumeM3=0).
+      if (s.clearYear > 0 && year - s.clearYear < delay) continue;
       // stemCount=0 && volumeM3=0 means site was clearcut — site prep + planting needed.
       // After planting APPLY sets stemCount > 0, so these stop spawning naturally.
 
@@ -640,6 +644,7 @@ export function runScheduleEngine(
       overstoryStarted: 0,
       growthMultiplier,
       plantingYear: 0,
+      clearYear: 0,
       thinningCount: 0,
       stemCount: k.stemCount,
       meanHeight: k.meanHeight,
@@ -740,7 +745,21 @@ export function runScheduleEngine(
       }
     }
 
-    // ── 6. APPLY operations to stand states ──
+    // ── 6. GROW: simulate one year of growth on ALL stands ──
+    for (const st of stands.values()) {
+      // growStand handles cleared/invalid stands (ages but returns 0 growth)
+      growStand(st, st.growthMultiplier);
+      // Keep basalArea in sync with Tapio diameter + current stem count
+      if (st.stemCount > 0) {
+        st.basalArea = st.stemCount * Math.PI * Math.pow(st.meanDiameter / 200, 2);
+      } else if (st.volumeM3 > 0 && st.meanHeight > 0) {
+        // Estimate BA from volume for stands without stem count data
+        const f = formFactor(st.species);
+        st.basalArea = st.volumeM3 / (st.meanHeight * f * st.areaHa);
+      }
+    }
+
+    // ── 7. APPLY operations to stand states (end of year, after growth) ──
     for (const op of scheduled) {
       const st = stands.get(op.stand.standId);
       if (!st) continue;
@@ -752,6 +771,7 @@ export function runScheduleEngine(
         st.meanHeight = 0;
         st.meanDiameter = 0;
         st.basalArea = 0;
+        st.clearYear = yr;
 
         st.speciesData = [];
       } else if (op.type === "selection_cutting") {
@@ -841,20 +861,6 @@ export function runScheduleEngine(
           basalArea: 0,
           areaHa: st.areaHa,
         }];
-      }
-    }
-
-    // ── 7. GROW: simulate one year of growth on ALL stands ──
-    for (const st of stands.values()) {
-      // growStand handles cleared/invalid stands (ages but returns 0 growth)
-      growStand(st, st.growthMultiplier);
-      // Keep basalArea in sync with Tapio diameter + current stem count
-      if (st.stemCount > 0) {
-        st.basalArea = st.stemCount * Math.PI * Math.pow(st.meanDiameter / 200, 2);
-      } else if (st.volumeM3 > 0 && st.meanHeight > 0) {
-        // Estimate BA from volume for stands without stem count data
-        const f = formFactor(st.species);
-        st.basalArea = st.volumeM3 / (st.meanHeight * f * st.areaHa);
       }
     }
 

@@ -370,14 +370,14 @@ export function simulateStand(
 
   const endYear = startYear + periodYears - 1;
   for (let yr = startYear; yr <= endYear; yr++) {
-    // Apply operations this year
+    // GROW first (natural growth through the year)
+    growStand(state, growthMultiplier);
+
+    // Apply operations at end of year (GROW then apply so snapshot shows operation target values)
     const yearOps = opsByYear.get(yr) ?? [];
     for (const op of yearOps) {
       applyOperation(state, op, yr);
     }
-
-    // GROW
-    growStand(state, growthMultiplier);
 
     // Snapshot
     snapshots.push({
