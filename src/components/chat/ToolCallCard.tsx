@@ -73,7 +73,7 @@ export default function ToolCallCard({
 
   return (
     <div className="flex justify-start">
-      <div className="max-w-[85%] rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200">
+      <div className="max-w-[85%] rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-sm hover:-translate-y-1 hover:shadow-lg transition-all duration-200">
         <div className="flex items-center gap-2">
           {icon}
           <span className="font-medium text-gray-700 dark:text-gray-300 text-xs">

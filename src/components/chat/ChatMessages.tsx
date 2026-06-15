@@ -36,7 +36,7 @@ export default function ChatMessages({
   const hasToolCalls = toolCalls.length > 0;
 
   return (
-    <div className="flex-1 overflow-y-auto px-3 py-4 space-y-3 dark:bg-gray-900">
+    <div className="flex-1 overflow-y-auto px-3 py-4 pb-10 space-y-3 dark:bg-gray-900">
       {messages.length === 0 && !hasStreamContent && !storeIsStreaming && !error && (
         <div className="flex flex-col items-center justify-center h-full text-center text-gray-400 dark:text-gray-500">
           <svg
