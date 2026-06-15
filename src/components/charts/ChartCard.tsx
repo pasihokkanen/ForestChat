@@ -229,8 +229,6 @@ export default function ChartCard({ tab }: ChartCardProps) {
   const setSelectedYear = useForestStore((s) => s.setSelectedYear);
   const setHighlightedStands = useForestStore((s) => s.setHighlightedStands);
   const language = useForestStore((s) => s.language) ?? "en";
-  // DEBUG: log chart config
-  console.log("[ChartCard] tab:", { id: tab.id, type: tab.type, y_key: tab.y_key, y_key2: tab.y_key2, color_key: tab.color_key, language, nameSample: tab.data?.[0] ? Object.keys(tab.data[0]).slice(0, 5) : [] });
   const yearAxisLabel = getYearAxisLabel(language);
 
   // ── Custom tooltip (closure inside ChartCard — has access to `tab` and `language`) ──
@@ -442,6 +440,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <Bar
               dataKey={tab.y_key}
               fill="#4CAF50"
+              name={FIELD_DISPLAY[tab.y_key]?.[language] ?? tab.y_key}
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
               radius={[4, 4, 0, 0]}
             >
@@ -531,7 +530,6 @@ export default function ChartCard({ tab }: ChartCardProps) {
         };
       };
       const { pivoted, stackKeys, dual, skipIncome = new Set<string>(), skipCost = new Set<string>() } = pivotStacked();
-      console.log("[ChartCard] stacked_bar dual:", { dual, stackKeys: Array.from(stackKeys), skipIncome: Array.from(skipIncome), skipCost: Array.from(skipCost), pivotedKeys: pivoted[0] ? Object.keys(pivoted[0]).filter(k => !k.startsWith('_')).join(', ') : 'none' });
 
       // Color palette for costs (warmer) vs income (greens/blues)
       const COST_COLORS = [
@@ -633,6 +631,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <Tooltip content={<EuroTooltip />} />
             <Bar
               dataKey={tab.y_key}
+              name={FIELD_DISPLAY[tab.y_key]?.[language] ?? tab.y_key}
               fill="#FF9800"
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
               radius={[0, 4, 4, 0]}
@@ -739,6 +738,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <Line
               type="monotone"
               dataKey={tab.y_key}
+              name={FIELD_DISPLAY[tab.y_key]?.[language] ?? tab.y_key}
               stroke="#2196F3"
               strokeWidth={2}
               activeDot={{ r: 8 }}
@@ -752,6 +752,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
               <Line
                 type="monotone"
                 dataKey={tab.y_key2}
+                name={FIELD_DISPLAY[tab.y_key2]?.[language] ?? tab.y_key2}
                 stroke="#FF9800"
                 strokeWidth={2}
                 activeDot={{ r: 6 }}
@@ -789,6 +790,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <Area
               type="monotone"
               dataKey={tab.y_key}
+              name={FIELD_DISPLAY[tab.y_key]?.[language] ?? tab.y_key}
               stroke="#4CAF50"
               fill="#4CAF50"
               fillOpacity={0.3}
@@ -879,7 +881,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <YAxis {...yAxisProps(tab.y_key, tab.y_key2)} />
             <Tooltip content={<EuroTooltip />} />
             <Legend />
-            <Bar dataKey={tab.y_key} fill="#4CAF50" radius={[4, 4, 0, 0]}
+            <Bar dataKey={tab.y_key} name={FIELD_DISPLAY[tab.y_key]?.[language] ?? tab.y_key} fill="#4CAF50" radius={[4, 4, 0, 0]}
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
             >
               {translatedData.map((entry, i) => (
@@ -892,6 +894,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <Line
               type="monotone"
               dataKey={tab.y_key2 ?? tab.y_key}
+              name={FIELD_DISPLAY[tab.y_key2 ?? tab.y_key]?.[language] ?? (tab.y_key2 ?? tab.y_key)}
               stroke="#2196F3"
               strokeWidth={2}
               dot={(props: Record<string, unknown>) => {
@@ -921,6 +924,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
             <Bar dataKey="_wfBase" stackId="wf" fill="transparent" />
             <Bar
               dataKey={tab.y_key}
+              name={FIELD_DISPLAY[tab.y_key]?.[language] ?? tab.y_key}
               stackId="wf"
               shape={<WaterfallBar />}
               onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
