@@ -633,6 +633,7 @@ export default function OperationList({ map }: OperationListProps) {
       <div className="flex-1 min-h-0">
         {listHeight > 0 && (
           <List
+            key={displayRows.length}
             defaultHeight={listHeight}
             onResize={(size) => setListHeight(size.height)}
             rowComponent={OperationRow}
