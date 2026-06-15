@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useForestStore } from "@/lib/store";
 import { displayDevClass, displaySpecies, displayOp, operationListLabels } from "@/lib/i18n";
-import { FixedSizeList as List } from "react-window";
+import { List } from "react-window";
 import type maplibregl from "maplibre-gl";
 
 interface OperationListProps {
@@ -49,6 +49,84 @@ const COL_WIDTHS: Record<string, number> = {
   colHeight: 45, colDiameter: 45, colRemoval: 55, colIncome: 70,
   colCost: 70, colDevClass: 120,
 };
+
+interface OpRowData {
+  op: typeof import("@/types/database").Operation;
+  comp: typeof import("@/types/database").Compartment | undefined;
+  pre: ReturnType<typeof import("./OperationList").parsePreState>;
+}
+
+function OperationRow({
+  index,
+  style,
+  rows,
+  highlightedStandIds,
+  highlightedOperationIds,
+  onRowClick,
+  onShowOnMap,
+  language,
+  showOnMapLabel,
+}: {
+  index: number;
+  style: React.CSSProperties;
+  rows: { op: { id: string; type: string; year: number; removal_pct?: number | null; income_eur?: number | null; cost_eur?: number | null; notes?: string | null }; comp?: { stand_id?: string; age_years?: number; area_ha?: number; volume_m3?: number; main_species?: string; development_class?: string } | null; pre?: { age_years?: number; area_ha?: number; volume_m3?: number; stem_count_per_ha?: number; mean_height?: number; mean_diameter?: number; main_species?: string; development_class?: string } | null }[];
+  highlightedStandIds: string[];
+  highlightedOperationIds: string[];
+  onRowClick: (standId: string, opId: string, e: React.MouseEvent) => void;
+  onShowOnMap: (standId: string) => void;
+  language: string;
+  showOnMapLabel: string;
+}) {
+  const { op, comp, pre } = rows[index];
+  const standId = comp?.stand_id ?? "";
+  const isHighlighted = highlightedStandIds.includes(standId) || highlightedOperationIds.includes(op.id);
+
+  return (
+    <div
+      style={style}
+      className={`flex items-center cursor-pointer border-b border-gray-100 dark:border-gray-800 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50 ${
+        isHighlighted ? "bg-blue-50 dark:bg-blue-900/20" : ""
+      }`}
+      onClick={(e) => onRowClick(standId, op.id, e as unknown as React.MouseEvent)}
+    >
+      <div className="px-2 py-1 font-mono text-xs w-[60px] shrink-0">{standId}</div>
+      <div className="px-2 py-1 text-xs w-[120px] shrink-0">{displayOp(op.type, language)}</div>
+      <div className="px-2 py-1 text-right w-[55px] shrink-0">{op.year}</div>
+      <div className="px-2 py-1 text-right w-[45px] shrink-0">{pre?.age_years ?? comp?.age_years ?? ""}</div>
+      <div className="px-2 py-1 w-[90px] shrink-0">{displaySpecies(pre?.main_species ?? comp?.main_species ?? "", language) || "—"}</div>
+      <div className="px-2 py-1 text-right w-[55px] shrink-0">{(pre?.area_ha ?? comp?.area_ha ?? 0).toFixed(1)}</div>
+      <div className="px-2 py-1 text-right w-[70px] shrink-0">{Math.round(pre?.volume_m3 ?? comp?.volume_m3 ?? 0).toLocaleString()}</div>
+      <div className="px-2 py-1 text-right w-[55px] shrink-0">{pre?.stem_count_per_ha != null ? Math.round(pre.stem_count_per_ha).toLocaleString() : "—"}</div>
+      <div className="px-2 py-1 text-right w-[45px] shrink-0">{pre?.mean_height != null ? pre.mean_height.toFixed(1) : "—"}</div>
+      <div className="px-2 py-1 text-right w-[45px] shrink-0">{pre?.mean_diameter != null ? pre.mean_diameter.toFixed(1) : "—"}</div>
+      <div className="px-2 py-1 text-right w-[55px] shrink-0">
+        {op.removal_pct != null ? `${op.removal_pct}%` : "—"}
+      </div>
+      <div className="px-2 py-1 text-right text-green-600 dark:text-green-400 w-[70px] shrink-0">
+        {op.income_eur != null && op.income_eur !== 0
+          ? `+${Math.round(op.income_eur).toLocaleString()}`
+          : ""}
+      </div>
+      <div className="px-2 py-1 text-right text-orange-600 dark:text-orange-400 w-[70px] shrink-0">
+        {op.cost_eur != null && op.cost_eur !== 0
+          ? `−${Math.round(op.cost_eur).toLocaleString()}`
+          : ""}
+      </div>
+      <div className="px-2 py-1 text-xs w-[120px] truncate shrink-0">
+        {pre?.development_class ? displayDevClass(pre.development_class, language) : comp?.development_class ? displayDevClass(comp.development_class, language) : ""}
+      </div>
+      <div className="px-1 py-1 text-right w-[32px] shrink-0">
+        <button
+          onClick={(e) => { e.stopPropagation(); onShowOnMap(standId); }}
+          className="text-xs text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+          title={showOnMapLabel}
+        >
+          📍
+        </button>
+      </div>
+    </div>
+  );
+}
 
 const naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 function naturalCompare(a: unknown, b: unknown): number {
@@ -156,17 +234,7 @@ export default function OperationList({ map }: OperationListProps) {
     }
   }, [aiOperationFilters]);
 
-  const listContainerRef = useRef<HTMLDivElement>(null);
   const [listHeight, setListHeight] = useState(400);
-  useEffect(() => {
-    const el = listContainerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) setListHeight(entry.contentRect.height);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 
   const [typeOpen, setTypeOpen] = useState(false);
   const [speciesOpen, setSpeciesOpen] = useState(false);
@@ -550,69 +618,24 @@ export default function OperationList({ map }: OperationListProps) {
         ))}
         <div className="w-[32px] shrink-0"></div>
       </div>
-      <div ref={listContainerRef} className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0">
         {listHeight > 0 && (
           <List
-            height={listHeight}
-            width="100%"
-            itemCount={displayRows.length}
-            itemSize={32}
-          >
-            {({ index, style }: { index: number; style: React.CSSProperties }) => {
-              const { op, comp, pre } = displayRows[index];
-              const standId = comp?.stand_id ?? "";
-              const isStandHighlighted = highlightedStandIds.includes(standId);
-              const isOpHighlighted = highlightedOperationIds.includes(op.id);
-              const isHighlighted = isStandHighlighted || isOpHighlighted;
-
-              return (
-                <div
-                  style={style}
-                  key={op.id}
-                  className={`flex items-center cursor-pointer border-b border-gray-100 dark:border-gray-800 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50 ${
-                    isHighlighted ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                  }`}
-                  onClick={(e) => handleOperationRowClick(standId, op.id, e as unknown as React.MouseEvent)}
-                >
-                  <div className="px-2 py-1 font-mono text-xs w-[60px] shrink-0">{standId}</div>
-                  <div className="px-2 py-1 text-xs w-[120px] shrink-0">{displayOp(op.type, language)}</div>
-                  <div className="px-2 py-1 text-right w-[55px] shrink-0">{op.year}</div>
-                  <div className="px-2 py-1 text-right w-[45px] shrink-0">{pre?.age_years ?? comp?.age_years ?? ""}</div>
-                  <div className="px-2 py-1 w-[90px] shrink-0">{displaySpecies(pre?.main_species ?? comp?.main_species ?? "", language) || "—"}</div>
-                  <div className="px-2 py-1 text-right w-[55px] shrink-0">{(pre?.area_ha ?? comp?.area_ha ?? 0).toFixed(1)}</div>
-                  <div className="px-2 py-1 text-right w-[70px] shrink-0">{Math.round(pre?.volume_m3 ?? comp?.volume_m3 ?? 0).toLocaleString()}</div>
-                  <div className="px-2 py-1 text-right w-[55px] shrink-0">{pre?.stem_count_per_ha != null ? Math.round(pre.stem_count_per_ha).toLocaleString() : "—"}</div>
-                  <div className="px-2 py-1 text-right w-[45px] shrink-0">{pre?.mean_height != null ? pre.mean_height.toFixed(1) : "—"}</div>
-                  <div className="px-2 py-1 text-right w-[45px] shrink-0">{pre?.mean_diameter != null ? pre.mean_diameter.toFixed(1) : "—"}</div>
-                  <div className="px-2 py-1 text-right w-[55px] shrink-0">
-                    {op.removal_pct != null ? `${op.removal_pct}%` : "—"}
-                  </div>
-                  <div className="px-2 py-1 text-right text-green-600 dark:text-green-400 w-[70px] shrink-0">
-                    {op.income_eur != null && op.income_eur !== 0
-                      ? `+${Math.round(op.income_eur).toLocaleString()}`
-                      : ""}
-                  </div>
-                  <div className="px-2 py-1 text-right text-orange-600 dark:text-orange-400 w-[70px] shrink-0">
-                    {op.cost_eur != null && op.cost_eur !== 0
-                      ? `−${Math.round(op.cost_eur).toLocaleString()}`
-                      : ""}
-                  </div>
-                  <div className="px-2 py-1 text-xs w-[120px] truncate shrink-0">
-                    {pre?.development_class ? displayDevClass(pre.development_class, language) : comp?.development_class ? displayDevClass(comp.development_class, language) : ""}
-                  </div>
-                  <div className="px-1 py-1 text-right w-[32px] shrink-0">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleShowOnMap(standId); }}
-                      className="text-xs text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-                      title={L.showOnMap}
-                    >
-                      📍
-                    </button>
-                  </div>
-                </div>
-              );
+            defaultHeight={listHeight}
+            onResize={(size) => setListHeight(size.height)}
+            rowComponent={OperationRow}
+            rowCount={displayRows.length}
+            rowHeight={32}
+            rowProps={{
+              rows: displayRows,
+              highlightedStandIds,
+              highlightedOperationIds,
+              onRowClick: handleOperationRowClick,
+              onShowOnMap: handleShowOnMap,
+              language,
+              showOnMapLabel: L.showOnMap,
             }}
-          </List>
+          />
         )}
         {displayRows.length === 0 && hasActiveFilters && (
           <div className="flex items-center justify-center h-32 text-gray-400 text-sm">
