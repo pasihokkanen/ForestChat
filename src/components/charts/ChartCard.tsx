@@ -229,6 +229,8 @@ export default function ChartCard({ tab }: ChartCardProps) {
   const setSelectedYear = useForestStore((s) => s.setSelectedYear);
   const setHighlightedStands = useForestStore((s) => s.setHighlightedStands);
   const language = useForestStore((s) => s.language) ?? "en";
+  // DEBUG: log chart config
+  console.log("[ChartCard] tab:", { id: tab.id, type: tab.type, y_key: tab.y_key, y_key2: tab.y_key2, color_key: tab.color_key, language, nameSample: tab.data?.[0] ? Object.keys(tab.data[0]).slice(0, 5) : [] });
   const yearAxisLabel = getYearAxisLabel(language);
 
   // ── Custom tooltip (closure inside ChartCard — has access to `tab` and `language`) ──
@@ -529,6 +531,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
         };
       };
       const { pivoted, stackKeys, dual, skipIncome = new Set<string>(), skipCost = new Set<string>() } = pivotStacked();
+      console.log("[ChartCard] stacked_bar dual:", { dual, stackKeys: Array.from(stackKeys), skipIncome: Array.from(skipIncome), skipCost: Array.from(skipCost), pivotedKeys: pivoted[0] ? Object.keys(pivoted[0]).filter(k => !k.startsWith('_')).join(', ') : 'none' });
 
       // Color palette for costs (warmer) vs income (greens/blues)
       const COST_COLORS = [
