@@ -42,10 +42,12 @@ export default function PanelResizer({ onResize }: PanelResizerProps) {
 
   return (
     <div
-      className="w-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-blue-400 dark:hover:bg-blue-500 cursor-col-resize shrink-0 transition-colors relative"
+      className="group w-4 shrink-0 cursor-col-resize relative flex items-center justify-center"
       onPointerDown={handlePointerDown}
       role="separator"
       aria-orientation="vertical"
-    />
+    >
+      <div className="w-px h-full bg-gray-300 dark:bg-gray-600 group-hover:w-[3px] group-hover:bg-blue-400 dark:group-hover:bg-blue-500 transition-all duration-200" />
+    </div>
   );
 }
