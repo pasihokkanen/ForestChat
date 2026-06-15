@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useForestStore } from "@/lib/store";
 import { displayDevClass, displaySpecies, displayOp, operationListLabels } from "@/lib/i18n";
+import { FixedSizeList as List } from "react-window";
 import type maplibregl from "maplibre-gl";
 
 interface OperationListProps {
@@ -40,6 +41,13 @@ const COL_KEY_TO_DATA: Record<string, string> = {
   colIncome: "income_eur",
   colCost: "cost_eur",
   colDevClass: "development_class",
+};
+
+const COL_WIDTHS: Record<string, number> = {
+  colStand: 60, colType: 120, colYear: 55, colAge: 45,
+  colSpecies: 90, colArea: 55, colVolume: 70, colStems: 55,
+  colHeight: 45, colDiameter: 45, colRemoval: 55, colIncome: 70,
+  colCost: 70, colDevClass: 120,
 };
 
 const naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
@@ -148,12 +156,16 @@ export default function OperationList({ map }: OperationListProps) {
     }
   }, [aiOperationFilters]);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const listContainerRef = useRef<HTMLDivElement>(null);
+  const [listHeight, setListHeight] = useState(400);
   useEffect(() => {
-    const el = scrollRef.current;
-    if (el && opPersist.scrollTop > 0) {
-      el.scrollTop = opPersist.scrollTop;
-    }
+    const el = listContainerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) setListHeight(entry.contentRect.height);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
 
   const [typeOpen, setTypeOpen] = useState(false);
@@ -523,69 +535,72 @@ export default function OperationList({ map }: OperationListProps) {
       </div>
 
       {/* Table */}
-      <div
-        className="flex-1 overflow-auto min-h-0"
-        ref={scrollRef}
-        onScroll={(e) => { opPersist.scrollTop = (e.target as HTMLDivElement).scrollTop; }}
-      >
-        <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-gray-100 dark:bg-gray-800 z-10">
-            <tr>
-              {OP_COLUMN_KEYS.map((colKey) => (
-                <th
-                  key={colKey}
-                  className="px-2 py-1.5 text-left text-xs font-medium text-gray-600 dark:text-gray-400 cursor-pointer hover:text-gray-900 dark:hover:text-gray-200 select-none"
-                  onClick={() => handleSort(colKey)}
-                >
-                  {(L as unknown as Record<string, string>)[colKey]}
-                  {sortKey === colKey && (sortDir === "asc" ? " ▲" : " ▼")}
-                </th>
-              ))}
-              <th className="w-16 px-1 py-1.5 text-right"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {displayRows.map(({ op, comp, pre }) => {
+      {/* Column headers */}
+      <div className="flex items-center shrink-0 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-xs font-medium text-gray-600 dark:text-gray-400 select-none">
+        {OP_COLUMN_KEYS.map((colKey) => (
+          <div
+            key={colKey}
+            className="px-2 py-1.5 cursor-pointer hover:text-gray-900 dark:hover:text-gray-200"
+            style={{ width: COL_WIDTHS[colKey] ?? 80 }}
+            onClick={() => handleSort(colKey)}
+          >
+            {(L as unknown as Record<string, string>)[colKey]}
+            {sortKey === colKey && (sortDir === "asc" ? " ▲" : " ▼")}
+          </div>
+        ))}
+        <div className="w-[32px] shrink-0"></div>
+      </div>
+      <div ref={listContainerRef} className="flex-1 min-h-0">
+        {listHeight > 0 && (
+          <List
+            height={listHeight}
+            width="100%"
+            itemCount={displayRows.length}
+            itemSize={32}
+          >
+            {({ index, style }: { index: number; style: React.CSSProperties }) => {
+              const { op, comp, pre } = displayRows[index];
               const standId = comp?.stand_id ?? "";
               const isStandHighlighted = highlightedStandIds.includes(standId);
               const isOpHighlighted = highlightedOperationIds.includes(op.id);
               const isHighlighted = isStandHighlighted || isOpHighlighted;
 
               return (
-                <tr
+                <div
+                  style={style}
                   key={op.id}
-                  className={`cursor-pointer border-b border-gray-100 dark:border-gray-800 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50 ${
+                  className={`flex items-center cursor-pointer border-b border-gray-100 dark:border-gray-800 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50 ${
                     isHighlighted ? "bg-blue-50 dark:bg-blue-900/20" : ""
                   }`}
-                  onClick={(e) => handleOperationRowClick(standId, op.id, e)}
+                  onClick={(e) => handleOperationRowClick(standId, op.id, e as unknown as React.MouseEvent)}
                 >
-                  <td className="px-2 py-1 font-mono text-xs">{standId}</td>
-                  <td className="px-2 py-1 text-xs">{displayOp(op.type, language)}</td>
-                  <td className="px-2 py-1 text-right">{op.year}</td>
-                  <td className="px-2 py-1 text-right">{pre?.age_years ?? comp?.age_years ?? ""}</td>
-                  <td className="px-2 py-1">{displaySpecies(pre?.main_species ?? comp?.main_species ?? "", language) || "—"}</td>
-                  <td className="px-2 py-1 text-right">{(pre?.area_ha ?? comp?.area_ha ?? 0).toFixed(1)}</td>
-                  <td className="px-2 py-1 text-right">{Math.round(pre?.volume_m3 ?? comp?.volume_m3 ?? 0).toLocaleString()}</td>
-                  <td className="px-2 py-1 text-right">{pre?.stem_count_per_ha != null ? Math.round(pre.stem_count_per_ha).toLocaleString() : "—"}</td>
-                  <td className="px-2 py-1 text-right">{pre?.mean_height != null ? pre.mean_height.toFixed(1) : "—"}</td>
-                  <td className="px-2 py-1 text-right">{pre?.mean_diameter != null ? pre.mean_diameter.toFixed(1) : "—"}</td>
-                  <td className="px-2 py-1 text-right">
+                  <div className="px-2 py-1 font-mono text-xs w-[60px] shrink-0">{standId}</div>
+                  <div className="px-2 py-1 text-xs w-[120px] shrink-0">{displayOp(op.type, language)}</div>
+                  <div className="px-2 py-1 text-right w-[55px] shrink-0">{op.year}</div>
+                  <div className="px-2 py-1 text-right w-[45px] shrink-0">{pre?.age_years ?? comp?.age_years ?? ""}</div>
+                  <div className="px-2 py-1 w-[90px] shrink-0">{displaySpecies(pre?.main_species ?? comp?.main_species ?? "", language) || "—"}</div>
+                  <div className="px-2 py-1 text-right w-[55px] shrink-0">{(pre?.area_ha ?? comp?.area_ha ?? 0).toFixed(1)}</div>
+                  <div className="px-2 py-1 text-right w-[70px] shrink-0">{Math.round(pre?.volume_m3 ?? comp?.volume_m3 ?? 0).toLocaleString()}</div>
+                  <div className="px-2 py-1 text-right w-[55px] shrink-0">{pre?.stem_count_per_ha != null ? Math.round(pre.stem_count_per_ha).toLocaleString() : "—"}</div>
+                  <div className="px-2 py-1 text-right w-[45px] shrink-0">{pre?.mean_height != null ? pre.mean_height.toFixed(1) : "—"}</div>
+                  <div className="px-2 py-1 text-right w-[45px] shrink-0">{pre?.mean_diameter != null ? pre.mean_diameter.toFixed(1) : "—"}</div>
+                  <div className="px-2 py-1 text-right w-[55px] shrink-0">
                     {op.removal_pct != null ? `${op.removal_pct}%` : "—"}
-                  </td>
-                  <td className="px-2 py-1 text-right text-green-600 dark:text-green-400">
+                  </div>
+                  <div className="px-2 py-1 text-right text-green-600 dark:text-green-400 w-[70px] shrink-0">
                     {op.income_eur != null && op.income_eur !== 0
                       ? `+${Math.round(op.income_eur).toLocaleString()}`
                       : ""}
-                  </td>
-                  <td className="px-2 py-1 text-right text-orange-600 dark:text-orange-400">
+                  </div>
+                  <div className="px-2 py-1 text-right text-orange-600 dark:text-orange-400 w-[70px] shrink-0">
                     {op.cost_eur != null && op.cost_eur !== 0
                       ? `−${Math.round(op.cost_eur).toLocaleString()}`
                       : ""}
-                  </td>
-                  <td className="px-2 py-1 text-xs">
+                  </div>
+                  <div className="px-2 py-1 text-xs w-[120px] truncate shrink-0">
                     {pre?.development_class ? displayDevClass(pre.development_class, language) : comp?.development_class ? displayDevClass(comp.development_class, language) : ""}
-                  </td>
-                  <td className="px-1 py-1 text-right">
+                  </div>
+                  <div className="px-1 py-1 text-right w-[32px] shrink-0">
                     <button
                       onClick={(e) => { e.stopPropagation(); handleShowOnMap(standId); }}
                       className="text-xs text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
@@ -593,12 +608,12 @@ export default function OperationList({ map }: OperationListProps) {
                     >
                       📍
                     </button>
-                  </td>
-                </tr>
+                  </div>
+                </div>
               );
-            })}
-          </tbody>
-        </table>
+            }}
+          </List>
+        )}
         {displayRows.length === 0 && hasActiveFilters && (
           <div className="flex items-center justify-center h-32 text-gray-400 text-sm">
             {L.emptyNoMatch}
