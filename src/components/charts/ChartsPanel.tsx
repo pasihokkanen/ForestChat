@@ -47,7 +47,7 @@ export default function ChartsPanel() {
 
   return (
     <div
-      className={`flex flex-col h-full bg-gradient-to-b from-gray-50 to-white dark:from-gray-900 dark:to-gray-950 ${
+      className={`flex flex-col h-full bg-gradient-to-b from-gray-100 to-white dark:from-gray-800 dark:to-gray-950 ${
         chartsFullscreen ? "" : ""
       }`}
     >
