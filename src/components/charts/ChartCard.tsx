@@ -274,6 +274,13 @@ export default function ChartCard({ tab }: ChartCardProps) {
       const dk = entry.dataKey as string | undefined;
       const isYKey = dk === tab.y_key || dk === tab.y_key2;
       const isXKey = dk === effectiveXKey;
+
+      // Strip dual-stack suffix (e.g. "Harvennus – Tulot" → "Tulot")
+      const SEP = " \u2013 ";
+      if (!isYKey && !isXKey && name.includes(SEP)) {
+        return name.split(SEP).pop()!;
+      }
+
       if (!isYKey && !isXKey) return name; // already translated category name
       return FIELD_DISPLAY[name]?.[language] ?? name;
     }
@@ -552,7 +559,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
                         dataKey={`${cat}_Income`}
                         stackId="income"
                         fill={CHART_COLORS[i % CHART_COLORS.length]}
-                        name={`${cat}`}
+                        name={`${cat} – ${FIELD_DISPLAY.income[language]}`}
                         onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
                       >
                         {pivoted.map((entry, j) => (
@@ -571,7 +578,7 @@ export default function ChartCard({ tab }: ChartCardProps) {
                         dataKey={`${cat}_Cost`}
                         stackId="cost"
                         fill={COST_COLORS[i % COST_COLORS.length]}
-                        name={`${cat}`}
+                        name={`${cat} – ${FIELD_DISPLAY.cost[language]}`}
                         onClick={(data) => handleChartClick(data as unknown as Record<string, unknown>)}
                       >
                         {pivoted.map((entry, j) => (
