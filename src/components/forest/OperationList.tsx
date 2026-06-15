@@ -631,25 +631,23 @@ export default function OperationList({ map }: OperationListProps) {
         <div className="w-[32px] shrink-0"></div>
       </div>
       <div className="flex-1 min-h-0">
-        {listHeight > 0 && (
-          <List
-            key={displayRows.length}
-            defaultHeight={listHeight}
-            onResize={(size) => setListHeight(size.height)}
-            rowComponent={OperationRow}
-            rowCount={displayRows.length}
-            rowHeight={32}
-            rowProps={{
-              rows: displayRows,
-              highlightedStandIds,
-              highlightedOperationIds,
-              onRowClick: handleOperationRowClick,
-              onShowOnMap: handleShowOnMap,
-              language,
-              showOnMapLabel: L.showOnMap,
-            }}
-          />
-        )}
+        <List
+          key={displayRows.length}
+          defaultHeight={Math.max(listHeight, 100)}
+          onResize={(size) => setListHeight(size.height)}
+          rowComponent={OperationRow}
+          rowCount={displayRows.length}
+          rowHeight={32}
+          rowProps={{
+            rows: displayRows,
+            highlightedStandIds,
+            highlightedOperationIds,
+            onRowClick: handleOperationRowClick,
+            onShowOnMap: handleShowOnMap,
+            language,
+            showOnMapLabel: L.showOnMap,
+          }}
+        />
         {displayRows.length === 0 && hasActiveFilters && (
           <div className="flex items-center justify-center h-32 text-gray-400 text-sm">
             {L.emptyNoMatch}
