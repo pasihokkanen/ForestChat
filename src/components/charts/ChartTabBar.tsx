@@ -23,7 +23,7 @@ export default function ChartTabBar({
   const displayTitle = (t: { title_en: string; title_fi?: string | null }) =>
     language === "fi" && t.title_fi ? t.title_fi : t.title_en;
   return (
-    <div className="flex items-center h-11 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 shrink-0">
+    <div className="flex items-center h-11 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-b from-gray-100 to-gray-50 dark:from-gray-800 dark:to-gray-800/50 shrink-0">
       <div className="flex-1 flex overflow-x-auto scrollbar-hide">
         {tabs.map((tab) => (
           <button

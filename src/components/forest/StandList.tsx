@@ -363,7 +363,7 @@ export default function StandList({ map }: StandListProps) {
   return (
     <div className="flex flex-col h-full bg-white dark:bg-gray-900">
       {/* Filter bar */}
-      <div className="shrink-0 border-b border-gray-200 dark:border-gray-700 p-2 space-y-2 bg-gray-50 dark:bg-gray-800/50 rounded-t-lg">
+      <div className="shrink-0 border-b border-gray-200 dark:border-gray-700 p-2 space-y-2 bg-gradient-to-b from-gray-100 to-gray-50 dark:from-gray-800 dark:to-gray-800/50 rounded-t-lg">
         <div className="flex flex-wrap gap-2 items-center">
           {/* Species multi-select */}
           <div className="relative" ref={speciesRef}>

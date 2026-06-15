@@ -11,7 +11,7 @@ export default function ChatHeader() {
   useEffect(() => { setMounted(true); }, []);
 
   return (
-<div className="relative flex items-center justify-between px-4 h-11 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 shrink-0">
+<div className="relative flex items-center justify-between px-4 h-11 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-b from-gray-100 to-gray-50 dark:from-gray-800 dark:to-gray-900 shrink-0">
       <div className="flex items-center gap-2 min-w-0">
         <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 whitespace-nowrap">
           {mounted ? appName(lang) : "ForestChat"}

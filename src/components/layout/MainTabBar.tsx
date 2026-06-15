@@ -19,7 +19,7 @@ export default function MainTabBar() {
   useEffect(() => { setMounted(true); }, []);
 
   return (
-    <div className="flex items-center h-11 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 shrink-0">
+    <div className="flex items-center h-11 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-b from-gray-100 to-gray-50 dark:from-gray-800 dark:to-gray-800/50 shrink-0">
       {TAB_DEFS.map((tab) => (
         <button
           key={tab.id}
