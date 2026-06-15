@@ -30,7 +30,7 @@ export default function ChartTabBar({
             key={tab.id}
             title={displayTitle(tab)}
             onClick={() => onSelect(tab.id)}
-            className={`flex items-center gap-1 px-3 py-2 text-xs rounded-t-lg whitespace-nowrap shrink-0 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 ${
+            className={`flex items-center gap-1 px-3 py-2 text-xs rounded-t-lg whitespace-nowrap shrink-0 hover:bg-gray-100 dark:hover:bg-gray-700 transition-[background-color,color,box-shadow] duration-200 ${
               activeId === tab.id
                 ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 font-medium border-b-2 border-b-blue-600 dark:border-b-blue-400"
                 : "text-gray-600 dark:text-gray-400"

@@ -24,7 +24,7 @@ export default function MainTabBar() {
         <button
           key={tab.id}
           onClick={() => setActiveMainTab(tab.id)}
-          className={`flex items-center gap-1.5 px-4 py-2 text-sm rounded-t-lg transition-all duration-200 hover:bg-gray-100 dark:hover:bg-gray-700 ${
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm rounded-t-lg transition-[background-color,color,box-shadow] duration-200 hover:bg-gray-100 dark:hover:bg-gray-700 ${
             activeMainTab === tab.id
               ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 font-medium border-b-2 border-b-blue-600 dark:border-b-blue-400"
               : "text-gray-600 dark:text-gray-400"
