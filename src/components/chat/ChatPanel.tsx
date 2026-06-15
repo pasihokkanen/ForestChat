@@ -224,7 +224,7 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
   );
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-gray-900">
+    <div className="flex flex-col h-full bg-gradient-to-b from-gray-50 to-white dark:from-gray-900 dark:to-gray-950">
       <ChatHeader />
       <ChatMessages
         messages={messages}
