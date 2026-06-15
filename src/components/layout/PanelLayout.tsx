@@ -68,16 +68,17 @@ function TabContainer({ tabs }: { tabs: PanelLayoutTabs }) {
     <div className="flex flex-col flex-1 min-w-0 min-h-0">
       <MainTabBar />
       <div className="flex-1 relative min-h-0">
-        {/* Map tab — always mounted, hidden when inactive */}
-        <div className={activeMainTab === "map" ? "h-full" : "hidden"}>
+        {/* Map tab — always mounted, fade between tabs */}
+        <div className={`absolute inset-0 transition-opacity duration-200 ${activeMainTab === "map" ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
           {tabs.map}
         </div>
-        {/* Stands/Operations tabs — conditionally rendered (no heavy init) */}
+        {/* Stands tab */}
         {activeMainTab === "stands" && (
-          <div className="h-full">{tabs.stands}</div>
+          <div className="h-full animate-fadeIn">{tabs.stands}</div>
         )}
+        {/* Operations tab */}
         {activeMainTab === "operations" && (
-          <div className="h-full">{tabs.operations}</div>
+          <div className="h-full animate-fadeIn">{tabs.operations}</div>
         )}
       </div>
     </div>
