@@ -50,12 +50,6 @@ const COL_WIDTHS: Record<string, number> = {
   colCost: 70, colDevClass: 120,
 };
 
-interface OpRowData {
-  op: typeof import("@/types/database").Operation;
-  comp: typeof import("@/types/database").Compartment | undefined;
-  pre: ReturnType<typeof import("./OperationList").parsePreState>;
-}
-
 function OperationRow({
   index,
   style,
@@ -69,7 +63,7 @@ function OperationRow({
 }: {
   index: number;
   style: React.CSSProperties;
-  rows: { op: { id: string; type: string; year: number; removal_pct?: number | null; income_eur?: number | null; cost_eur?: number | null; notes?: string | null }; comp?: { stand_id?: string; age_years?: number; area_ha?: number; volume_m3?: number; main_species?: string; development_class?: string } | null; pre?: { age_years?: number; area_ha?: number; volume_m3?: number; stem_count_per_ha?: number; mean_height?: number; mean_diameter?: number; main_species?: string; development_class?: string } | null }[];
+  rows: Record<string, unknown>[];
   highlightedStandIds: string[];
   highlightedOperationIds: string[];
   onRowClick: (standId: string, opId: string, e: React.MouseEvent) => void;
@@ -77,9 +71,9 @@ function OperationRow({
   language: string;
   showOnMapLabel: string;
 }) {
-  const { op, comp, pre } = rows[index];
-  const standId = comp?.stand_id ?? "";
-  const isHighlighted = highlightedStandIds.includes(standId) || highlightedOperationIds.includes(op.id);
+  const row = rows[index];
+  const standId = String(row._standId ?? "");
+  const isHighlighted = highlightedStandIds.includes(standId) || highlightedOperationIds.includes(String(row._opId ?? ""));
 
   return (
     <div
@@ -87,33 +81,29 @@ function OperationRow({
       className={`flex items-center cursor-pointer border-b border-gray-100 dark:border-gray-800 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50 ${
         isHighlighted ? "bg-blue-50 dark:bg-blue-900/20" : ""
       }`}
-      onClick={(e) => onRowClick(standId, op.id, e as unknown as React.MouseEvent)}
+      onClick={(e) => onRowClick(standId, String(row._opId ?? ""), e as unknown as React.MouseEvent)}
     >
       <div className="px-2 py-1 font-mono text-xs w-[60px] shrink-0">{standId}</div>
-      <div className="px-2 py-1 text-xs w-[120px] shrink-0">{displayOp(op.type, language)}</div>
-      <div className="px-2 py-1 text-right w-[55px] shrink-0">{op.year}</div>
-      <div className="px-2 py-1 text-right w-[45px] shrink-0">{pre?.age_years ?? comp?.age_years ?? ""}</div>
-      <div className="px-2 py-1 w-[90px] shrink-0">{displaySpecies(pre?.main_species ?? comp?.main_species ?? "", language) || "—"}</div>
-      <div className="px-2 py-1 text-right w-[55px] shrink-0">{(pre?.area_ha ?? comp?.area_ha ?? 0).toFixed(1)}</div>
-      <div className="px-2 py-1 text-right w-[70px] shrink-0">{Math.round(pre?.volume_m3 ?? comp?.volume_m3 ?? 0).toLocaleString()}</div>
-      <div className="px-2 py-1 text-right w-[55px] shrink-0">{pre?.stem_count_per_ha != null ? Math.round(pre.stem_count_per_ha).toLocaleString() : "—"}</div>
-      <div className="px-2 py-1 text-right w-[45px] shrink-0">{pre?.mean_height != null ? pre.mean_height.toFixed(1) : "—"}</div>
-      <div className="px-2 py-1 text-right w-[45px] shrink-0">{pre?.mean_diameter != null ? pre.mean_diameter.toFixed(1) : "—"}</div>
-      <div className="px-2 py-1 text-right w-[55px] shrink-0">
-        {op.removal_pct != null ? `${op.removal_pct}%` : "—"}
+      <div className="px-2 py-1 text-xs w-[120px] shrink-0">{String(row._typeLabel ?? "")}</div>
+      <div className="px-2 py-1 text-right text-xs w-[55px] shrink-0">{String(row._year ?? "")}</div>
+      <div className="px-2 py-1 text-right text-xs w-[45px] shrink-0">{String(row._ageStr ?? "")}</div>
+      <div className="px-2 py-1 text-xs w-[90px] shrink-0">{String(row._speciesLabel ?? "")}</div>
+      <div className="px-2 py-1 text-right text-xs w-[55px] shrink-0">{String(row._areaStr ?? "")}</div>
+      <div className="px-2 py-1 text-right text-xs w-[70px] shrink-0">{String(row._volumeStr ?? "")}</div>
+      <div className="px-2 py-1 text-right text-xs w-[55px] shrink-0">{String(row._stemsStr ?? "")}</div>
+      <div className="px-2 py-1 text-right text-xs w-[45px] shrink-0">{String(row._heightStr ?? "")}</div>
+      <div className="px-2 py-1 text-right text-xs w-[45px] shrink-0">{String(row._diameterStr ?? "")}</div>
+      <div className="px-2 py-1 text-right text-xs w-[55px] shrink-0">
+        {String(row._removalStr ?? "")}
       </div>
-      <div className="px-2 py-1 text-right text-green-600 dark:text-green-400 w-[70px] shrink-0">
-        {op.income_eur != null && op.income_eur !== 0
-          ? `+${Math.round(op.income_eur).toLocaleString()}`
-          : ""}
+      <div className="px-2 py-1 text-right text-xs text-green-600 dark:text-green-400 w-[70px] shrink-0">
+        {String(row._incomeStr ?? "")}
       </div>
-      <div className="px-2 py-1 text-right text-orange-600 dark:text-orange-400 w-[70px] shrink-0">
-        {op.cost_eur != null && op.cost_eur !== 0
-          ? `−${Math.round(op.cost_eur).toLocaleString()}`
-          : ""}
+      <div className="px-2 py-1 text-right text-xs text-orange-600 dark:text-orange-400 w-[70px] shrink-0">
+        {String(row._costStr ?? "")}
       </div>
       <div className="px-2 py-1 text-xs w-[120px] truncate shrink-0">
-        {pre?.development_class ? displayDevClass(pre.development_class, language) : comp?.development_class ? displayDevClass(comp.development_class, language) : ""}
+        {String(row._devClassLabel ?? "")}
       </div>
       <div className="px-1 py-1 text-right w-[32px] shrink-0">
         <button
@@ -459,8 +449,30 @@ export default function OperationList({ map }: OperationListProps) {
       return 0;
     });
 
-    return filtered;
-  }, [operations, compMap, yearFrom, yearTo, typeFilter, speciesFilter, standFilter, globalFilter, sortKey, sortDir]);
+    return filtered.map((row) => {
+      const pre = row.pre;
+      const comp = row.comp;
+      const standId = comp?.stand_id ?? "";
+      return {
+        ...row,
+        _standId: standId,
+        _opId: row.op.id,
+        _typeLabel: displayOp(row.op.type, language),
+        _year: row.op.year,
+        _ageStr: pre?.age_years != null ? String(pre.age_years) : comp?.age_years != null ? String(comp.age_years) : "",
+        _speciesLabel: displaySpecies(pre?.main_species ?? comp?.main_species ?? "", language) || "—",
+        _areaStr: (pre?.area_ha ?? comp?.area_ha ?? 0).toFixed(1),
+        _volumeStr: Math.round(pre?.volume_m3 ?? comp?.volume_m3 ?? 0).toLocaleString(),
+        _stemsStr: pre?.stem_count_per_ha != null ? Math.round(pre.stem_count_per_ha).toLocaleString() : "—",
+        _heightStr: pre?.mean_height != null ? pre.mean_height.toFixed(1) : "—",
+        _diameterStr: pre?.mean_diameter != null ? pre.mean_diameter.toFixed(1) : "—",
+        _removalStr: row.op.removal_pct != null ? `${row.op.removal_pct}%` : "—",
+        _incomeStr: row.op.income_eur != null && row.op.income_eur !== 0 ? `+${Math.round(row.op.income_eur).toLocaleString()}` : "",
+        _costStr: row.op.cost_eur != null && row.op.cost_eur !== 0 ? `−${Math.round(row.op.cost_eur).toLocaleString()}` : "",
+        _devClassLabel: pre?.development_class ? displayDevClass(pre.development_class, language) : comp?.development_class ? displayDevClass(comp.development_class, language) : "",
+      };
+    });
+  }, [operations, compMap, yearFrom, yearTo, typeFilter, speciesFilter, standFilter, globalFilter, sortKey, sortDir, language]);
 
   if (operations.length === 0) {
     return (
