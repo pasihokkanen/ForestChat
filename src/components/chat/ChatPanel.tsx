@@ -226,17 +226,14 @@ export default function ChatPanel({ forestId }: ChatPanelProps) {
   return (
     <div className="flex flex-col h-full bg-gradient-to-b from-gray-100 to-white dark:from-gray-800 dark:to-gray-950">
       <ChatHeader />
-      {/* Messages area with floating tool bar overlay */}
-      <div className="flex-1 relative min-h-0">
-        <ChatMessages
-          messages={messages}
-          streamingContent={streamingContent}
-          isStreaming={isStreaming}
-          toolCalls={toolCalls}
-          error={error}
-        />
-        <ToolCallBar toolCalls={toolCalls} language={language ?? "en"} />
-      </div>
+      <ChatMessages
+        messages={messages}
+        streamingContent={streamingContent}
+        isStreaming={isStreaming}
+        toolCalls={toolCalls}
+        error={error}
+      />
+      <ToolCallBar toolCalls={toolCalls} language={language ?? "en"} />
       <ChatInput onSend={handleSend} disabled={isStreaming} />
     </div>
   );
