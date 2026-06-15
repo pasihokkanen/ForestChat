@@ -69,9 +69,9 @@ export default function ChartsPanel() {
       )}
       <div className="flex-1 p-2 overflow-hidden" style={{ minHeight: 200 }}>
         {activeTab ? (
-          <ChartCard key={activeTab.id} tab={activeTab} />
+          <div key={activeTab.id} className="h-full animate-fadeIn"><ChartCard tab={activeTab} /></div>
         ) : (
-          <div className="flex items-center justify-center h-full text-gray-400 dark:text-gray-500 text-sm">
+          <div className="flex items-center justify-center h-full text-gray-400 dark:text-gray-500 text-sm animate-fadeIn">
             <div className="text-center">
               <div className="text-3xl mb-2">📊</div>
               <p>{mounted ? chartEmptyTitle(language) : "No charts yet"}</p>
