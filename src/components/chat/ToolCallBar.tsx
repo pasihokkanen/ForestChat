@@ -76,7 +76,7 @@ export default function ToolCallBar({ toolCalls, language }: ToolCallBarProps) {
   }, [toolCalls.length]);
 
   return (
-    <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 bg-gray-100/80 dark:bg-gray-800/80 backdrop-blur-sm">
+    <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 bg-gray-100/60 dark:bg-gray-800/60 backdrop-blur-md">
       {toolCalls.length === 0 ? (
         <div className="px-3 py-1.5 text-[11px] text-gray-400 dark:text-gray-500">
           {mounted ? (language === "fi" ? "Valmiina…" : "Ready…") : "…"}
