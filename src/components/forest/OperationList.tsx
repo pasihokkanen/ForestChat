@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useTransition } from "react";
 import { useForestStore } from "@/lib/store";
 import { displayDevClass, displaySpecies, displayOp, operationListLabels } from "@/lib/i18n";
 import { List } from "react-window";
@@ -225,6 +225,7 @@ export default function OperationList({ map }: OperationListProps) {
   }, [aiOperationFilters]);
 
   const [listHeight, setListHeight] = useState(400);
+  const [isPending, startTransition] = useTransition();
 
   const [typeOpen, setTypeOpen] = useState(false);
   const [speciesOpen, setSpeciesOpen] = useState(false);
@@ -242,12 +243,14 @@ export default function OperationList({ map }: OperationListProps) {
   }, []);
 
   const handleSort = (key: string) => {
-    if (sortKey === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir("asc");
-    }
+    startTransition(() => {
+      if (sortKey === key) {
+        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      } else {
+        setSortKey(key);
+        setSortDir("asc");
+      }
+    });
   };
 
   const standToOpIds = useMemo(() => {
@@ -630,7 +633,7 @@ export default function OperationList({ map }: OperationListProps) {
         ))}
         <div className="w-[32px] shrink-0"></div>
       </div>
-      <div className="flex-1 min-h-0">
+      <div className={`flex-1 min-h-0 transition-opacity duration-150 ${isPending ? "opacity-60" : ""}`}>
         <List
           key={displayRows.length}
           defaultHeight={Math.max(listHeight, 100)}
