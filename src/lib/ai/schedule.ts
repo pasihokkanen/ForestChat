@@ -9,7 +9,7 @@
 // on-demand from the current simulated state.
 
 import type { StandData, PlannedOperation, PlanGoal, YearPlan, PlanSummary, SpeciesDatum, YearSnapshot, StandSnapshot, SpeciesSnapshot } from "./types";
-import { getOptimalAge, THINNING_BA, MIN_AGE_FIRST_THINNING, MIN_AGE_THINNING, COSTS, OPERATION_DEFAULTS, computeOperationValue, CLEARCUT_MIN_DIAMETER, CLEARCUT_MIN_VOLUME_PER_HA } from "./config";
+import { getOptimalAge, THINNING_BA, getThinningTriggerBA, THINNING_HEADROOM, THINNING_DEFAULT_HEADROOM, FIRST_THINNING_TARGET_STEMS_HA, FIRST_THINNING_DEFAULT_TARGET, FIRST_THINNING_MIN_REMOVAL, FIRST_THINNING_MAX_REMOVAL, MAX_DIAMETER_FIRST_THINNING, THINNING_MIN_REMOVAL, THINNING_MAX_REMOVAL, MIN_AGE_FIRST_THINNING, MIN_AGE_THINNING, COSTS, OPERATION_DEFAULTS, computeOperationValue, CLEARCUT_MIN_DIAMETER, CLEARCUT_MIN_VOLUME_PER_HA } from "./config";
 import { computeTapioAnnualGrowth } from "./tapio-growth";
 import { getStrategy, type SchedulingStrategy } from "./strategies";
 import { type GrowableStand, growStand, snapshotState } from "./stand-simulator";
@@ -162,58 +162,6 @@ const TENDING_TARGET_STEMS_HA: Record<string, number> = {
 // Post-operation stems/ha by species × site class.
 // Source: Metsanhoidon suositukset — harvennusmallit
 // ═══════════════════════════════════════════════════════════════════════
-
-/** Tapio post-first-thinning stem count target (stems/ha) by species and site class. */
-export const FIRST_THINNING_TARGET_STEMS_HA: Record<string, Record<string, number>> = {
-  pine:       { mesic: 1100, "sub-xeric": 1100, xeric: 1000 },
-  spruce:     { "herb-rich heath": 1100, mesic: 1100 },
-  silver_birch: { "herb-rich heath": 750, mesic: 750 },
-  downy_birch:  { mesic: 1150, "sub-xeric": 1150 },
-  larch:      { mesic: 900, "sub-xeric": 900 },
-  grey_alder: { mesic: 700, "sub-xeric": 700 },
-};
-
-/** Default first thinning target when species/site not in table. */
-export const FIRST_THINNING_DEFAULT_TARGET = 1100;
-
-/** Minimum removal fraction for first thinning (Tapio lower bound: 35%). */
-const FIRST_THINNING_MIN_REMOVAL = 0.35;
-
-/** Maximum removal fraction for first thinning (Tapio upper bound: 50%). */
-const FIRST_THINNING_MAX_REMOVAL = 0.50;
-
-/** Maximum mean diameter (cm) for first thinning eligibility.
- *  Stands with larger diameters are biologically past the first thinning stage
- *  and should be treated as regular thinning candidates.
- *  Tapio: first thinning typically at 14-18 cm (pine/spruce), 12-16 cm (birch). */
-const MAX_DIAMETER_FIRST_THINNING: Record<string, number> = {
-  pine: 20, spruce: 20, silver_birch: 18, downy_birch: 18, larch: 20, grey_alder: 16,
-};
-
-// ═══════════════════════════════════════════════════════════════════════
-// Tapio regular thinning targets (harvennus)
-// Post-operation basal area (m²/ha) by species × site class.
-// Source: Metsanhoidon suositukset — harvennusmallit
-// ═══════════════════════════════════════════════════════════════════════
-
-/** Tapio post-thinning basal area target (m²/ha) by species and site class. */
-const THINNING_TARGET_BA: Record<string, Record<string, number>> = {
-  pine:       { mesic: 18, "sub-xeric": 16, xeric: 14 },
-  spruce:     { "herb-rich heath": 20, mesic: 19 },
-  silver_birch: { "herb-rich heath": 15, mesic: 15 },
-  downy_birch:  { mesic: 15 },
-  larch:      { mesic: 16, "sub-xeric": 16 },
-  grey_alder: { mesic: 14, "sub-xeric": 14 },
-};
-
-/** Default thinning target BA when species/site not in table. */
-const THINNING_DEFAULT_TARGET_BA = 16;
-
-/** Minimum removal fraction for regular thinning (Tapio lower bound). */
-const THINNING_MIN_REMOVAL = 0.25;
-
-/** Maximum removal fraction for regular thinning (Tapio upper bound). */
-const THINNING_MAX_REMOVAL = 0.45;
 
 // ═══════════════════════════════════════════════════════════════════════
 // Stand splitting stub (not implemented — split removed per user request)
@@ -466,7 +414,7 @@ function spawnOperations(
 
     // ── Thinning eligibility ──
     const firstThinThresh = THINNING_BA["first_thinning"]?.[s.species] ?? 18;
-    const thinThresh = THINNING_BA["thinning"]?.[s.species] ?? 22;
+    const thinThresh = getThinningTriggerBA(s.species, s.siteClass);
     const minFirstAge = MIN_AGE_FIRST_THINNING?.[s.species] ?? 30;
     const minThinAge = MIN_AGE_THINNING?.[s.species] ?? 40;
 
@@ -521,15 +469,17 @@ function spawnOperations(
     if (!firstThinSpawned && currentBA >= thinThresh && s.ageYears >= minThinAge) {
       const m3PerHa = s.volumeM3 / s.areaHa;
       if (m3PerHa >= 50) {
-        // Tapio-driven removal: calculate fraction from BA target
-        const targetBA = THINNING_TARGET_BA[s.species]?.[s.siteClass]
-          ?? THINNING_DEFAULT_TARGET_BA;
+        // Headroom-based removal: thin down to trigger minus headroom,
+        // ensuring ≥15 years of BA recovery via D growth alone.
+        const headroom = THINNING_HEADROOM[s.species]?.[s.siteClass]
+          ?? THINNING_DEFAULT_HEADROOM;
+        const effectiveTarget = thinThresh - headroom;
         let removalFraction: number;
-        if (currentBA > targetBA) {
-          removalFraction = (currentBA - targetBA) / Math.max(1, currentBA);
+        if (currentBA > effectiveTarget) {
+          removalFraction = (currentBA - effectiveTarget) / Math.max(1, currentBA);
           removalFraction = Math.min(THINNING_MAX_REMOVAL, Math.max(THINNING_MIN_REMOVAL, removalFraction));
         } else {
-          removalFraction = THINNING_MIN_REMOVAL; // stand at or below target — use minimum
+          removalFraction = THINNING_MIN_REMOVAL; // stand at or below effective target — use minimum
         }
         const removal = s.volumeM3 * removalFraction;
         // Step 8: Peatland min harvest volume
@@ -543,7 +493,7 @@ function spawnOperations(
               cost_eur: 0,
               removal_m3: Math.round(removal),
               removalFraction,
-              notes: `Thinning BA=${currentBA.toFixed(0)}→${targetBA} m²/ha (${Math.round(removalFraction * 100)}%) age=${s.ageYears}y`,
+              notes: `Thinning BA=${currentBA.toFixed(0)}→${Math.round(effectiveTarget)} m²/ha (headroom ${headroom}, ${Math.round(removalFraction * 100)}%) age=${s.ageYears}y`,
               dueYear: year,
             });
           }
@@ -886,8 +836,10 @@ export function runScheduleEngine(
         // regular thinning trigger so the stand needs real growth before
         // qualifying for the next thinning. Use the smaller of the Tapio
         // stem target and the BA-constrained target.
-        const thinThreshBA = THINNING_BA["thinning"]?.[st.species] ?? 22;
-        const targetBA = thinThreshBA - 2;
+        const thinThreshBA = getThinningTriggerBA(st.species, st.siteClass);
+        const headroom = THINNING_HEADROOM[st.species]?.[st.siteClass]
+          ?? THINNING_DEFAULT_HEADROOM;
+        const targetBA = thinThreshBA - headroom;
         const baPerStem = Math.PI * Math.pow(st.meanDiameter / 200, 2);
         const baBasedStems = baPerStem > 0 ? Math.round(targetBA / baPerStem) : 0;
         const tapioTarget = FIRST_THINNING_TARGET_STEMS_HA[st.species]?.[st.siteClass]

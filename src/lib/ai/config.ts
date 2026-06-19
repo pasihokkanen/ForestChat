@@ -133,12 +133,96 @@ export function getRemovalPct(type: string): number {
 }
 
 // ─── Thinning thresholds ───
+// first_thinning BA triggers (species-level, Tapio midpoints)
+// pine 22-26→24, spruce 26-30→28, birch 20-24→22, larch 20-24→22, grey alder 16-20→18
 export const THINNING_BA: Record<string, Record<string, number>> = {
-  // Tapio ensiharvennus BA triggers (midpoint of span: pine 22-26→24, spruce 26-30→28, birch 20-24→22)
   first_thinning: { pine: 24, spruce: 28, downy_birch: 22, silver_birch: 22, larch: 22, grey_alder: 18 },
-  // Tapio harvennus BA triggers (midpoint of span: pine 24-28→26, spruce 26-32→29, birch 20-24→22)
+  // Species-level fallback for thinning — prefer THINNING_BA_BY_SITE below
   thinning:       { pine: 26, spruce: 29, downy_birch: 22, silver_birch: 22, larch: 24, grey_alder: 20 },
 };
+
+/** Thinning BA triggers by species × site class (site-calibrated).
+ *  Upper end of Tapio range for fast-growing sites, midpoints for moderate sites.
+ *  Falls back to THINNING_BA["thinning"][species] when site not in table. */
+export const THINNING_BA_BY_SITE: Record<string, Record<string, number>> = {
+  pine:        { "herb-rich heath": 28, mesic: 28, "sub-xeric": 26, xeric: 20 },
+  spruce:      { "herb-rich heath": 30, mesic: 29, "sub-xeric": 26 },
+  silver_birch:{ "herb-rich heath": 24, mesic: 22 },
+  downy_birch: { mesic: 22, "sub-xeric": 20 },
+  larch:       { "herb-rich heath": 26, mesic: 24, "sub-xeric": 22 },
+  grey_alder:  { "herb-rich heath": 22, mesic: 20, "sub-xeric": 18 },
+};
+
+/** Get the site-calibrated thinning BA trigger for a species+site combination. */
+export function getThinningTriggerBA(species: string, siteClass: string): number {
+  const bySite = THINNING_BA_BY_SITE[species];
+  if (bySite?.[siteClass]) return bySite[siteClass];
+  // Fall back to species-level trigger, then default
+  return THINNING_BA["thinning"]?.[species] ?? 22;
+}
+
+/** Minimum BA headroom (m²/ha) below the thinning trigger that the post-thinning
+ *  BA must leave, ensuring ≥15 year recovery intervals. Higher values for
+ *  fast-growing species/sites. Derived from Tapio D growth rates at minimum
+ *  thinning age with a convergence bonus for stands below the Tapio curve. */
+export const THINNING_HEADROOM: Record<string, Record<string, number>> = {
+  pine:        { "herb-rich heath": 11, mesic: 12, "sub-xeric": 10, xeric: 9 },
+  spruce:      { "herb-rich heath": 12, mesic: 12, "sub-xeric": 11 },
+  silver_birch:{ "herb-rich heath": 10, mesic: 10 },
+  downy_birch: { mesic: 10, "sub-xeric": 9 },
+  larch:       { "herb-rich heath": 11, mesic: 10, "sub-xeric": 9 },
+  grey_alder:  { "herb-rich heath": 10, mesic: 9, "sub-xeric": 9 },
+};
+
+/** Fallback headroom when species/site not in THINNING_HEADROOM table. */
+export const THINNING_DEFAULT_HEADROOM = 8;
+
+/** Tapio post-thinning basal area target (m²/ha) by species × site class.
+ *  Reference only — new code uses headroom-based effective targets. */
+export const THINNING_TARGET_BA: Record<string, Record<string, number>> = {
+  pine:        { mesic: 18, "sub-xeric": 16, xeric: 14 },
+  spruce:      { "herb-rich heath": 20, mesic: 19 },
+  silver_birch:{ "herb-rich heath": 15, mesic: 15 },
+  downy_birch: { mesic: 15 },
+  larch:       { mesic: 16, "sub-xeric": 16 },
+  grey_alder:  { mesic: 14, "sub-xeric": 14 },
+};
+
+/** Default thinning target BA when species/site not in table. */
+export const THINNING_DEFAULT_TARGET_BA = 16;
+
+/** Tapio post-first-thinning stem count target (stems/ha) by species and site class. */
+export const FIRST_THINNING_TARGET_STEMS_HA: Record<string, Record<string, number>> = {
+  pine:        { mesic: 1100, "sub-xeric": 1100, xeric: 1000 },
+  spruce:      { "herb-rich heath": 1100, mesic: 1100 },
+  silver_birch:{ "herb-rich heath": 750, mesic: 750 },
+  downy_birch: { mesic: 1150, "sub-xeric": 1150 },
+  larch:       { mesic: 900, "sub-xeric": 900 },
+  grey_alder:  { mesic: 700, "sub-xeric": 700 },
+};
+
+/** Default first thinning target when species/site not in table. */
+export const FIRST_THINNING_DEFAULT_TARGET = 1100;
+
+/** Minimum removal fraction for first thinning (Tapio lower bound: 35%). */
+export const FIRST_THINNING_MIN_REMOVAL = 0.35;
+
+/** Maximum removal fraction for first thinning (Tapio upper bound: 50%). */
+export const FIRST_THINNING_MAX_REMOVAL = 0.50;
+
+/** Maximum mean diameter (cm) for first thinning eligibility.
+ *  Stands with larger diameters are biologically past the first thinning stage. */
+export const MAX_DIAMETER_FIRST_THINNING: Record<string, number> = {
+  pine: 20, spruce: 20, silver_birch: 18, downy_birch: 18, larch: 20, grey_alder: 16,
+};
+
+/** Minimum removal fraction for regular thinning (Tapio lower bound). */
+export const THINNING_MIN_REMOVAL = 0.25;
+
+/** Maximum removal fraction for regular thinning.
+ *  Raised to 0.50 (from 0.45) to allow sufficient BA headroom for
+ *  ≥15 year recovery intervals on fast-growing sites. */
+export const THINNING_MAX_REMOVAL = 0.50;
 
 export const MIN_AGE_FIRST_THINNING: Record<string, number> = { pine: 30, spruce: 25, downy_birch: 20, silver_birch: 20, larch: 25, grey_alder: 20 };
 export const MIN_AGE_THINNING: Record<string, number> =  { pine: 45, spruce: 40, downy_birch: 35, silver_birch: 35, larch: 40, grey_alder: 35 };
