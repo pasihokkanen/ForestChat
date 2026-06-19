@@ -115,7 +115,7 @@ describe("Tapio growth model validation", () => {
       const { species, siteType } = SPECIES_MAP[key];
 
       // Per-species N_back tracker — stem count decreases over time (thinnings)
-      const nValues: number[] = [];
+      const nValues: { age: number; n: number }[] = [];
 
       for (const pt of points) {
         const volMid = (pt.volRange[0] + pt.volRange[1]) / 2;

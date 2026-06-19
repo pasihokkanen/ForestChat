@@ -642,6 +642,8 @@ export default function OperationList({ map }: OperationListProps) {
           rowCount={displayRows.length}
           rowHeight={32}
           rowProps={{
+            index: undefined as never,
+            style: undefined as never,
             rows: displayRows,
             highlightedStandIds,
             highlightedOperationIds,
