@@ -122,19 +122,18 @@ export function speciesForAgg(st: GrowableStand): Array<{
 
 /**
  * Build a year snapshot from the current stand state.
- * Computes stand-level aggregates from Tapio reference tables,
- * with per-species snapshots that each get their own Tapio-anchored
- * height, diameter, and basal area.
+ * Uses simulated (convergence-adjusted) D/H for the stand aggregate,
+ * with per-species snapshots that each get their own stored height,
+ * diameter, and computed basal area.
  */
 export function snapshotState(
   st: GrowableStand,
   year: number,
   _isInitial: boolean,
 ): StandSnapshot {
-  const gm = st.growthMultiplier;
-  // Compute stand-level aggregates from Tapio reference tables.
-  const standHeight = computeStandHeight(speciesForAgg(st), st.ageYears, st.siteType, st.areaHa, gm);
-  const standDiamCm = meanDiameter(st.species, st.siteType, st.ageYears, gm);
+  // Use simulated (convergence-adjusted) D/H, not raw Tapio table values.
+  const standHeight = st.meanHeight;
+  const standDiamCm = st.meanDiameter;
   const standBA = Math.round(st.stemCount * Math.PI * Math.pow(standDiamCm / 200, 2) * 10) / 10;
 
   // Use volRatio to ensure per-species volumes sum exactly to stand total
@@ -149,8 +148,9 @@ export function snapshotState(
         ? Math.round(sp.stemCount * st.stemCount / totalSpeciesStems)
         : 0;
     const sppVol = Math.round(sp.volumeM3 * volRatio);
-    const sppH = meanHeight(sp.species, st.siteType, st.ageYears, gm);
-    const sppDiam = meanDiameter(sp.species, st.siteType, st.ageYears, gm);
+    // Use stored species-specific D/H (set by GROW/APPLY), not raw Tapio tables.
+    const sppH = sp.meanHeight ?? st.meanHeight;
+    const sppDiam = sp.meanDiameter ?? st.meanDiameter;
     const sppBA = Math.round(stemsPerHa * Math.PI * Math.pow(sppDiam / 200, 2) * 10) / 10;
     return {
       species: sp.species,
@@ -244,8 +244,8 @@ function applyOperation(st: SimState, op: DBOperation, year: number): void {
     st.species = plantSpecies;
     const density = PLANTING_DENSITY[plantSpecies] ?? 1800;
     st.stemCount = density;
-    st.meanHeight = PLANTING_INITIAL_HEIGHT_M;
-    st.meanDiameter = PLANTING_INITIAL_DIAMETER_CM;
+    st.meanHeight = PLANTING_INITIAL_HEIGHT_M[plantSpecies] ?? 0.3;
+    st.meanDiameter = PLANTING_INITIAL_DIAMETER_CM[plantSpecies] ?? 0.5;
     st.ageYears = 0;
     st.speciesData = [
       {
@@ -253,8 +253,8 @@ function applyOperation(st: SimState, op: DBOperation, year: number): void {
         volumeM3: st.volumeM3,
         logPct: 0,
         stemCount: density,
-        meanHeight: PLANTING_INITIAL_HEIGHT_M,
-        meanDiameter: PLANTING_INITIAL_DIAMETER_CM,
+        meanHeight: PLANTING_INITIAL_HEIGHT_M[plantSpecies] ?? 0.3,
+        meanDiameter: PLANTING_INITIAL_DIAMETER_CM[plantSpecies] ?? 0.5,
         age: 0,
         areaHa: st.areaHa,
       },
@@ -282,9 +282,42 @@ export function growStand(
   st.ageYears += 1;
   const gm = st.growthMultiplier;
 
-  // Tapio-anchored height and diameter (regionally scaled)
-  st.meanHeight = meanHeight(st.species, st.siteType, st.ageYears, gm);
-  st.meanDiameter = meanDiameter(st.species, st.siteType, st.ageYears, gm);
+  // Percentage-based height and diameter growth from current state.
+  // The Tapio table defines the growth curve shape; actual values grow from
+  // the stand's real baseline with slow convergence toward the table curve.
+  // This preserves real-world measurements in the short term while allowing
+  // stands to reach clearcut thresholds over a full rotation.
+  //
+  // Growth adds the absolute year-over-year change from the Tapio table
+  // (not a percentage of current value — avoids divergence when real ≠ table).
+  // Convergence: 5% of the gap between real and table closes each year,
+  // bidirectionally — pulls toward table potential from both above and below.
+  // Falls back to direct table value when prevTable ≤ 0.01 (age 0→1 edge case).
+  const CONVERGENCE = 0.05;
+  {
+    const currTableH = meanHeight(st.species, st.siteType, st.ageYears, 1.0);
+    const prevTableH = meanHeight(st.species, st.siteType, st.ageYears - 1, 1.0);
+    const tableTargetH = meanHeight(st.species, st.siteType, st.ageYears, gm);
+    if (prevTableH > 0.01) {
+      const absGrowth = (currTableH - prevTableH) * gm;
+      const convergenceH = CONVERGENCE * (tableTargetH - st.meanHeight);
+      st.meanHeight = Math.round((st.meanHeight + absGrowth + convergenceH) * 10000) / 10000;
+    } else {
+      st.meanHeight = Math.round(tableTargetH * 10000) / 10000;
+    }
+  }
+  {
+    const currTableD = meanDiameter(st.species, st.siteType, st.ageYears, 1.0);
+    const prevTableD = meanDiameter(st.species, st.siteType, st.ageYears - 1, 1.0);
+    const tableTargetD = meanDiameter(st.species, st.siteType, st.ageYears, gm);
+    if (prevTableD > 0.01) {
+      const absGrowth = (currTableD - prevTableD) * gm;
+      const convergenceD = CONVERGENCE * (tableTargetD - st.meanDiameter);
+      st.meanDiameter = Math.round((st.meanDiameter + absGrowth + convergenceD) * 10000) / 10000;
+    } else {
+      st.meanDiameter = Math.round(tableTargetD * 10000) / 10000;
+    }
+  }
 
   // Volume from standard forestry formula: V = N × π × (D/200)² × H × f
   const baPerHa = st.stemCount * Math.PI * Math.pow(st.meanDiameter / 200, 2);

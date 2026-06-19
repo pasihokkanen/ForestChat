@@ -10,7 +10,7 @@
 import { simulateStand } from "./stand-simulator";
 import type { DBOperation } from "./stand-simulator";
 import type { StandData } from "./types";
-import { meanDiameter } from "./tapio-growth";
+import { meanDiameter, meanHeight } from "./tapio-growth";
 
 // ── Input types (unchanged public API) ──
 
@@ -122,8 +122,8 @@ export function estimateForestState(
       ageYears: age,
       ba,
       stemCount,
-      meanHeight: 0,
-      meanDiameter: 0,
+      meanHeight: age > 0 ? meanHeight(species, site, age, gm) : 0,
+      meanDiameter: age > 0 ? meanDiameter(species, site, age, gm) : 0,
       valueEur: 0,
       speciesData: [],
       site_class: site,
