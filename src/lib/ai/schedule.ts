@@ -832,19 +832,13 @@ export function runScheduleEngine(
         const oldVol = st.volumeM3;
         const oldStems = st.stemCount;
         st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
-        // Compute stem target from BA: post-thinning BA must land below the
-        // regular thinning trigger so the stand needs real growth before
-        // qualifying for the next thinning. Use the smaller of the Tapio
-        // stem target and the BA-constrained target.
-        const thinThreshBA = getThinningTriggerBA(st.species, st.siteClass);
-        const headroom = THINNING_HEADROOM[st.species]?.[st.siteClass]
-          ?? THINNING_DEFAULT_HEADROOM;
-        const targetBA = thinThreshBA - headroom;
-        const baPerStem = Math.PI * Math.pow(st.meanDiameter / 200, 2);
-        const baBasedStems = baPerStem > 0 ? Math.round(targetBA / baPerStem) : 0;
+        // First thinning uses Tapio stem count target directly.
+        // Unlike regular thinning, first thinning aims for the
+        // recommended post-thinning stem density, not a BA headroom.
         const tapioTarget = FIRST_THINNING_TARGET_STEMS_HA[st.species]?.[st.siteClass]
           ?? FIRST_THINNING_DEFAULT_TARGET;
-        st.stemCount = Math.min(tapioTarget, baBasedStems);
+        st.stemCount = tapioTarget;
+        const baPerStem = Math.PI * Math.pow(st.meanDiameter / 200, 2);
         st.basalArea = st.stemCount * baPerStem;
 
         // Sync speciesData volumes and stems
