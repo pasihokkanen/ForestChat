@@ -12,7 +12,7 @@ import { schedulePlan } from "./schedule";
 import { serverMsg } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
 import { getPricesForRegion } from "./price-fetcher";
-import { classifySite, detectPeatland, PRICES, getRemovalPct } from "./config";
+import { classifySite, detectPeatland, PRICES } from "./config";
 import { computeTapioAnnualGrowth } from "./tapio-growth";
 
 interface GeneratePlanArgs {
@@ -325,7 +325,7 @@ export async function generatePlan(
             forest_id: forestId,
             type: op.type,
             year: yp.year,
-            removal_pct: getRemovalPct(op.type),
+            removal_pct: Math.round((op.removalFraction ?? 0) * 100),
             income_eur: op.income_eur,
             cost_eur: op.cost_eur,
             notes: notesWithState,
