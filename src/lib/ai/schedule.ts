@@ -412,6 +412,46 @@ function spawnOperations(
       continue; // Step 1: skip thinning — this stand is clearcut-ready
     }
 
+    // ── Maturity gate: skip thinning if clearcut is imminent (≤15 years) ──
+    // Clones the stand and projects D growth using growStand() — the same
+    // function the main simulation loop uses. If the clone reaches both
+    // the clearcut D and age thresholds within 15 years, the thinning is
+    // skipped so the stand can grow undisturbed to final harvest.
+    // Fast path: age too far from clearcut — skip the projection entirely.
+    if (s.ageYears >= optMin - 15 && s.stemCount > 0) {
+      const minDiam = CLEARCUT_MIN_DIAMETER[s.species]?.[s.siteClass]
+        ?? CLEARCUT_MIN_DIAMETER[s.species]?.mesic
+        ?? 26;
+      let ccImminent = false;
+      // Shallow clone — only fields touched by growStand()
+      const clone: GrowableStand = {
+        standId: s.standId,
+        areaHa: s.areaHa,
+        siteType: s.siteType,
+        soilType: s.soilType,
+        species: s.species,
+        developmentClass: s.developmentClass,
+        volumeM3: s.volumeM3,
+        ageYears: s.ageYears,
+        stemCount: s.stemCount,
+        meanHeight: s.meanHeight,
+        meanDiameter: s.meanDiameter,
+        growthMultiplier: s.growthMultiplier,
+        speciesData: s.speciesData.map((sp) => ({ ...sp })),
+      };
+      for (let pYr = 1; pYr <= 15; pYr++) {
+        growStand(clone, clone.growthMultiplier);
+        if (clone.meanDiameter >= minDiam && clone.ageYears >= optMin) {
+          ccImminent = true;
+          break;
+        }
+      }
+      if (ccImminent) {
+        dlog(`[SPAWN yr=${year}] stand=${s.standId} maturity gate: clearcut predicted ≤15yr (D=${s.meanDiameter.toFixed(1)}→${clone.meanDiameter.toFixed(1)}, age ${s.ageYears}→${clone.ageYears}), skipping thinning`);
+        continue; // skip thinning — let stand grow to clearcut
+      }
+    }
+
     // ── Thinning eligibility ──
     const firstThinThresh = THINNING_BA["first_thinning"]?.[s.species] ?? 18;
     const thinThresh = getThinningTriggerBA(s.species, s.siteClass);
