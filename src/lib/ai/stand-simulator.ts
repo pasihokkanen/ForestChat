@@ -34,6 +34,8 @@ import {
   MIN_DIAMETER_INCREMENT_DEFAULT,
   MIN_HEIGHT_INCREMENT,
   MIN_HEIGHT_INCREMENT_DEFAULT,
+  EARLY_TENDING_TARGET_STEMS_HA,
+  TENDING_TARGET_STEMS_HA,
 } from "./config";
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -225,7 +227,9 @@ function applyOperation(st: SimState, op: DBOperation, year: number): void {
     const oldVol = st.volumeM3;
     const oldStems = st.stemCount;
     st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
-    st.stemCount = 3250; // Tapio early tending target (midpoint 3000-3500)
+    st.stemCount = EARLY_TENDING_TARGET_STEMS_HA[st.species]?.[st.siteType]
+      ?? EARLY_TENDING_TARGET_STEMS_HA[st.species]?.mesic
+      ?? 3250;
     // Sync speciesData volumes and stems proportionally
     const volScale = oldVol > 0 ? st.volumeM3 / oldVol : 1;
     const stemScale = oldStems > 0 ? st.stemCount / oldStems : 1;
@@ -237,7 +241,9 @@ function applyOperation(st: SimState, op: DBOperation, year: number): void {
     const oldVol = st.volumeM3;
     const oldStems = st.stemCount;
     st.volumeM3 = Math.round(st.volumeM3 * (1 - pct));
-    st.stemCount = 1800; // Tapio tending target (lower bound 1800)
+    st.stemCount = TENDING_TARGET_STEMS_HA[st.species]?.[st.siteType]
+      ?? TENDING_TARGET_STEMS_HA[st.species]?.mesic
+      ?? 2000;
     // Sync speciesData volumes and stems proportionally
     const volScale = oldVol > 0 ? st.volumeM3 / oldVol : 1;
     const stemScale = oldStems > 0 ? st.stemCount / oldStems : 1;

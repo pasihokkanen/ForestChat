@@ -133,10 +133,20 @@ export function getRemovalPct(type: string): number {
 }
 
 // ─── Thinning thresholds ───
-// first_thinning BA triggers (species-level, Tapio midpoints)
-// pine 22-26→24, spruce 26-30→28, birch 20-24→22, larch 20-24→22, grey alder 16-20→18
-export const THINNING_BA: Record<string, Record<string, number>> = {
-  first_thinning: { pine: 24, spruce: 28, downy_birch: 22, silver_birch: 22, larch: 22, grey_alder: 18 },
+// first_thinning BA triggers by species × site (Tapio midpoints, site-calibrated)
+// Higher on fertile sites (faster growth reaches trigger sooner), lower on poor sites.
+export const THINNING_BA: {
+  first_thinning: Record<string, Record<string, number>>;
+  thinning: Record<string, number>;
+} = {
+  first_thinning: {
+    pine:        { "herb-rich heath": 26, mesic: 24, "sub-xeric": 22, xeric: 18 },
+    spruce:      { "herb-rich heath": 30, mesic: 28, "sub-xeric": 24 },
+    downy_birch: { "herb-rich heath": 24, mesic: 22, "sub-xeric": 20 },
+    silver_birch:{ "herb-rich heath": 24, mesic: 22 },
+    larch:       { "herb-rich heath": 24, mesic: 22, "sub-xeric": 20 },
+    grey_alder:  { "herb-rich heath": 20, mesic: 18, "sub-xeric": 16 },
+  },
   // Species-level fallback for thinning — prefer THINNING_BA_BY_SITE below
   thinning:       { pine: 26, spruce: 29, downy_birch: 22, silver_birch: 22, larch: 24, grey_alder: 20 },
 };
@@ -148,7 +158,7 @@ export const THINNING_BA_BY_SITE: Record<string, Record<string, number>> = {
   pine:        { "herb-rich heath": 28, mesic: 28, "sub-xeric": 26, xeric: 20 },
   spruce:      { "herb-rich heath": 30, mesic: 29, "sub-xeric": 26 },
   silver_birch:{ "herb-rich heath": 24, mesic: 22 },
-  downy_birch: { mesic: 22, "sub-xeric": 20 },
+  downy_birch: { "herb-rich heath": 24, mesic: 22, "sub-xeric": 20 },
   larch:       { "herb-rich heath": 26, mesic: 24, "sub-xeric": 22 },
   grey_alder:  { "herb-rich heath": 22, mesic: 20, "sub-xeric": 18 },
 };
@@ -157,8 +167,14 @@ export const THINNING_BA_BY_SITE: Record<string, Record<string, number>> = {
 export function getThinningTriggerBA(species: string, siteClass: string): number {
   const bySite = THINNING_BA_BY_SITE[species];
   if (bySite?.[siteClass]) return bySite[siteClass];
-  // Fall back to species-level trigger, then default
   return THINNING_BA["thinning"]?.[species] ?? 22;
+}
+
+/** Get the site-calibrated first-thinning BA trigger for a species+site combination. */
+export function getFirstThinningTriggerBA(species: string, siteClass: string): number {
+  const bySite = THINNING_BA["first_thinning"]?.[species];
+  if (bySite?.[siteClass]) return bySite[siteClass];
+  return bySite?.mesic ?? 18;
 }
 
 /** Minimum BA headroom (m²/ha) below the thinning trigger that the post-thinning
@@ -193,12 +209,12 @@ export const THINNING_DEFAULT_TARGET_BA = 16;
 
 /** Tapio post-first-thinning stem count target (stems/ha) by species and site class. */
 export const FIRST_THINNING_TARGET_STEMS_HA: Record<string, Record<string, number>> = {
-  pine:        { mesic: 1100, "sub-xeric": 1100, xeric: 1000 },
-  spruce:      { "herb-rich heath": 1100, mesic: 1100 },
+  pine:        { "herb-rich heath": 1100, mesic: 1100, "sub-xeric": 1100, xeric: 1000 },
+  spruce:      { "herb-rich heath": 1100, mesic: 1100, "sub-xeric": 1000 },
   silver_birch:{ "herb-rich heath": 750, mesic: 750 },
-  downy_birch: { mesic: 1150, "sub-xeric": 1150 },
-  larch:       { mesic: 900, "sub-xeric": 900 },
-  grey_alder:  { mesic: 700, "sub-xeric": 700 },
+  downy_birch: { "herb-rich heath": 1150, mesic: 1150, "sub-xeric": 1150 },
+  larch:       { "herb-rich heath": 1000, mesic: 900, "sub-xeric": 900 },
+  grey_alder:  { "herb-rich heath": 800, mesic: 700, "sub-xeric": 700 },
 };
 
 /** Default first thinning target when species/site not in table. */
@@ -211,9 +227,15 @@ export const FIRST_THINNING_MIN_REMOVAL = 0.35;
 export const FIRST_THINNING_MAX_REMOVAL = 0.50;
 
 /** Maximum mean diameter (cm) for first thinning eligibility.
- *  Stands with larger diameters are biologically past the first thinning stage. */
-export const MAX_DIAMETER_FIRST_THINNING: Record<string, number> = {
-  pine: 20, spruce: 20, silver_birch: 18, downy_birch: 18, larch: 20, grey_alder: 16,
+ *  Stands with larger diameters are biologically past the first thinning stage.
+ *  Higher on fertile sites (trees thicken faster), lower on poor sites. */
+export const MAX_DIAMETER_FIRST_THINNING: Record<string, Record<string, number>> = {
+  pine:        { "herb-rich heath": 22, mesic: 20, "sub-xeric": 18, xeric: 16 },
+  spruce:      { "herb-rich heath": 22, mesic: 20, "sub-xeric": 18 },
+  silver_birch:{ "herb-rich heath": 20, mesic: 18 },
+  downy_birch: { mesic: 18, "sub-xeric": 16 },
+  larch:       { "herb-rich heath": 22, mesic: 20, "sub-xeric": 18 },
+  grey_alder:  { "herb-rich heath": 18, mesic: 16, "sub-xeric": 14 },
 };
 
 /** Minimum removal fraction for regular thinning (Tapio lower bound). */
@@ -251,8 +273,23 @@ export const MIN_HEIGHT_INCREMENT: Record<string, number> = {
 /** Fallback minimum height increment when species not in table. */
 export const MIN_HEIGHT_INCREMENT_DEFAULT = 0.010;
 
-export const MIN_AGE_FIRST_THINNING: Record<string, number> = { pine: 30, spruce: 25, downy_birch: 20, silver_birch: 20, larch: 25, grey_alder: 20 };
-export const MIN_AGE_THINNING: Record<string, number> =  { pine: 45, spruce: 40, downy_birch: 35, silver_birch: 35, larch: 40, grey_alder: 35 };
+export const MIN_AGE_FIRST_THINNING: Record<string, Record<string, number>> = {
+  pine:        { "herb-rich heath": 25, mesic: 30, "sub-xeric": 35, xeric: 40 },
+  spruce:      { "herb-rich heath": 20, mesic: 25, "sub-xeric": 30 },
+  silver_birch:{ "herb-rich heath": 18, mesic: 20 },
+  downy_birch: { mesic: 20, "sub-xeric": 25 },
+  larch:       { "herb-rich heath": 22, mesic: 25, "sub-xeric": 30 },
+  grey_alder:  { "herb-rich heath": 15, mesic: 20, "sub-xeric": 25 },
+};
+
+export const MIN_AGE_THINNING: Record<string, Record<string, number>> = {
+  pine:        { "herb-rich heath": 35, mesic: 40, "sub-xeric": 45, xeric: 55 },
+  spruce:      { "herb-rich heath": 30, mesic: 35, "sub-xeric": 40 },
+  silver_birch:{ "herb-rich heath": 25, mesic: 30 },
+  downy_birch: { mesic: 30, "sub-xeric": 35 },
+  larch:       { "herb-rich heath": 30, mesic: 35, "sub-xeric": 40 },
+  grey_alder:  { "herb-rich heath": 25, mesic: 30, "sub-xeric": 35 },
+};
 
 // ─── Operation type display names (system value → English display) ───
 // Used for chart legends, tooltips, and any user-facing display of operation types.
@@ -332,9 +369,20 @@ export const CLEARCUT_MIN_DIAMETER: Record<string, Record<string, number>> = {
   silver_birch:{ "herb-rich heath": 26.0, mesic: 24.0 },
 };
 
-/** Minimum standing volume per hectare for clearcut economic viability.
- *  Tapio generally recommends ≥150 m³/ha for a commercially viable clearcut. */
-export const CLEARCUT_MIN_VOLUME_PER_HA = 140;
+/** Minimum standing volume per hectare (m³/ha) for clearcut economic viability,
+ *  by site class. Higher on fertile sites (more valuable timber), lower on poor sites.
+ *  Tapio: ≥150 m³/ha fertile, ≥120 m³/ha medium, ≥100 m³/ha poor. */
+export const CLEARCUT_MIN_VOLUME_PER_HA: Record<string, number> = {
+  "herb-rich heath": 160,
+  mesic: 140,
+  "sub-xeric": 120,
+  xeric: 100,
+};
+
+/** Get the site-calibrated minimum clearcut volume per hectare. */
+export function getClearcutMinVolumePerHa(siteClass: string): number {
+  return CLEARCUT_MIN_VOLUME_PER_HA[siteClass] ?? 140;
+}
 
 // ─── Silvicultural costs (€/ha) ───
 export const COSTS: Record<string, number> = {
@@ -346,6 +394,66 @@ export const COSTS: Record<string, number> = {
   early_tending: 630,
   tending: 900,
   pre_clearance: 720,
+};
+
+// ─── Tending thresholds (species × site) ───
+// Tapio varhaisperkaus / taimikonharvennus by species and site class.
+// Fertile sites: higher stem thresholds (more stems before tending triggers)
+// and higher target stems (leave more after tending).
+
+/** Early tending stem trigger (stems/ha): varhaisperkaus when stems exceed this. */
+export const EARLY_TENDING_STEM_THRESHOLD: Record<string, Record<string, number>> = {
+  pine:        { "herb-rich heath": 5000, mesic: 4500, "sub-xeric": 4000, xeric: 3500 },
+  spruce:      { "herb-rich heath": 5000, mesic: 4500, "sub-xeric": 4000 },
+  silver_birch:{ "herb-rich heath": 4000, mesic: 3500 },
+  downy_birch: { mesic: 3500, "sub-xeric": 3000 },
+  larch:       { "herb-rich heath": 5000, mesic: 4500, "sub-xeric": 4000 },
+  grey_alder:  { "herb-rich heath": 4000, mesic: 3500, "sub-xeric": 3000 },
+};
+
+/** Tending stem trigger (stems/ha): taimikonharvennus when stems exceed this. */
+export const TENDING_STEM_THRESHOLD: Record<string, Record<string, number>> = {
+  pine:        { "herb-rich heath": 2500, mesic: 2250, "sub-xeric": 2000, xeric: 1800 },
+  spruce:      { "herb-rich heath": 2500, mesic: 2250, "sub-xeric": 2000 },
+  silver_birch:{ "herb-rich heath": 2000, mesic: 1800 },
+  downy_birch: { mesic: 1800, "sub-xeric": 1600 },
+  larch:       { "herb-rich heath": 2200, mesic: 2000, "sub-xeric": 1800 },
+  grey_alder:  { "herb-rich heath": 1800, mesic: 1600, "sub-xeric": 1400 },
+};
+
+/** Early tending max height (m): above this, varhaisperkaus is no longer appropriate. */
+export const EARLY_TENDING_MAX_HEIGHT: Record<string, number> = {
+  pine: 1.0, spruce: 1.5, silver_birch: 1.5, downy_birch: 1.5, birch: 1.5, larch: 1.2,
+};
+
+/** Tending min height (m): below this, taimikonharvennus should not fire. */
+export const TENDING_MIN_HEIGHT: Record<string, number> = {
+  pine: 3.0, spruce: 3.5, silver_birch: 4.0, downy_birch: 4.0, birch: 4.0, larch: 3.5,
+};
+
+/** Tending max height (m): above this, stand enters thinning phase. */
+export const TENDING_MAX_HEIGHT: Record<string, number> = {
+  pine: 4.0, spruce: 5.0, silver_birch: 6.0, downy_birch: 6.0, birch: 6.0, larch: 5.0,
+};
+
+/** Target stems/ha after early tending, by species × site. */
+export const EARLY_TENDING_TARGET_STEMS_HA: Record<string, Record<string, number>> = {
+  pine:        { "herb-rich heath": 3500, mesic: 3250, "sub-xeric": 3000, xeric: 2800 },
+  spruce:      { "herb-rich heath": 3500, mesic: 3250, "sub-xeric": 3000 },
+  silver_birch:{ "herb-rich heath": 3000, mesic: 2750 },
+  downy_birch: { mesic: 2750, "sub-xeric": 2500 },
+  larch:       { "herb-rich heath": 3500, mesic: 3250, "sub-xeric": 3000 },
+  grey_alder:  { "herb-rich heath": 3000, mesic: 2750, "sub-xeric": 2500 },
+};
+
+/** Target stems/ha after tending (taimikonharvennus), by species × site. */
+export const TENDING_TARGET_STEMS_HA: Record<string, Record<string, number>> = {
+  pine:        { "herb-rich heath": 2200, mesic: 2000, "sub-xeric": 1800, xeric: 1600 },
+  spruce:      { "herb-rich heath": 2100, mesic: 1900, "sub-xeric": 1700 },
+  silver_birch:{ "herb-rich heath": 1800, mesic: 1600 },
+  downy_birch: { mesic: 1600, "sub-xeric": 1400 },
+  larch:       { "herb-rich heath": 2000, mesic: 1800, "sub-xeric": 1600 },
+  grey_alder:  { "herb-rich heath": 1800, mesic: 1600, "sub-xeric": 1400 },
 };
 
 // ─── Site classification mapping ───
