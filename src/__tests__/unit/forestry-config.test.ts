@@ -8,11 +8,11 @@ import {
   MIN_AGE_FIRST_THINNING,
   MIN_AGE_THINNING,
   COSTS,
-  GROWTH_REGION_MULTIPLIERS,
   PRICE_REGION_MULTIPLIERS,
   classifySite,
   detectPeatland,
 } from "@/lib/ai/config";
+import { resolveMunicipalityFromPropertyId } from "@/lib/import/municipality-lookup";
 
 describe("Forestry Config", () => {
   it("has correct timber prices for clear_cut pine", () => {
@@ -62,19 +62,22 @@ describe("Forestry Config", () => {
   });
 
   it("THINNING_BA has correct first thinning thresholds", () => {
-    expect(THINNING_BA.first_thinning.pine).toBe(24);
-    expect(THINNING_BA.first_thinning.spruce).toBe(28);
+    // Site-dependent: test the mesic baseline (original species-level value)
+    expect(THINNING_BA.first_thinning.pine).toEqual({ "herb-rich heath": 26, mesic: 24, "sub-xeric": 22, xeric: 18 });
+    expect(THINNING_BA.first_thinning.spruce).toEqual({ "herb-rich heath": 30, mesic: 28, "sub-xeric": 24 });
   });
 
   it("MIN_AGE_FIRST_THINNING has correct values", () => {
-    expect(MIN_AGE_FIRST_THINNING.pine).toBe(30);
-    expect(MIN_AGE_FIRST_THINNING.spruce).toBe(25);
-    expect(MIN_AGE_FIRST_THINNING.downy_birch).toBe(20);
+    // Site-dependent: test the mesic baseline
+    expect(MIN_AGE_FIRST_THINNING.pine.mesic).toBe(30);
+    expect(MIN_AGE_FIRST_THINNING.spruce.mesic).toBe(25);
+    expect(MIN_AGE_FIRST_THINNING.downy_birch.mesic).toBe(20);
   });
 
   it("MIN_AGE_THINNING has correct values", () => {
-    expect(MIN_AGE_THINNING.pine).toBe(45);
-    expect(MIN_AGE_THINNING.spruce).toBe(40);
+    // Site-dependent: test the mesic baseline
+    expect(MIN_AGE_THINNING.pine.mesic).toBe(40);
+    expect(MIN_AGE_THINNING.spruce.mesic).toBe(35);
   });
 
   it("COSTS has all silvicultural operations (Phase 7b updated rates)", () => {
@@ -86,10 +89,22 @@ describe("Forestry Config", () => {
     expect(COSTS.ditch_mounding).toBe(720);
   });
 
-  it("GROWTH_REGION_MULTIPLIERS has all 9 regions", () => {
-    expect(Object.keys(GROWTH_REGION_MULTIPLIERS)).toHaveLength(9);
-    expect(GROWTH_REGION_MULTIPLIERS["3"]).toBe(1.0);
-    expect(GROWTH_REGION_MULTIPLIERS["8"]).toBeLessThan(0.6);
+  it("resolveMunicipalityFromPropertyId maps property ID to correct region", () => {
+    // Ähtäri (989) → region 6, gm=1.00
+    const ahtari = resolveMunicipalityFromPropertyId("989-405-0001-0405");
+    expect(ahtari.name).toBe("Ähtäri");
+    expect(ahtari.priceRegion).toBe("6");
+    expect(ahtari.growthMultiplier).toBe(1.00);
+
+    // Helsinki (091) → region 1, gm=1.10
+    const helsinki = resolveMunicipalityFromPropertyId("091-001-0001-0000");
+    expect(helsinki.priceRegion).toBe("1");
+    expect(helsinki.growthMultiplier).toBe(1.10);
+
+    // Rovaniemi (698) → region 8 (Lappi), gm=0.55
+    const rovaniemi = resolveMunicipalityFromPropertyId("698-001-0001-0000");
+    expect(rovaniemi.priceRegion).toBe("8");
+    expect(rovaniemi.growthMultiplier).toBe(0.55);
   });
 
   it("PRICE_REGION_MULTIPLIERS has all 9 regions", () => {

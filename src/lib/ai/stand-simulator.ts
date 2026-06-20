@@ -294,26 +294,17 @@ export function growStand(
   st.ageYears += 1;
   const gm = st.growthMultiplier;
 
-  // Percentage-based height and diameter growth from current state.
-  // The Tapio table defines the growth curve shape; actual values grow from
-  // the stand's real baseline with slow convergence toward the table curve.
-  // This preserves real-world measurements in the short term while allowing
-  // stands to reach clearcut thresholds over a full rotation.
-  //
-  // Growth adds the absolute year-over-year change from the Tapio table
-  // (not a percentage of current value — avoids divergence when real ≠ table).
-  // Convergence: 5% of the gap between real and table closes each year,
-  // bidirectionally — pulls toward table potential from both above and below.
-  // Falls back to direct table value when prevTable ≤ 0.01 (age 0→1 edge case).
-  const CONVERGENCE = 0.05;
+  // Height: absolute year-over-year growth from Tapio tables — no convergence.
+  // Height is site-quality-driven, not density-driven, and should not be
+  // pulled toward a "typical" curve. Falls back to direct table value when
+  // prevTable ≤ 0.01 (age 0→1 edge case).
   {
     const currTableH = meanHeight(st.species, st.siteType, st.ageYears, 1.0);
     const prevTableH = meanHeight(st.species, st.siteType, st.ageYears - 1, 1.0);
     const tableTargetH = meanHeight(st.species, st.siteType, st.ageYears, gm);
     if (prevTableH > 0.01) {
       const absGrowth = (currTableH - prevTableH) * gm;
-      const convergenceH = CONVERGENCE * (tableTargetH - st.meanHeight);
-      const newH = Math.round((st.meanHeight + absGrowth + convergenceH) * 10000) / 10000;
+      const newH = Math.round((st.meanHeight + absGrowth) * 10000) / 10000;
       // Old-age height floor (same age-dependent multiplier as diameter).
       const minHIncr = (MIN_HEIGHT_INCREMENT[st.species]
         ?? MIN_HEIGHT_INCREMENT_DEFAULT) * gm;
@@ -324,7 +315,12 @@ export function growStand(
       st.meanHeight = Math.round(tableTargetH * 10000) / 10000;
     }
   }
+  // Diameter: Tapio absolute delta + 5%/yr convergence toward D_REF curve.
+  // D has a genuine biological ceiling (D_REF) — a stand below the curve
+  // should catch up over time. Convergence closes the gap at 5% per year.
+  // Falls back to direct table value when prevTable ≤ 0.01.
   {
+    const CONVERGENCE = 0.05;
     const currTableD = meanDiameter(st.species, st.siteType, st.ageYears, 1.0);
     const prevTableD = meanDiameter(st.species, st.siteType, st.ageYears - 1, 1.0);
     const tableTargetD = meanDiameter(st.species, st.siteType, st.ageYears, gm);

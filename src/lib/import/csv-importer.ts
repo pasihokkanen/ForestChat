@@ -5,6 +5,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchPropertyBoundary } from "./mml-client";
+import { resolveMunicipalityFromPropertyId } from "./municipality-lookup";
 import type { ParsedCsvData, CsvStandRow, CsvSpeciesRow } from "./csv-parser";
 
 export interface CsvImportResult {
@@ -92,7 +93,18 @@ export async function importStandsFromCsv(
     }
     forestId = forest.id;
 
-    // 3. Store property boundary
+    // 3a. Resolve municipality from property ID and set growth multiplier
+    const municipality = resolveMunicipalityFromPropertyId(propertyId);
+    await supabase
+      .from("forests")
+      .update({
+        municipality: municipality.name,
+        price_region: municipality.priceRegion,
+        growth_multiplier: municipality.growthMultiplier,
+      })
+      .eq("id", forestId);
+
+    // 3b. Store property boundary
     const { error: boundaryError } = await supabase
       .from("property_boundaries")
       .upsert({

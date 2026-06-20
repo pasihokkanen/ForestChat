@@ -78,20 +78,7 @@ export function getOptimalAge(species: string, site: string, growthMultiplier = 
   return [Math.round(optMin * ageMultiplier), Math.round(optMax * ageMultiplier)];
 }
 
-// ─── Region multipliers (Luke VMI13 based) ───
-
-/** Growth rate multiplier per Luke price region. 1.00 = Väli-Suomi baseline. */
-export const GROWTH_REGION_MULTIPLIERS: Record<string, number> = {
-  "1": 1.10,   // Etelä-Suomi
-  "3": 1.00,   // Keski-Suomi (baseline)
-  "4": 0.90,   // Savo-Karjala
-  "5": 1.05,   // Kymi-Savo
-  "6": 1.00,   // Etelä-Pohjanmaa (baseline)
-  "71": 0.80,  // Pohjois-Pohjanmaa
-  "72": 0.75,  // Kainuu-Koillismaa
-  "8": 0.55,   // Lappi
-  "9": 1.00,   // KOKO MAA (fallback)
-};
+// ─── Price region multipliers (Luke based) ───
 
 /** Timber price multiplier per Luke price region (fallback when API is unavailable). */
 export const PRICE_REGION_MULTIPLIERS: Record<string, number> = {

@@ -88,10 +88,9 @@ describe("schedulePlan (Phase 7b rewrite — dynamic spawning)", () => {
     // spruce on mesic: optMin=65, optMax=85 → optMax+15=100.
     // age 100 with 400 stems on mesic still has trace growth → cap > 0.
     const stand = makeStand({
-      standId: "cs1",
-      volumeM3: 1600,
-      valueEur: 80000,
-      areaHa: 10,
+      standId: "s4",
+      volumeM3: 500,
+      valueEur: 25000,
       ageYears: 100,
       ba: 30,
       siteType: "mesic",
@@ -99,6 +98,7 @@ describe("schedulePlan (Phase 7b rewrite — dynamic spawning)", () => {
       mainSpecies: "spruce",
       annual_growth: 5.0,
       stemCount: 400,
+      meanHeight: 17,   // realistic height for D=30 spruce at age 100
     });
     const { years } = schedulePlan([stand], 2026, 20, "carbon_storage", 1.0);
     const allHarvests = years.flatMap((y) => [...y.finalHarvests, ...y.thinnings]);

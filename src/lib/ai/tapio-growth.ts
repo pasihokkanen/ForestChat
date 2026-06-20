@@ -226,11 +226,11 @@ export function meanDiameter(
 
 /**
  * Form factor (f in V = BA × H × f) by species.
- * Conservative Finnish norms: pine 0.44, spruce 0.43, birch 0.40.
+ * Southern/central Finland norms: pine 0.47, spruce 0.45, birch 0.40.
  */
 const FORM_FACTOR: Record<string, number> = {
-  pine: 0.44,
-  spruce: 0.43,
+  pine: 0.47,
+  spruce: 0.45,
   silver_birch: 0.40,
   downy_birch: 0.40,
   larch: 0.45,

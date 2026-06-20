@@ -475,7 +475,7 @@ describe("estimateForestState", () => {
           expect(
             snap.meanHeight,
             `rotation ${ri} year ${snapshots[i].year}: height near-monotonic (${prevH.toFixed(1)} → ${snap.meanHeight.toFixed(1)})`,
-          ).toBeGreaterThanOrEqual(prevH - 0.05); // convergence may pull toward table
+          ).toBeGreaterThanOrEqual(prevH - 0.05); // rounding tolerance only (no convergence)
           expect(
             snap.meanDiameter,
             `rotation ${ri} year ${snapshots[i].year}: diameter near-monotonic (${prevD.toFixed(1)} → ${snap.meanDiameter.toFixed(1)})`,

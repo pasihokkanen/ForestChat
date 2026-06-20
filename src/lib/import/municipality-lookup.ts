@@ -335,3 +335,15 @@ export function lookupMunicipality(kuntanumero: string): MunicipalityInfo {
     growthMultiplier: 1.0,
   };
 }
+
+/**
+ * Resolve municipality info from a Finnish property ID (kiinteistötunnus).
+ * The first 3 digits of the normalized ID are the kuntanumero.
+ *
+ * Example: "989-405-0001-0405" → municipality "989" → Ähtäri, region 6, gm=1.00
+ */
+export function resolveMunicipalityFromPropertyId(propertyId: string): MunicipalityInfo {
+  const normalized = propertyId.replace(/-/g, "");
+  const kuntanumero = normalized.slice(0, 3);
+  return lookupMunicipality(kuntanumero);
+}

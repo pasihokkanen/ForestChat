@@ -1,6 +1,7 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchPropertyBoundary } from "@/lib/import/mml-client";
+import { resolveMunicipalityFromPropertyId } from "@/lib/import/municipality-lookup";
 import { env } from "@/lib/env";
 import { NextResponse, type NextRequest } from "next/server";
 
@@ -59,6 +60,17 @@ export async function POST(request: NextRequest) {
         `Failed to create forest: ${forestError?.message}`
       );
     }
+
+    // 4a. Resolve municipality from property ID and set growth multiplier
+    const municipality = resolveMunicipalityFromPropertyId(property_id);
+    await admin
+      .from("forests")
+      .update({
+        municipality: municipality.name,
+        price_region: municipality.priceRegion,
+        growth_multiplier: municipality.growthMultiplier,
+      })
+      .eq("id", forest.id);
 
     // 5. Store property boundary
     const { error: boundaryError } = await admin
