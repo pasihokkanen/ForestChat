@@ -29,6 +29,12 @@ import {
   computeStandHeight,
   formFactor,
 } from "./tapio-growth";
+import {
+  MIN_DIAMETER_INCREMENT,
+  MIN_DIAMETER_INCREMENT_DEFAULT,
+  MIN_HEIGHT_INCREMENT,
+  MIN_HEIGHT_INCREMENT_DEFAULT,
+} from "./config";
 
 // ═══════════════════════════════════════════════════════════════════════
 // Shared interface — any stand-like object that can be grown/snapshotted.
@@ -301,7 +307,13 @@ export function growStand(
     if (prevTableH > 0.01) {
       const absGrowth = (currTableH - prevTableH) * gm;
       const convergenceH = CONVERGENCE * (tableTargetH - st.meanHeight);
-      st.meanHeight = Math.round((st.meanHeight + absGrowth + convergenceH) * 10000) / 10000;
+      const newH = Math.round((st.meanHeight + absGrowth + convergenceH) * 10000) / 10000;
+      // Old-age height floor (same age-dependent multiplier as diameter).
+      const minHIncr = (MIN_HEIGHT_INCREMENT[st.species]
+        ?? MIN_HEIGHT_INCREMENT_DEFAULT) * gm;
+      const ageFactor = Math.max(0.3, 1.0 - (st.ageYears - 80) / 300);
+      const floorH = st.meanHeight + minHIncr * ageFactor;
+      st.meanHeight = Math.max(newH, floorH);
     } else {
       st.meanHeight = Math.round(tableTargetH * 10000) / 10000;
     }
@@ -313,7 +325,16 @@ export function growStand(
     if (prevTableD > 0.01) {
       const absGrowth = (currTableD - prevTableD) * gm;
       const convergenceD = CONVERGENCE * (tableTargetD - st.meanDiameter);
-      st.meanDiameter = Math.round((st.meanDiameter + absGrowth + convergenceD) * 10000) / 10000;
+      const newD = Math.round((st.meanDiameter + absGrowth + convergenceD) * 10000) / 10000;
+      // Old-age floor: trees never stop growing. The floor activates when
+      // Tapio+convergence growth drops below the minimum annual increment.
+      // Age-dependent multiplier: floor declines from 100% at age 80 to
+      // 60% at age 200, to 30% at age 290+, matching natural senescence.
+      const minDIncr = (MIN_DIAMETER_INCREMENT[st.species]?.[st.siteType]
+        ?? MIN_DIAMETER_INCREMENT_DEFAULT) * gm;
+      const ageFactor = Math.max(0.3, 1.0 - (st.ageYears - 80) / 300);
+      const floorD = st.meanDiameter + minDIncr * ageFactor;
+      st.meanDiameter = Math.max(newD, floorD);
     } else {
       st.meanDiameter = Math.round(tableTargetD * 10000) / 10000;
     }

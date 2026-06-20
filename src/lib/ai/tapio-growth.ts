@@ -55,6 +55,10 @@ const HEIGHT_PCT: [number, number][] = [
   [80, 93],
   [90, 96],
   [100, 99],
+  // Tail: old trees continue slow height growth (1-3 cm/yr beyond age 100).
+  [120, 100.5],
+  [150, 101.5],
+  [200, 102.5],
 ];
 
 /**
@@ -164,8 +168,19 @@ const DIAMETER_PCT: [number, number][] = [
   [60, 94],
   [70, 97],
   [80, 100],
-  [90, 100],
-  [100, 100],
+  // Tail: old trees continue slow diameter growth beyond the reference age.
+  // PCT values rise smoothly above 100%, producing Tapio deltas that decline
+  // from ~0.06 cm/yr at age 80 to ~0.04 cm/yr at age 200 (for D_REF=24).
+  // Exponentially decaying delta: δ(t) = 0.167 + 0.083×exp(-(t-80)/40) %/yr
+  [85, 101.2],
+  [90, 102.4],
+  [100, 104.6],
+  [110, 106.8],
+  [120, 108.8],
+  [140, 112.6],
+  [160, 116.2],
+  [180, 119.7],
+  [200, 123.2],
 ];
 
 /**

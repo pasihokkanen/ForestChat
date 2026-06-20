@@ -224,6 +224,33 @@ export const THINNING_MIN_REMOVAL = 0.25;
  *  ≥15 year recovery intervals on fast-growing sites. */
 export const THINNING_MAX_REMOVAL = 0.50;
 
+/** Minimum annual diameter increment (cm/year) at old age, by species × site.
+ *  Ensures trees never stop growing even at the Tapio D_REF asymptote.
+ *  Values are ~60-70% of the Tapio tail delta so the floor only activates
+ *  as a safety net when Tapio+convergence growth drops below this floor.
+ *  Applied with an age-dependent multiplier: floor × max(0.3, 1−(age−80)/300). */
+export const MIN_DIAMETER_INCREMENT: Record<string, Record<string, number>> = {
+  pine:        { "herb-rich heath": 0.04, mesic: 0.035, "sub-xeric": 0.030, xeric: 0.020 },
+  spruce:      { "herb-rich heath": 0.05, mesic: 0.040, "sub-xeric": 0.030 },
+  silver_birch:{ "herb-rich heath": 0.03, mesic: 0.025 },
+  downy_birch: { mesic: 0.025, "sub-xeric": 0.020 },
+  larch:       { "herb-rich heath": 0.04, mesic: 0.035, "sub-xeric": 0.025 },
+  grey_alder:  { "herb-rich heath": 0.03, mesic: 0.025, "sub-xeric": 0.020 },
+};
+
+/** Fallback minimum diameter increment when species/site not in table. */
+export const MIN_DIAMETER_INCREMENT_DEFAULT = 0.025;
+
+/** Minimum annual height increment (m/year) at old age, by species.
+ *  Applied with same age-dependent multiplier as diameter floor. */
+export const MIN_HEIGHT_INCREMENT: Record<string, number> = {
+  pine: 0.010, spruce: 0.015, silver_birch: 0.008, downy_birch: 0.008,
+  larch: 0.012, grey_alder: 0.008,
+};
+
+/** Fallback minimum height increment when species not in table. */
+export const MIN_HEIGHT_INCREMENT_DEFAULT = 0.010;
+
 export const MIN_AGE_FIRST_THINNING: Record<string, number> = { pine: 30, spruce: 25, downy_birch: 20, silver_birch: 20, larch: 25, grey_alder: 20 };
 export const MIN_AGE_THINNING: Record<string, number> =  { pine: 45, spruce: 40, downy_birch: 35, silver_birch: 35, larch: 40, grey_alder: 35 };
 
