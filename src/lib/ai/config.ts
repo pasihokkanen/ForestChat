@@ -166,8 +166,8 @@ export function getThinningTriggerBA(species: string, siteClass: string): number
  *  fast-growing species/sites. Derived from Tapio D growth rates at minimum
  *  thinning age with a convergence bonus for stands below the Tapio curve. */
 export const THINNING_HEADROOM: Record<string, Record<string, number>> = {
-  pine:        { "herb-rich heath": 11, mesic: 12, "sub-xeric": 10, xeric: 9 },
-  spruce:      { "herb-rich heath": 12, mesic: 12, "sub-xeric": 11 },
+  pine:        { "herb-rich heath": 9, mesic: 10, "sub-xeric": 10, xeric: 9 },
+  spruce:      { "herb-rich heath": 10, mesic: 10, "sub-xeric": 11 },
   silver_birch:{ "herb-rich heath": 10, mesic: 10 },
   downy_birch: { mesic: 10, "sub-xeric": 9 },
   larch:       { "herb-rich heath": 11, mesic: 10, "sub-xeric": 9 },

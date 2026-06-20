@@ -412,13 +412,14 @@ function spawnOperations(
       continue; // Step 1: skip thinning — this stand is clearcut-ready
     }
 
-    // ── Maturity gate: skip thinning if clearcut is imminent (≤15 years) ──
+    // ── Maturity gate: skip thinning if clearcut is imminent (≤10 years) ──
     // Clones the stand and projects D growth using growStand() — the same
     // function the main simulation loop uses. If the clone reaches both
-    // the clearcut D and age thresholds within 15 years, the thinning is
+    // the clearcut D and age thresholds within 10 years, the thinning is
     // skipped so the stand can grow undisturbed to final harvest.
+    // 10-year window matches Tapio's minimum final growth period (10-15y).
     // Fast path: age too far from clearcut — skip the projection entirely.
-    if (s.ageYears >= optMin - 15 && s.stemCount > 0) {
+    if (s.ageYears >= optMin - 10 && s.stemCount > 0) {
       const minDiam = CLEARCUT_MIN_DIAMETER[s.species]?.[s.siteClass]
         ?? CLEARCUT_MIN_DIAMETER[s.species]?.mesic
         ?? 26;
@@ -439,7 +440,7 @@ function spawnOperations(
         growthMultiplier: s.growthMultiplier,
         speciesData: s.speciesData.map((sp) => ({ ...sp })),
       };
-      for (let pYr = 1; pYr <= 15; pYr++) {
+      for (let pYr = 1; pYr <= 10; pYr++) {
         growStand(clone, clone.growthMultiplier);
         if (clone.meanDiameter >= minDiam && clone.ageYears >= optMin) {
           ccImminent = true;
@@ -447,7 +448,7 @@ function spawnOperations(
         }
       }
       if (ccImminent) {
-        dlog(`[SPAWN yr=${year}] stand=${s.standId} maturity gate: clearcut predicted ≤15yr (D=${s.meanDiameter.toFixed(1)}→${clone.meanDiameter.toFixed(1)}, age ${s.ageYears}→${clone.ageYears}), skipping thinning`);
+        dlog(`[SPAWN yr=${year}] stand=${s.standId} maturity gate: clearcut predicted ≤10yr (D=${s.meanDiameter.toFixed(1)}→${clone.meanDiameter.toFixed(1)}, age ${s.ageYears}→${clone.ageYears}), skipping thinning`);
         continue; // skip thinning — let stand grow to clearcut
       }
     }
