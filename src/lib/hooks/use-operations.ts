@@ -12,15 +12,17 @@ interface UseOperationsResult {
 }
 
 export function useOperations(
-  forestId: string | null
+  forestIds: string[] | null
 ): UseOperationsResult {
   const [data, setData] = useState<Operation[]>([]);
-  const [loading, setLoading] = useState<boolean>(forestId !== null);
+  const [loading, setLoading] = useState<boolean>(
+    forestIds !== null && forestIds.length > 0
+  );
   const [error, setError] = useState<string | null>(null);
   const refetchCounter = useForestStore((s) => s.refetchCounter);
 
   useEffect(() => {
-    if (forestId === null) {
+    if (forestIds === null || forestIds.length === 0) {
       setData([]);
       setLoading(false);
       setError(null);
@@ -36,8 +38,6 @@ export function useOperations(
         const supabase = createClient();
         const PAGE_SIZE = 1000;
 
-        // Paginate: Supabase PostgREST max-rows caps .limit() at 1000 server-side.
-        // Use .range() to fetch all pages until an empty/incomplete page signals end.
         let allOps: Operation[] = [];
         let from = 0;
 
@@ -46,7 +46,7 @@ export function useOperations(
           const { data: result, error: fetchError } = await supabase
             .from("operations")
             .select("*")
-            .eq("forest_id", forestId)
+            .in("forest_id", forestIds)
             .order("year", { ascending: true })
             .order("compartment_id", { ascending: true })
             .range(from, to);
@@ -62,7 +62,6 @@ export function useOperations(
           const page = (result as Operation[]) ?? [];
           allOps = allOps.concat(page);
 
-          // Stop when page is smaller than PAGE_SIZE (last page or no more rows)
           if (page.length < PAGE_SIZE) break;
           from += PAGE_SIZE;
         }
@@ -86,7 +85,7 @@ export function useOperations(
     return () => {
       cancelled = true;
     };
-  }, [forestId, refetchCounter]);
+  }, [forestIds, refetchCounter]);
 
   return { data, loading, error };
 }

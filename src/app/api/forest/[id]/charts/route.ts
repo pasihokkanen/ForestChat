@@ -1,5 +1,6 @@
 // src/app/api/forest/[id]/charts/route.ts
 // Chart tabs API — GET list, POST upsert, DELETE single or all charts.
+// Phase C3b: chart_tabs are user-scoped (user_id, chart_id unique constraint).
 
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
@@ -10,9 +11,9 @@ import {
 } from "@/lib/repos/chart-tabs";
 import type { ChartTab } from "@/lib/store/visualization-slice";
 
-function mapTabToRow(forestId: string, tab: ChartTab) {
+function mapTabToRow(userId: string, tab: ChartTab) {
   return {
-    forest_id: forestId,
+    user_id: userId,
     chart_id: tab.id,
     title_en: tab.title_en,
     title_fi: tab.title_fi ?? null,
@@ -29,7 +30,7 @@ function mapTabToRow(forestId: string, tab: ChartTab) {
   };
 }
 
-/** GET /api/forest/[id]/charts — List all chart tabs for a forest. */
+/** GET /api/forest/[id]/charts — List all chart tabs for the user. */
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -43,8 +44,7 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { id: forestId } = await params;
-    const tabs = await getChartTabs(forestId);
+    const tabs = await getChartTabs(user.id);
     return NextResponse.json(tabs);
   } catch (err) {
     return NextResponse.json(
@@ -68,7 +68,6 @@ export async function POST(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { id: forestId } = await params;
     const body = await request.json();
 
     // Validate required fields — data is optional when query_config is present
@@ -106,9 +105,9 @@ export async function POST(
       );
     }
 
-    const row = mapTabToRow(forestId, body as ChartTab);
+    const row = mapTabToRow(user.id, body as ChartTab);
     await supabase.from("chart_tabs").upsert(row, {
-      onConflict: "forest_id, chart_id",
+      onConflict: "user_id, chart_id",
     });
 
     return NextResponse.json({ success: true, chart_id: body.id });
@@ -134,13 +133,12 @@ export async function DELETE(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { id: forestId } = await params;
     const chartId = request.nextUrl.searchParams.get("chart_id");
 
     if (chartId) {
-      await deleteChartTab(forestId, chartId);
+      await deleteChartTab(user.id, chartId);
     } else {
-      await deleteAllChartTabs(forestId);
+      await deleteAllChartTabs(user.id);
     }
 
     return NextResponse.json({ success: true });

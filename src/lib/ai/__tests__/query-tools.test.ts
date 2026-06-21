@@ -145,7 +145,7 @@ describe("searchStands", () => {
       compartments: createQueryableMock(mockCompartments, null),
     });
 
-    const result = await searchStands(supabase, "forest-1", {});
+    const result = await searchStands(supabase, ["forest-1"], {});
     expect(result.success).toBe(true);
     expect(result.result).toContain("Found 3 stand(s)");
     expect(result.result).toContain("Stand 1");
@@ -161,7 +161,7 @@ describe("searchStands", () => {
       ),
     });
 
-    const result = await searchStands(supabase, "forest-1", { stand_ids: ["1", "5"] });
+    const result = await searchStands(supabase, ["forest-1"], { stand_ids: ["1", "5"] });
     expect(result.success).toBe(true);
     expect(result.result).toContain("Found 2 stand(s)");
     expect(result.result).toContain("Stand 1");
@@ -174,7 +174,7 @@ describe("searchStands", () => {
       compartments: createQueryableMock([mockCompartments[0]], null),
     });
 
-    const result = await searchStands(supabase, "forest-1", { species: ["pine"] });
+    const result = await searchStands(supabase, ["forest-1"], { species: ["pine"] });
     expect(result.success).toBe(true);
     expect(result.result).toContain("Found 1 stand(s)");
     expect(result.result).toContain("pine");
@@ -185,7 +185,7 @@ describe("searchStands", () => {
       compartments: createQueryableMock([mockCompartments[1]], null),
     });
 
-    const result = await searchStands(supabase, "forest-1", { species: ["spruce"] });
+    const result = await searchStands(supabase, ["forest-1"], { species: ["spruce"] });
     expect(result.success).toBe(true);
     expect(result.result).toContain("spruce");
   });
@@ -195,7 +195,7 @@ describe("searchStands", () => {
       compartments: createQueryableMock([mockCompartments[0]], null),
     });
 
-    const result = await searchStands(supabase, "forest-1", { age_min: 40, age_max: 60 });
+    const result = await searchStands(supabase, ["forest-1"], { age_min: 40, age_max: 60 });
     expect(result.success).toBe(true);
     expect(result.result).toContain("Found 1 stand(s)");
   });
@@ -205,7 +205,7 @@ describe("searchStands", () => {
       compartments: createQueryableMock([], null),
     });
 
-    const result = await searchStands(supabase, "forest-1", { species: ["larch"] });
+    const result = await searchStands(supabase, ["forest-1"], { species: ["larch"] });
     expect(result.success).toBe(true);
     expect(result.result).toBe("No matching stands found.");
   });
@@ -215,7 +215,7 @@ describe("searchStands", () => {
       compartments: createQueryableMock([mockCompartments[0]], null),
     });
 
-    const result = await searchStands(supabase, "forest-1", { species: ["pine"] as any });
+    const result = await searchStands(supabase, ["forest-1"], { species: ["pine"] as any });
     expect(result.success).toBe(true);
     expect(result.result).toContain("pine");
   });
@@ -225,7 +225,7 @@ describe("searchStands", () => {
       compartments: createQueryableMock(null, { message: "Database connection failed" }),
     });
 
-    const result = await searchStands(supabase, "forest-1", {});
+    const result = await searchStands(supabase, ["forest-1"], {});
     expect(result.success).toBe(false);
     expect(result.error).toContain("connection");
   });
@@ -240,7 +240,7 @@ describe("queryOperations", () => {
       ),
     });
 
-    const result = await queryOperations(supabase, "forest-1", { years: [2026] });
+    const result = await queryOperations(supabase, ["forest-1"], { years: [2026] });
     expect(result.success).toBe(true);
     expect(result.result).toContain("Found 2 operation(s)");
     expect(result.result).toContain("2026");
@@ -251,7 +251,7 @@ describe("queryOperations", () => {
       operations: createQueryableMock([mockOperations[0]], null),
     });
 
-    const result = await queryOperations(supabase, "forest-1", { years: [2026] });
+    const result = await queryOperations(supabase, ["forest-1"], { years: [2026] });
     expect(result.success).toBe(true);
     expect(result.result).toContain("Stand 1");
     expect(result.result).toContain("pine");
@@ -264,7 +264,7 @@ describe("queryOperations", () => {
       operations: createQueryableMock([mockOperations[1]], null),
     });
 
-    const result = await queryOperations(supabase, "forest-1", { income_min: 30000 });
+    const result = await queryOperations(supabase, ["forest-1"], { income_min: 30000 });
     expect(result.success).toBe(true);
     expect(result.result).toContain("Found 1 operation(s)");
   });
@@ -274,7 +274,7 @@ describe("queryOperations", () => {
       operations: createQueryableMock([], null),
     });
 
-    const result = await queryOperations(supabase, "forest-1", { years: [2099] });
+    const result = await queryOperations(supabase, ["forest-1"], { years: [2099] });
     expect(result.success).toBe(true);
     expect(result.result).toBe("No matching operations found.");
   });
@@ -284,7 +284,7 @@ describe("queryOperations", () => {
       operations: createQueryableMock(null, { message: "DB error" }),
     });
 
-    const result = await queryOperations(supabase, "forest-1", {});
+    const result = await queryOperations(supabase, ["forest-1"], {});
     expect(result.success).toBe(false);
     expect(result.error).toBe("DB error");
   });
@@ -299,7 +299,7 @@ describe("batchUpdateOperations", () => {
 
     const result = await batchUpdateOperations(
       supabase,
-      "forest-1",
+      ["forest-1"],
       { years: [2026], types: ["thinning"] },
       { year: 2028 }
     );
@@ -316,7 +316,7 @@ describe("batchUpdateOperations", () => {
     const badUpdate = { type: "clear_cut" };
     const result = await batchUpdateOperations(
       supabase,
-      "forest-1",
+      ["forest-1"],
       {},
       badUpdate as any
     );
@@ -331,7 +331,7 @@ describe("batchUpdateOperations", () => {
 
     const result = await batchUpdateOperations(
       supabase,
-      "forest-1",
+      ["forest-1"],
       {},
       { year: 2020 }
     );
@@ -346,7 +346,7 @@ describe("batchUpdateOperations", () => {
 
     const result = await batchUpdateOperations(
       supabase,
-      "forest-1",
+      ["forest-1"],
       { years: [2099] },
       { year: 2028 }
     );
@@ -362,7 +362,7 @@ describe("batchUpdateOperations", () => {
 
     const result = await batchUpdateOperations(
       supabase,
-      "forest-1",
+      ["forest-1"],
       { years: [2026], types: ["thinning"] },
       { notes: "Updated batch" }
     );

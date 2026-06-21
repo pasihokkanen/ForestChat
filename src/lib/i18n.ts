@@ -318,6 +318,10 @@ export function serverMsg(key: string, lang: Language, ...args: string[]): strin
       en: "ℹ️ No AI-generated operations to clear — the plan is already empty.",
       fi: "ℹ️ Ei tyhjennettävää — suunnitelmassa ei ole tekoälyn luomia toimenpiteitä.",
     },
+    planClearConfirmMulti: {
+      en: "⚠️ Confirmation required: This will clear ALL AI-generated operations from {0} active forests. To proceed, call clear_plan again with confirm:true.",
+      fi: "⚠️ Vahvistus vaaditaan: Tämä tyhjentää KAIKKI tekoälyn luomat toimenpiteet {0} aktiivisesta metsästä. Jatkaaksesi, kutsu clear_plan uudelleen parametrillä confirm:true.",
+    },
     noMatchingOperations: {
       en: "No matching operations found.",
       fi: "Ei vastaavia toimenpiteitä löytynyt.",

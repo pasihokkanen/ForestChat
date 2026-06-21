@@ -11,20 +11,18 @@ interface UseCompartmentSpeciesResult {
   error: string | null;
 }
 
-/**
- * Fetches all compartment_species rows for a forest.
- * Writes them to the Zustand store for use in map popups, charts, etc.
- */
 export function useCompartmentSpecies(
-  forestId: string | null
+  forestIds: string[] | null
 ): UseCompartmentSpeciesResult {
   const [data, setData] = useState<CompartmentSpecies[]>([]);
-  const [loading, setLoading] = useState<boolean>(forestId !== null);
+  const [loading, setLoading] = useState<boolean>(
+    forestIds !== null && forestIds.length > 0
+  );
   const [error, setError] = useState<string | null>(null);
   const refetchCounter = useForestStore((s) => s.refetchCounter);
 
   useEffect(() => {
-    if (forestId === null) {
+    if (forestIds === null || forestIds.length === 0) {
       setData([]);
       setLoading(false);
       setError(null);
@@ -41,7 +39,7 @@ export function useCompartmentSpecies(
         const { data: result, error: fetchError } = await supabase
           .from("compartment_species")
           .select("*")
-          .eq("forest_id", forestId)
+          .in("forest_id", forestIds)
           .order("stand_id")
           .order("species");
 
@@ -71,7 +69,7 @@ export function useCompartmentSpecies(
     return () => {
       cancelled = true;
     };
-  }, [forestId, refetchCounter]);
+  }, [forestIds, refetchCounter]);
 
   return { data, loading, error };
 }

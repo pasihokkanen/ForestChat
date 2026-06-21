@@ -1,27 +1,28 @@
 // src/lib/repos/chart-tabs.ts
 // Supabase repo for chart_tabs CRUD operations.
+// Phase C3b: chart_tabs are user-scoped (user_id, chart_id unique constraint).
 
 import { createServerSupabase } from "@/lib/supabase/server";
 import type { ChartTab } from "@/lib/store/visualization-slice";
 
-export async function getChartTabs(forestId: string): Promise<ChartTab[]> {
+export async function getChartTabs(userId: string): Promise<ChartTab[]> {
   const supabase = await createServerSupabase();
   const { data } = await supabase
     .from("chart_tabs")
     .select("*")
-    .eq("forest_id", forestId)
+    .eq("user_id", userId)
     .order("created_at", { ascending: true });
   return (data ?? []).map(mapRowToChartTab);
 }
 
 export async function upsertChartTab(
-  forestId: string,
+  userId: string,
   tab: ChartTab
 ): Promise<void> {
   const supabase = await createServerSupabase();
   await supabase.from("chart_tabs").upsert(
     {
-      forest_id: forestId,
+      user_id: userId,
       chart_id: tab.id,
       title_en: tab.title_en,
       title_fi: tab.title_fi ?? null,
@@ -35,25 +36,25 @@ export async function upsertChartTab(
       ...(tab.query_config ? { query_config: tab.query_config } : {}),
       ...(tab.computed_at ? { computed_at: tab.computed_at } : {}),
     },
-    { onConflict: "forest_id, chart_id" }
+    { onConflict: "user_id, chart_id" }
   );
 }
 
 export async function deleteChartTab(
-  forestId: string,
+  userId: string,
   chartId: string
 ): Promise<void> {
   const supabase = await createServerSupabase();
   await supabase
     .from("chart_tabs")
     .delete()
-    .eq("forest_id", forestId)
+    .eq("user_id", userId)
     .eq("chart_id", chartId);
 }
 
-export async function deleteAllChartTabs(forestId: string): Promise<void> {
+export async function deleteAllChartTabs(userId: string): Promise<void> {
   const supabase = await createServerSupabase();
-  await supabase.from("chart_tabs").delete().eq("forest_id", forestId);
+  await supabase.from("chart_tabs").delete().eq("user_id", userId);
 }
 
 function mapRowToChartTab(row: Record<string, unknown>): ChartTab {

@@ -19,13 +19,13 @@ afterAll(() => server.close());
 
 describe("useCompartments", () => {
   it("returns loading=true initially", () => {
-    const { result } = renderHook(() => useCompartments("test-forest"));
+    const { result } = renderHook(() => useCompartments(["test-forest"]));
     expect(result.current.loading).toBe(true);
     expect(result.current.data).toEqual([]);
   });
 
   it("fetches compartments and updates state", async () => {
-    const { result } = renderHook(() => useCompartments("test-forest"));
+    const { result } = renderHook(() => useCompartments(["test-forest"]));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -38,7 +38,7 @@ describe("useCompartments", () => {
   });
 
   it("returns empty array for unknown forest ID", async () => {
-    const { result } = renderHook(() => useCompartments("nonexistent"));
+    const { result } = renderHook(() => useCompartments(["nonexistent"]));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);

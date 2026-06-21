@@ -3,42 +3,35 @@
 import { useEffect } from "react";
 import { useForestStore } from "@/lib/store";
 
-/**
- * Fetches chart tabs for a forest from Supabase on mount and populates Zustand.
- * Charts persist across page reloads and devices.
- */
-export function useCharts(forestId: string) {
+export function useCharts(forestIds: string[]) {
   const setChartTabs = useForestStore((s) => s.setChartTabs);
   const setActiveChartTab = useForestStore((s) => s.setActiveChartTab);
+  const forestIdsKey = forestIds.join(",");
 
   useEffect(() => {
     let cancelled = false;
 
-    fetch(`/api/forest/${encodeURIComponent(forestId)}/charts`)
+    fetch(`/api/charts?forests=${encodeURIComponent(forestIdsKey)}`)
       .then((res) => res.json())
       .then((tabs) => {
         if (!cancelled && Array.isArray(tabs)) {
           setChartTabs(tabs);
-          // Restore previously active chart tab from localStorage
           try {
-            const saved = localStorage.getItem("forestchat_activeChart_" + forestId);
+            const saved = localStorage.getItem("forestchat_activeChart_" + forestIdsKey);
             if (saved && tabs.some((t: { id: string }) => t.id === saved)) {
               setActiveChartTab(saved);
             } else if (tabs.length > 0) {
               setActiveChartTab(tabs[tabs.length - 1].id);
             }
           } catch {
-            // ignore localStorage errors
             if (tabs.length > 0) setActiveChartTab(tabs[tabs.length - 1].id);
           }
         }
       })
-      .catch(() => {
-        // Silently fail — charts stay empty, user can ask AI to recreate
-      });
+      .catch(() => {});
 
     return () => {
       cancelled = true;
     };
-  }, [forestId, setChartTabs, setActiveChartTab]);
+  }, [forestIdsKey, setChartTabs, setActiveChartTab]);
 }

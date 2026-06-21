@@ -5,13 +5,13 @@ import type { PlanMetadata } from "@/types/database";
 import { createClient } from "@/lib/supabase/client";
 import { useForestStore } from "@/lib/store";
 
-export function usePlanMetadata(forestId: string | null) {
+export function usePlanMetadata(forestIds: string[] | null) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const refetchCounter = useForestStore((s) => s.refetchCounter);
 
   useEffect(() => {
-    if (!forestId) return;
+    if (!forestIds || forestIds.length === 0) return;
 
     let cancelled = false;
     setLoading(true);
@@ -22,7 +22,7 @@ export function usePlanMetadata(forestId: string | null) {
       const { data, error: fetchError } = await supabase
         .from("plan_metadata")
         .select("*")
-        .eq("forest_id", forestId)
+        .in("forest_id", forestIds)
         .limit(1)
         .single();
 
@@ -41,7 +41,7 @@ export function usePlanMetadata(forestId: string | null) {
 
     fetchMeta();
     return () => { cancelled = true; };
-  }, [forestId, refetchCounter]);
+  }, [forestIds, refetchCounter]);
 
   return { loading, error };
 }

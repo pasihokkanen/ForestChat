@@ -10,21 +10,17 @@ interface UseCompartmentsResult {
   error: string | null;
 }
 
-/**
- * Fetches compartments for a forest from Supabase.
- * Supabase returns PostGIS geometry as GeoJSON objects directly.
- * The `compartmentsToGeoJSON` converter handles CRS reprojection
- * from EPSG:3067 to EPSG:4326 for MapLibre rendering.
- */
 export function useCompartments(
-  forestId: string | null
+  forestIds: string[] | null
 ): UseCompartmentsResult {
   const [data, setData] = useState<Compartment[]>([]);
-  const [loading, setLoading] = useState<boolean>(forestId !== null);
+  const [loading, setLoading] = useState<boolean>(
+    forestIds !== null && forestIds.length > 0
+  );
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (forestId === null) {
+    if (forestIds === null || forestIds.length === 0) {
       setData([]);
       setLoading(false);
       setError(null);
@@ -41,8 +37,10 @@ export function useCompartments(
         const { data: result, error: fetchError } = await supabase
           .from("compartments")
           .select("*")
-          .eq("forest_id", forestId)
-          .order("stand_id");
+          .in("forest_id", forestIds)
+          .order("stand_id")
+          .order("forest_id")
+          .limit(1000);
 
         if (cancelled) return;
 
@@ -68,7 +66,7 @@ export function useCompartments(
     return () => {
       cancelled = true;
     };
-  }, [forestId]);
+  }, [forestIds]);
 
   return { data, loading, error };
 }

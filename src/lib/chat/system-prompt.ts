@@ -73,19 +73,8 @@ export function buildSystemPrompt(
     ].join("\n");
   }
 
-  // Forest mode — first active forest drives the prompt
-  const firstActiveId = activeForestIds[0];
-  const activeForest = forests.find((f) => f.id === firstActiveId);
-
-  const forestContext = activeForest
-    ? buildForestDetailPrompt(activeForest, compartments)
-    : "";
-
-  return [
-    `You are a Finnish forestry expert helping a forest owner manage their forest plan.`,
+  const guidelines = [
     ``,
-    forestContext,
-
     `GUIDELINES: Plan behavior depends on the selected goal. Rules like rotation age, harvest limits, and regeneration methods vary. After generating a plan, the goal is visible in plan_summary.`,
     `5. Explain your recommendations in forestry terms.`,
     `6. ${language === "fi" ? "Vastaa suomeksi. Kaikki työkalukutsut ja parametrit pysyvät englanniksi (järjestelmän sisäinen kieli), mutta käyttäjälle näytettävä teksti on suomeksi." : "Respond in English."}`,
@@ -193,7 +182,7 @@ export function buildSystemPrompt(
     `      { source:\"compartments\", aggregate:[], values:[{field:\"growth_m3_total\", as:\"growth\", fn:\"sum\", cumulative:true}], broadcast:true }`,
     `    ], sort:{by:\"year\"} }`,
     `    → type:\"line\", x_key:\"year\", y_key:\"removal\", y_key2:\"growth\". broadcast:true fans growth to all years. growth_m3_total computed from growth_m3_per_ha × area_ha.`,
-
+    ``,
     `SIMPLER GROWTH+REMOVAL (single-source):`,
     `  Yearly net volume change (growth − removal) via operations join to compartments:`,
     `    { source:\"operations\", join:{table:\"compartments\", on:\"compartment_id\", fields:[\"site_type\",\"soil_type\",\"main_species\",\"age_years\",\"basal_area\",\"development_class\",\"area_ha\",\"volume_m3\"]}, aggregate:[{group_by:\"year\"}], values:[{field:\"net_volume_change\", as:\"net\", fn:\"sum\"}], sort:{by:\"year\"} }`,
@@ -221,6 +210,57 @@ export function buildSystemPrompt(
     `  compartment_species: species (pine|spruce|silver_birch|downy_birch|grey_alder|larch|aspen|rowan), volume_m3, area_ha, compartment_id. NO dev_class column — use join with compartments.`,
     ``,
     `CONVENTIONS: Common group_by: year, type, main_species, species, development_class, stand_id. Value field→as: income_eur→income, cost_eur→cost, area_ha→total_ha, volume_m3→total_m3. Always sort:{by:\"year\"} when grouping by year. Joined fields use \"comp.\" prefix in group_by/filters.`,
+  ];
+
+  // Multi-forest mode — per-forest breakdown
+  if (activeForestIds.length > 1) {
+    const perForestLines: string[] = [];
+    let totalCompartments = 0;
+    let totalArea = 0;
+    let totalVolume = 0;
+
+    for (const fid of activeForestIds) {
+      const f = forests.find((ff) => ff.id === fid);
+      if (!f) continue;
+      const fCompartments = compartments.filter((c) => c.forest_id === fid);
+      const compCount = fCompartments.length;
+      const area = fCompartments.reduce((s, c) => s + (c.area_ha ?? 0), 0);
+      const volume = fCompartments.reduce((s, c) => s + (c.volume_m3 ?? 0), 0);
+      const totalGrowth = fCompartments.reduce((s, c) => s + ((c.growth_m3_per_ha ?? 0) * (c.area_ha ?? 0)), 0);
+      const gm = volume > 0 ? (totalGrowth / volume).toFixed(2) : "0.00";
+      perForestLines.push(`- ${f.name}: ${compCount} compartments, ${area.toFixed(1)} ha, ${Math.round(volume).toLocaleString()} m³ (gm: ${gm})`);
+      totalCompartments += compCount;
+      totalArea += area;
+      totalVolume += volume;
+    }
+
+    const perForestBlock = [
+      `ACTIVE FORESTS (${activeForestIds.length} of ${forests.length} selected):`,
+      ...perForestLines,
+      `Combined: ${totalCompartments} compartments, ${totalArea.toFixed(1)} ha, ${Math.round(totalVolume).toLocaleString()} m³`,
+    ].join("\n");
+
+    return [
+      `You are a Finnish forestry expert helping a forest owner manage their forest plan.`,
+      ``,
+      perForestBlock,
+      ...guidelines,
+    ].join("\n");
+  }
+
+  // Single forest mode — first active forest drives the prompt
+  const firstActiveId = activeForestIds[0];
+  const activeForest = forests.find((f) => f.id === firstActiveId);
+
+  const forestContext = activeForest
+    ? buildForestDetailPrompt(activeForest, compartments)
+    : "";
+
+  return [
+    `You are a Finnish forestry expert helping a forest owner manage their forest plan.`,
+    ``,
+    forestContext,
+    ...guidelines,
   ]
     .filter(Boolean)
     .join("\n");

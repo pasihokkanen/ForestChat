@@ -1278,12 +1278,13 @@ export async function recomputeChartData(
 export async function recomputeAllCharts(
   supabase: SupabaseClient,
   forestIds: string[],
+  userId: string,
   sendSse?: (event: string, data: unknown) => void
 ): Promise<void> {
   const { data: tabs, error } = await supabase
     .from("chart_tabs")
-    .select("chart_id, forest_id, query_config, title_en, title_fi")
-    .in("forest_id", forestIds)
+    .select("chart_id, query_config, title_en, title_fi")
+    .eq("user_id", userId)
     .not("query_config", "is", null);
 
   if (error) {
@@ -1307,7 +1308,7 @@ export async function recomputeAllCharts(
           data: result.data,
           computed_at: result.computedAt,
         })
-        .eq("forest_id", tab.forest_id)
+        .eq("user_id", userId)
         .eq("chart_id", tab.chart_id);
 
       recomputedIds.push(tab.chart_id);

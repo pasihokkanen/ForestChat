@@ -9,6 +9,7 @@ import type { Compartment, Operation } from "@/types/database";
 import { serverMsg } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
 import { computeTapioAnnualGrowth } from "./tapio-growth";
+import { parseCompositeId } from "./stand-resolver";
 
 // ── Module-level constants (reused by searchStands and queryOperations) ──
 
@@ -127,19 +128,28 @@ export interface SearchStandsFilter {
 
 export async function getStand(
   supabase: SupabaseClient,
-  forestId: string,
+  forestIds: string[],
   standId: string,
   language: Language = "en",
 ): Promise<{ success: boolean; result: string; error?: string }> {
+  let resolvedForestId = forestIds[0];
+  let resolvedStandId = standId;
+
+  const composite = parseCompositeId(standId);
+  if (composite) {
+    resolvedForestId = composite.forestPart;
+    resolvedStandId = composite.standPart;
+  }
+
   const { data, error } = await supabase
     .from("compartments")
     .select("*")
-    .eq("forest_id", forestId)
-    .eq("stand_id", standId)
+    .eq("forest_id", resolvedForestId)
+    .eq("stand_id", resolvedStandId)
     .single();
 
   if (error || !data) {
-    return { success: false, result: "", error: `Stand ${standId} not found` };
+    return { success: false, result: "", error: `Stand ${resolvedStandId} not found` };
   }
 
   const c = data as Compartment;
@@ -164,14 +174,14 @@ export async function getStand(
 
 export async function searchStands(
   supabase: SupabaseClient,
-  forestId: string,
+  forestIds: string[],
   filters: SearchStandsFilter
 ): Promise<{ success: boolean; result: string; error?: string; data?: Record<string, unknown>[] }> {
   try {
     let query = supabase
       .from("compartments")
       .select(buildCompSelect(filters.fields))
-      .eq("forest_id", forestId);
+      .in("forest_id", forestIds);
 
     // Apply array filters (DB-level with .in())
     const standIds = toArray(filters.stand_ids);
@@ -251,20 +261,20 @@ export async function searchStands(
 
 export async function planSummary(
   supabase: SupabaseClient,
-  forestId: string,
+  forestIds: string[],
   language: Language = "en",
 ): Promise<{ success: boolean; result: string; error?: string }> {
   try {
     const { data: opsData } = await supabase
       .from("operations")
       .select("*")
-      .eq("forest_id", forestId);
+      .in("forest_id", forestIds);
     const operations = (opsData as Operation[]) ?? [];
 
     const { data: compData } = await supabase
       .from("compartments")
       .select("area_ha, volume_m3, site_type, soil_type, main_species, age_years, basal_area, development_class, stem_count_per_ha")
-      .eq("forest_id", forestId);
+      .in("forest_id", forestIds);
     const compartments = (compData as Array<{
       area_ha: number | null;
       volume_m3: number | null;
@@ -409,7 +419,7 @@ function buildOpSelect(fields?: string[]): string {
 
 export async function queryOperations(
   supabase: SupabaseClient,
-  forestId: string,
+  forestIds: string[],
   filters: QueryOperationsFilter
 ): Promise<{ success: boolean; result: string; error?: string }> {
   try {
@@ -417,7 +427,7 @@ export async function queryOperations(
     let query = supabase
       .from("operations")
       .select(buildOpSelect(filters.fields))
-      .eq("forest_id", forestId);
+      .in("forest_id", forestIds);
 
     // Apply operation-level filters (applied at DB level via PostgREST)
     if (filters.years?.length) {

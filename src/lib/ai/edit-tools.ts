@@ -11,6 +11,7 @@ import { calculateOperationIncome } from "./income-calculator";
 import { COSTS, normalizeOperationType, getRemovalPct } from "./config";
 import { serverMsg } from "../i18n";
 import type { Language } from "../i18n";
+import { parseCompositeId } from "./stand-resolver";
 
 const VALID_TYPES = [
   "clear_cut",
@@ -56,21 +57,29 @@ export async function addOperation(
   args: Record<string, unknown>,
   language: Language = "en",
 ): Promise<{ success: boolean; result: string; error?: string }> {
-  const standId = args.stand_id as string;
+  const rawStandId = args.stand_id as string;
   const year = args.year as number;
   const type = normalizeType(args.type as string);
-  // Type-aware removal percentage defaults (silvicultural ops get 0)
   const removalPct = (args.removal_pct as number) ?? getRemovalPct(type);
 
-  if (!standId || !year || !type) {
+  if (!rawStandId || !year || !type) {
     return { success: false, result: "", error: "Required: stand_id, year, type" };
+  }
+
+  let resolvedForestId = forestId;
+  let standId = rawStandId;
+
+  const composite = parseCompositeId(rawStandId);
+  if (composite) {
+    resolvedForestId = composite.forestPart;
+    standId = composite.standPart;
   }
 
   // Get compartment (Phase 4b: fetch full data for income calculation)
   const { data: compartment } = await supabase
     .from("compartments")
     .select("id, development_class, main_species, volume_m3, area_ha, attributes")
-    .eq("forest_id", forestId)
+    .eq("forest_id", resolvedForestId)
     .eq("stand_id", standId)
     .single();
 
@@ -82,7 +91,7 @@ export async function addOperation(
   const { data: existing } = await supabase
     .from("operations")
     .select("id")
-    .eq("forest_id", forestId)
+    .eq("forest_id", resolvedForestId)
     .eq("compartment_id", (compartment as Record<string, unknown>).id as string)
     .eq("year", year)
     .eq("type", type)
@@ -115,7 +124,7 @@ export async function addOperation(
   // Insert with computed income and cost
   const { error } = await supabase.from("operations").insert({
     compartment_id: compartmentData.id as string,
-    forest_id: forestId,
+    forest_id: resolvedForestId,
     type,
     year,
     removal_pct: removalPct,
@@ -142,38 +151,60 @@ export async function removeOperations(
   typeFilter?: string,
   language: Language = "en",
 ): Promise<{ success: boolean; result: string; error?: string }> {
-  // Resolve stand IDs to compartment IDs
-  const { data: compartments } = await supabase
-    .from("compartments")
-    .select("id, stand_id")
-    .eq("forest_id", forestId)
-    .in("stand_id", standIds);
-
-  if (!compartments || compartments.length === 0) {
-    return { success: false, result: "", error: `No stands found: ${standIds.join(", ")}` };
+  // Parse composite stand IDs, group by forest
+  const byForest = new Map<string, string[]>(); // forestId → standIds
+  for (const raw of standIds) {
+    const composite = parseCompositeId(raw);
+    if (composite) {
+      const fId = composite.forestPart;
+      const sId = composite.standPart;
+      if (!byForest.has(fId)) byForest.set(fId, []);
+      byForest.get(fId)!.push(sId);
+    } else {
+      if (!byForest.has(forestId)) byForest.set(forestId, []);
+      byForest.get(forestId)!.push(raw);
+    }
   }
 
-  const compIds = compartments.map((c) => (c as { id: string }).id);
+  let totalDeleted = 0;
+  const allDeleted: unknown[] = [];
 
-  let query = supabase
-    .from("operations")
-    .delete()
-    .eq("forest_id", forestId)
-    .in("compartment_id", compIds);
+  for (const [fId, sIds] of byForest) {
+    // Resolve stand IDs to compartment IDs
+    const { data: compartments } = await supabase
+      .from("compartments")
+      .select("id, stand_id")
+      .eq("forest_id", fId)
+      .in("stand_id", sIds);
 
-  if (year != null) query = query.eq("year", year);
-  if (typeFilter) query = query.eq("type", typeFilter);
+    if (!compartments || compartments.length === 0) continue;
 
-  const { data: deleted, error } = await query.select("id");
+    const compIds = compartments.map((c) => (c as { id: string }).id);
 
-  if (error) return { success: false, result: "", error: error.message };
+    let query = supabase
+      .from("operations")
+      .delete()
+      .eq("forest_id", fId)
+      .in("compartment_id", compIds);
 
-  const count = (deleted as unknown[] | null)?.length ?? 0;
+    if (year != null) query = query.eq("year", year);
+    if (typeFilter) query = query.eq("type", typeFilter);
+
+    const { data: deleted, error } = await query.select("id");
+
+    if (error) return { success: false, result: "", error: error.message };
+
+    const count = (deleted as unknown[] | null)?.length ?? 0;
+    totalDeleted += count;
+    if (deleted) allDeleted.push(...(deleted as unknown[]));
+  }
+
+  const count = totalDeleted;
   const yearLabel = language === "fi" ? "vuonna" : "in";
   const yearClause = year != null ? ` ${yearLabel} ${year}` : "";
   const typeLabel = language === "fi" ? "tyyppi" : "type";
   const typeClause = typeFilter ? ` (${typeLabel}: ${typeFilter})` : "";
-  const standLabel = standIds.length <= 3 ? standIds.join(", ") : `${standIds.length} stands`;  // numeric, no i18n needed
+  const standLabel = standIds.length <= 3 ? standIds.join(", ") : `${standIds.length} stands`;
 
   if (count === 0) {
     return { success: true, result: serverMsg("noOperationsForStand", language, standLabel, yearClause, typeClause) };
@@ -222,7 +253,7 @@ const MAX_BATCH_SIZE = 500;
  */
 export async function batchUpdateOperations(
   supabase: SupabaseClient,
-  forestId: string,
+  forestIds: string[],
   filter: BatchUpdateFilter,
   update: BatchUpdatePayload,
   language: Language = "en",
@@ -253,7 +284,7 @@ export async function batchUpdateOperations(
     let query = supabase
       .from("operations")
       .select("id, year, type, removal_pct, income_eur, cost_eur, compartments!inner(stand_id, main_species, development_class, site_type, area_ha, age_years, volume_m3)")
-      .eq("forest_id", forestId);
+      .in("forest_id", forestIds);
 
     // Operation-level filters
     if (filter.years?.length) query = query.in("year", filter.years);
@@ -370,7 +401,7 @@ export async function batchUpdateOperations(
       .from("operations")
       .update(updatePayload)
       .in("id", ids)
-      .eq("forest_id", forestId);
+      .in("forest_id", forestIds);
 
     if (updateError) throw new Error(updateError.message);
 
@@ -390,17 +421,84 @@ export async function batchUpdateOperations(
   }
 }
 
-/** Delete ALL AI-created operations for a forest. Uses the same pattern as generate_plan. */
+/** Delete ALL AI-created operations for one or all forests.
+ *  Multi-forest mode: when no forest_id AND 2+ active forests, requires explicit
+ *  confirm:true to proceed. First call without confirm returns a confirmation prompt. */
 export async function clearPlan(
   supabase: SupabaseClient,
-  forestId: string,
+  forestIds: string[],
   language: Language = "en",
-): Promise<{ success: boolean; result: string; error?: string }> {
+  options?: { forest_id?: string; confirm?: boolean },
+): Promise<{ success: boolean; result: string; error?: string; data?: Record<string, unknown>[] }> {
+  // Specific forest_id: clear ONLY that forest (ignore forestIds)
+  if (options?.forest_id) {
+    const targetForests = [options.forest_id];
+    const { count, error: countErr } = await supabase
+      .from("operations")
+      .select("*", { count: "exact", head: true })
+      .in("forest_id", targetForests)
+      .eq("created_by", "ai");
+
+    if (countErr) return { success: false, result: "", error: countErr.message };
+    if (!count || count === 0) return { success: true, result: serverMsg("planClearNone", language) };
+
+    const { error } = await supabase
+      .from("operations")
+      .delete()
+      .in("forest_id", targetForests)
+      .eq("created_by", "ai");
+
+    if (error) return { success: false, result: "", error: error.message };
+    return { success: true, result: serverMsg("planCleared", language, String(count)) };
+  }
+
+  // No specific forest_id
+  if (forestIds.length === 0) {
+    return { success: false, result: "", error: "No forests specified" };
+  }
+
+  // Single forest → clear immediately without confirmation
+  if (forestIds.length === 1) {
+    const targetForests = forestIds;
+    const { count, error: countErr } = await supabase
+      .from("operations")
+      .select("*", { count: "exact", head: true })
+      .in("forest_id", targetForests)
+      .eq("created_by", "ai");
+
+    if (countErr) return { success: false, result: "", error: countErr.message };
+    if (!count || count === 0) return { success: true, result: serverMsg("planClearNone", language) };
+
+    const { error } = await supabase
+      .from("operations")
+      .delete()
+      .in("forest_id", targetForests)
+      .eq("created_by", "ai");
+
+    if (error) return { success: false, result: "", error: error.message };
+    return { success: true, result: serverMsg("planCleared", language, String(count)) };
+  }
+
+  // Multi-forest confirmation gate
+  if (!options?.confirm) {
+    return {
+      success: true,
+      result: serverMsg("planClearConfirmMulti", language, String(forestIds.length)),
+      data: [{ confirmation_required: true, affected_forests: forestIds }],
+    };
+  }
+
+  // Confirmed multi-forest clear
+  const targetForests = forestIds;
+  if (targetForests.length === 0) {
+    return { success: false, result: "", error: "No forests specified" };
+  }
+
   // Count operations first so we can report what was deleted
   const { count, error: countErr } = await supabase
     .from("operations")
     .select("*", { count: "exact", head: true })
-    .eq("forest_id", forestId)
+    .in("forest_id", targetForests)
     .eq("created_by", "ai");
 
   if (countErr) {
@@ -418,7 +516,7 @@ export async function clearPlan(
   const { error } = await supabase
     .from("operations")
     .delete()
-    .eq("forest_id", forestId)
+    .in("forest_id", targetForests)
     .eq("created_by", "ai");
 
   if (error) return { success: false, result: "", error: error.message };

@@ -52,15 +52,14 @@ export default function ForestView({ forestId }: ForestViewProps) {
     data: compartments,
     loading: compartmentsLoading,
     error: compartmentsError,
-  } = useCompartments(forestId);
-  useOperations(forestId);
-  useCompartmentSpecies(forestId);
-  usePlanMetadata(forestId);
+  } = useCompartments([forestId]);
+  useOperations([forestId]);
+  useCompartmentSpecies([forestId]);
+  usePlanMetadata([forestId]);
   const setForest = useForestStore((s) => s.setForest);
   const setCompartments = useForestStore((s) => s.setCompartments);
 
-  // Load chart tabs from Supabase
-  useCharts(forestId);
+  useCharts([forestId]);
 
   // Sync Supabase data to Zustand store
   useEffect(() => {

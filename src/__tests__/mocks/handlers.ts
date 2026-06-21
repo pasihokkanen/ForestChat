@@ -12,7 +12,22 @@ export const handlers = [
   // ── compartments ──
   http.get(`${SUPABASE_URL}/rest/v1/compartments`, ({ request }) => {
     const url = new URL(request.url);
-    const forestId = url.searchParams.get("forest_id");
+    // PostgREST encodes .eq() as "eq.value" and .in() as "in.(val1,val2)"
+    // The raw search param looks like: forest_id=eq.test-forest or forest_id=in.%28test-forest%29
+    const rawForestId = url.searchParams.get("forest_id") ?? "";
+
+    // Parse both .eq() and .in() formats
+    let forestKey = "";
+    if (rawForestId.startsWith("eq.")) {
+      forestKey = rawForestId.slice(3);
+    } else if (rawForestId.startsWith("in.")) {
+      // Decode URL-encoded parentheses: in.%28val1%2Cval2%29 -> (val1,val2)
+      const decoded = decodeURIComponent(rawForestId.slice(3));
+      const match = decoded.match(/^\((.+)\)$/);
+      forestKey = match ? match[1].replace(/"/g, "") : decoded;
+    } else {
+      forestKey = rawForestId;
+    }
 
     // Return test data keyed by forest_id
     const compartments = {
@@ -54,9 +69,14 @@ export const handlers = [
       ],
     };
 
-    const key = forestId;
+    const key = forestKey;
+    // Normalize: MSW test data uses "eq.test-forest" as key, but .in() queries extract "test-forest"
+    const eqKey = `eq.${forestKey}`;
     if (compartments[key as keyof typeof compartments]) {
       return HttpResponse.json(compartments[key as keyof typeof compartments]);
+    }
+    if (compartments[eqKey as keyof typeof compartments]) {
+      return HttpResponse.json(compartments[eqKey as keyof typeof compartments]);
     }
     return HttpResponse.json([]);
   }),

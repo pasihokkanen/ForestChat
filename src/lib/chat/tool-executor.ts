@@ -27,6 +27,7 @@ export interface ToolResult {
 
 export interface ToolContext {
   forestId: string;
+  forestIds: string[];
   userId: string;
   supabase: SupabaseClient;
   sendSse?: (event: string, data: unknown) => void;
@@ -64,24 +65,28 @@ function resolveAsName(config: ChartQueryConfig, key: string): string {
 
 const toolHandlers: Record<string, ToolHandler> = {
   generate_plan: async (args, ctx) => {
-    return generatePlan(ctx.supabase, ctx.forestId, ctx.userId, {
+    const forestIds = args.forest_ids != null
+      ? (Array.isArray(args.forest_ids) ? args.forest_ids.map(String) : [String(args.forest_ids)])
+      : ctx.forestIds;
+    return generatePlan(ctx.supabase, forestIds, ctx.userId, {
       periodYears: (args.period_years as number) ?? 20,
       startYear: (args.start_year as number) ?? new Date().getFullYear(),
       goal: args.goal as "maximum_growth_aggressive" | "maximum_growth_balanced" | "carbon_storage" | "balanced" | undefined,
     }, (ctx.language ?? "en") as "en" | "fi");
   },
-  get_stand: async (args, ctx) => getStand(ctx.supabase, ctx.forestId, args.stand_id as string, (ctx.language ?? "en") as "en" | "fi"),
-
-  // Pure data-fetching — no UI side effects
-  search_stands: async (args, ctx) => {
-    return searchStands(ctx.supabase, ctx.forestId, args as any);
+  get_stand: async (args, ctx) => {
+    const standId = args.stand_id as string;
+    return getStand(ctx.supabase, ctx.forestIds, standId, (ctx.language ?? "en") as "en" | "fi");
   },
 
-  plan_summary: async (_args, ctx) => planSummary(ctx.supabase, ctx.forestId, (ctx.language ?? "en") as "en" | "fi"),
+  search_stands: async (args, ctx) => {
+    return searchStands(ctx.supabase, ctx.forestIds, args as any);
+  },
 
-  // Pure data-fetching — no UI side effects
+  plan_summary: async (_args, ctx) => planSummary(ctx.supabase, ctx.forestIds, (ctx.language ?? "en") as "en" | "fi"),
+
   query_operations: async (args, ctx) => {
-    return queryOperations(ctx.supabase, ctx.forestId, args as any);
+    return queryOperations(ctx.supabase, ctx.forestIds, args as any);
   },
 
   show_stands: async (args, ctx) => {
@@ -119,7 +124,7 @@ const toolHandlers: Record<string, ToolHandler> = {
   },
 
   batch_update_operations: async (args, ctx) =>
-    batchUpdateOperations(ctx.supabase, ctx.forestId, (args.filter || {}) as any, (args.update || {}) as any, (ctx.language ?? "en") as "en" | "fi"),
+    batchUpdateOperations(ctx.supabase, ctx.forestIds, (args.filter || {}) as any, (args.update || {}) as any, (ctx.language ?? "en") as "en" | "fi"),
 
   add_operation: async (args, ctx) => {
     const lang = (ctx.language ?? "en") as "en" | "fi";
@@ -151,8 +156,12 @@ const toolHandlers: Record<string, ToolHandler> = {
     return removeOperations(ctx.supabase, ctx.forestId, rawIds, year, typeFilter, (ctx.language ?? "en") as "en" | "fi");
   },
 
-  clear_plan: async (_args, ctx) =>
-    clearPlan(ctx.supabase, ctx.forestId, (ctx.language ?? "en") as "en" | "fi"),
+  clear_plan: async (args, ctx) => {
+    return clearPlan(ctx.supabase, ctx.forestIds, (ctx.language ?? "en") as "en" | "fi", {
+      forest_id: args.forest_id as string | undefined,
+      confirm: args.confirm as boolean | undefined,
+    });
+  },
 
   check_harvest_sustainability: async (args, ctx) => checkSustainability(ctx.supabase, ctx.forestId, args.year as number | undefined, (ctx.language ?? "en") as "en" | "fi"),
   validate_plan: async (_args, ctx) => validatePlan(ctx.supabase, ctx.forestId, (ctx.language ?? "en") as "en" | "fi"),
@@ -195,7 +204,7 @@ const toolHandlers: Record<string, ToolHandler> = {
           qc = parsed as unknown as AnyQueryConfig;
         } else { qc = query_config as AnyQueryConfig; }
 
-        const engineResult = await recomputeChartData(ctx.supabase, [ctx.forestId], qc);
+        const engineResult = await recomputeChartData(ctx.supabase, ctx.forestIds, qc);
         const isSingleSource = qc.source !== "cross" && Array.isArray((qc as ChartQueryConfig).values);
         const scValues = isSingleSource ? (qc as ChartQueryConfig).values : undefined;
 
@@ -225,13 +234,13 @@ const toolHandlers: Record<string, ToolHandler> = {
         };
 
         await ctx.supabase.from("chart_tabs").upsert({
-          forest_id: ctx.forestId, chart_id: chartTab.id,
+          user_id: ctx.userId, chart_id: chartTab.id,
           title_en: chartTab.title_en, title_fi: chartTab.title_fi,
           type: chartTab.type, data: chartTab.data, query_config: chartTab.query_config,
           computed_at: chartTab.computed_at, x_key: chartTab.x_key, y_key: chartTab.y_key,
           y_key2: chartTab.y_key2, name_key: chartTab.name_key, color_key: chartTab.color_key,
           waterfall_base: chartTab.waterfall_base,
-        }, { onConflict: "forest_id, chart_id" });
+        }, { onConflict: "user_id, chart_id" });
 
         ctx.sendSse?.("create_chart", chartTab);
         return { success: true, result: serverMsg("chartCreatedEngine", (ctx.language ?? "en") as "en" | "fi", String(title_en), String(type), String(engineResult.data.length)) };
@@ -252,12 +261,12 @@ const toolHandlers: Record<string, ToolHandler> = {
     };
     try {
       await ctx.supabase.from("chart_tabs").upsert({
-        forest_id: ctx.forestId, chart_id: chartTab.id,
+        user_id: ctx.userId, chart_id: chartTab.id,
         title_en: chartTab.title_en, title_fi: chartTab.title_fi,
         type: chartTab.type, data: chartTab.data, x_key: chartTab.x_key,
         y_key: chartTab.y_key, y_key2: chartTab.y_key2, name_key: chartTab.name_key,
         color_key: chartTab.color_key, waterfall_base: chartTab.waterfall_base,
-      }, { onConflict: "forest_id, chart_id" });
+      }, { onConflict: "user_id, chart_id" });
     } catch (err) { console.error("Failed to persist chart tab:", err); }
     ctx.sendSse?.("create_chart", chartTab);
     return { success: true, result: serverMsg("chartCreatedLegacy", (ctx.language ?? "en") as "en" | "fi", String(title_en), String(type), String((data as unknown[]).length)) };
@@ -274,7 +283,7 @@ const toolHandlers: Record<string, ToolHandler> = {
       const { data: existing } = await ctx.supabase
         .from("compartments")
         .select("stand_id")
-        .eq("forest_id", ctx.forestId)
+        .in("forest_id", ctx.forestIds)
         .in("stand_id", ids);
       const existingIds = new Set(((existing as Array<{ stand_id: string }>) ?? []).map(r => r.stand_id));
       const missing = ids.filter(id => !existingIds.has(id));
@@ -288,7 +297,7 @@ const toolHandlers: Record<string, ToolHandler> = {
         if (ids.length === 0) return { success: false, result: "", error: serverMsg("standsNotFound", lang, missing.join(", ")) };
       }
     } else if (age_min !== undefined || age_max !== undefined || species || development_classes || site_types || area_min !== undefined || area_max !== undefined || volume_min !== undefined || volume_max !== undefined || basal_area_min !== undefined || basal_area_max !== undefined || height_min !== undefined || height_max !== undefined || diameter_min !== undefined || diameter_max !== undefined || growth_min !== undefined || growth_max !== undefined) {
-      const result = await searchStands(ctx.supabase, ctx.forestId, {
+      const result = await searchStands(ctx.supabase, ctx.forestIds, {
         age_min: age_min as number | undefined,
         age_max: age_max as number | undefined,
         species: species as string[] | undefined,
@@ -327,14 +336,14 @@ const toolHandlers: Record<string, ToolHandler> = {
   remove_chart: async (args, ctx) => {
     const { chart_id } = args;
     if (!chart_id || typeof chart_id !== "string") return { success: false, result: "", error: "chart_id is required" };
-    try { await ctx.supabase.from("chart_tabs").delete().eq("forest_id", ctx.forestId).eq("chart_id", chart_id); }
+    try { await ctx.supabase.from("chart_tabs").delete().eq("user_id", ctx.userId).eq("chart_id", chart_id); }
     catch (err) { console.error("Failed to remove chart tab:", err); }
     ctx.sendSse?.("remove_chart", { chart_id });
     return { success: true, result: serverMsg("chartRemoved", (ctx.language ?? "en") as "en" | "fi", chart_id as string) };
   },
 
   clear_charts: async (_args, ctx) => {
-    try { await ctx.supabase.from("chart_tabs").delete().eq("forest_id", ctx.forestId); }
+    try { await ctx.supabase.from("chart_tabs").delete().eq("user_id", ctx.userId); }
     catch (err) { console.error("Failed to clear chart tabs:", err); }
     ctx.sendSse?.("clear_charts", {});
     return { success: true, result: serverMsg("chartsCleared", (ctx.language ?? "en") as "en" | "fi") };
@@ -344,7 +353,7 @@ const toolHandlers: Record<string, ToolHandler> = {
     const { data } = await ctx.supabase
       .from("chart_tabs")
       .select("chart_id, title_en, title_fi, type, x_key, y_key, y_key2, name_key, color_key, query_config")
-      .eq("forest_id", ctx.forestId).order("created_at", { ascending: true });
+      .eq("user_id", ctx.userId).order("created_at", { ascending: true });
     const lang = (ctx.language ?? "en") as "en" | "fi";
     if (!data || data.length === 0) return { success: true, result: serverMsg("noChartsFound", lang) };
     const lines = (data as Array<Record<string, unknown>>).map((c) =>
@@ -360,7 +369,7 @@ const toolHandlers: Record<string, ToolHandler> = {
   update_chart: async (args, ctx) => {
     const { chart_id, title_en, title_fi, type, x_key, y_key, y_key2, name_key, color_key, waterfall_base } = args;
     if (!chart_id || typeof chart_id !== "string") return { success: false, result: "", error: "chart_id is required" };
-    const { data: existing } = await ctx.supabase.from("chart_tabs").select("*").eq("forest_id", ctx.forestId).eq("chart_id", chart_id as string).single();
+    const { data: existing } = await ctx.supabase.from("chart_tabs").select("*").eq("user_id", ctx.userId).eq("chart_id", chart_id as string).single();
     if (!existing) return { success: false, result: "", error: `Chart "${chart_id}" not found` };
     const update: Record<string, unknown> = {};
     if (title_en !== undefined) update.title_en = title_en;
@@ -372,7 +381,7 @@ const toolHandlers: Record<string, ToolHandler> = {
     if (name_key !== undefined) update.name_key = name_key;
     if (color_key !== undefined) update.color_key = color_key;
     if (waterfall_base !== undefined) update.waterfall_base = waterfall_base;
-    await ctx.supabase.from("chart_tabs").update(update).eq("forest_id", ctx.forestId).eq("chart_id", chart_id as string);
+    await ctx.supabase.from("chart_tabs").update(update).eq("user_id", ctx.userId).eq("chart_id", chart_id as string);
     const merged = { ...existing, ...update };
     const updated = {
       id: merged.chart_id as string,
@@ -396,8 +405,8 @@ const toolHandlers: Record<string, ToolHandler> = {
     const { chart_id, query_config, title_en, title_fi, type, x_key, y_key, y_key2, name_key, color_key, waterfall_base } = args;
     if (!chart_id || typeof chart_id !== "string") return { success: false, result: "", error: "chart_id is required" };
     if (!query_config) return { success: false, result: "", error: "query_config is required" };
-    const engineResult = await recomputeChartData(ctx.supabase, [ctx.forestId], query_config as AnyQueryConfig);
-    const { data: existing } = await ctx.supabase.from("chart_tabs").select("*").eq("forest_id", ctx.forestId).eq("chart_id", chart_id as string).single();
+    const engineResult = await recomputeChartData(ctx.supabase, ctx.forestIds, query_config as AnyQueryConfig);
+    const { data: existing } = await ctx.supabase.from("chart_tabs").select("*").eq("user_id", ctx.userId).eq("chart_id", chart_id as string).single();
     const ex = existing as Record<string, unknown> ?? {};
     const newTitleEn = (title_en as string) ?? (ex.title_en as string) ?? "Chart";
     const newTitleFi = (title_fi as string) ?? (ex.title_fi as string) ?? null;
@@ -413,13 +422,13 @@ const toolHandlers: Record<string, ToolHandler> = {
       waterfall_base: (waterfall_base as number) ?? ((existing as Record<string, unknown>)?.waterfall_base as number) ?? null,
     };
     await ctx.supabase.from("chart_tabs").upsert({
-      forest_id: ctx.forestId, chart_id: chartTab.id,
+      user_id: ctx.userId, chart_id: chartTab.id,
       title_en: chartTab.title_en, title_fi: chartTab.title_fi,
       type: chartTab.type, data: chartTab.data, query_config: chartTab.query_config,
       computed_at: chartTab.computed_at, x_key: chartTab.x_key, y_key: chartTab.y_key,
       y_key2: chartTab.y_key2, name_key: chartTab.name_key, color_key: chartTab.color_key,
       waterfall_base: chartTab.waterfall_base,
-    }, { onConflict: "forest_id, chart_id" });
+    }, { onConflict: "user_id, chart_id" });
     ctx.sendSse?.("create_chart", chartTab);
     return { success: true, result: serverMsg("chartCreatedEngine", (ctx.language ?? "en") as "en" | "fi", String(newTitleEn), String(newType), String(engineResult.data.length)) };
   },

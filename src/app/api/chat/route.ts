@@ -414,6 +414,7 @@ export async function POST(request: NextRequest) {
 
       const ctx: ToolContext = {
         forestId: forest_id,
+        forestIds: [forest_id],
         userId: user.id,
         supabase,
         sendSse,
@@ -642,7 +643,7 @@ export async function POST(request: NextRequest) {
 
       // Phase 4b: After ALL iterations + fallback — recompute charts once if any mutation happened
       if (needsRecompute) {
-        await recomputeAllCharts(ctx.supabase, [ctx.forestId], sendSse);
+        await recomputeAllCharts(ctx.supabase, [ctx.forestId], ctx.userId, sendSse);
       }
 
       // Store final assistant message

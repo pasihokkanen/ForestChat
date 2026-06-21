@@ -43,6 +43,11 @@ Returns: operations per stand, key metrics.`,
           properties: {
             period_years: { type: "number", description: "Duration in years (default 20)" },
             start_year: { type: "number", description: "Start year (default current year)" },
+            forest_ids: {
+              type: "array",
+              items: { type: "string" },
+              description: "Optional list of forest IDs to generate the plan for. If omitted, generates for all currently active forests."
+            },
             goal: {
               type: "string",
               enum: ["maximum_growth_aggressive", "maximum_growth_balanced", "carbon_storage", "balanced", "maximum_growth_no_cap"],

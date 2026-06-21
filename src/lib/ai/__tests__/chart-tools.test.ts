@@ -8,6 +8,7 @@ import { executeTool, type ToolContext } from "@/lib/chat/tool-executor";
 function makeCtx(overrides: Partial<Pick<ToolContext, "sendSse" | "supabase">> = {}): ToolContext {
   return {
     forestId: "test-forest-id",
+    forestIds: ["test-forest-id"],
     userId: "test-user-id",
     supabase: overrides.supabase ?? makeBasicSupabaseMock(),
     sendSse: overrides.sendSse ?? (vi.fn() as unknown as (event: string, data: unknown) => void),
@@ -30,6 +31,9 @@ function makeBasicSupabaseMock() {
       }),
     }),
     select: vi.fn().mockReturnValue({
+      in: vi.fn().mockReturnValue({
+        in: vi.fn().mockImplementation((_field: string, ids: string[]) => chain(ids.map(id => ({ stand_id: id })))),
+      }),
       eq: vi.fn().mockReturnValue({
         in: vi.fn().mockImplementation((_field: string, ids: string[]) => chain(ids.map(id => ({ stand_id: id })))),
         order: vi.fn().mockResolvedValue({ data: [], error: null }),

@@ -191,6 +191,7 @@ describe("recomputeAllCharts", () => {
     await recomputeAllCharts(
       { from: mockSupabase.from } as any,
       ["forest-1"],
+      "user-1",
       sendSse
     );
 
@@ -217,6 +218,7 @@ describe("recomputeAllCharts", () => {
     await recomputeAllCharts(
       { from: mockSupabase.from } as any,
       ["forest-1"],
+      "user-1",
       sendSse
     );
 
@@ -234,6 +236,7 @@ describe("recomputeAllCharts", () => {
     await recomputeAllCharts(
       { from: mockSupabase.from } as any,
       ["forest-1"],
+      "user-1",
       sendSse
     );
 
@@ -262,7 +265,7 @@ describe("recomputeAllCharts", () => {
     };
 
     await expect(
-      recomputeAllCharts(errorSupabase as any, ["forest-1"], sendSse)
+      recomputeAllCharts(errorSupabase as any, ["forest-1"], "user-1", sendSse)
     ).resolves.toBeUndefined();
 
     expect(sendSse).not.toHaveBeenCalled();
@@ -292,6 +295,7 @@ describe("recomputeAllCharts", () => {
     await recomputeAllCharts(
       { from: mixedSupabase.from } as any,
       ["forest-1"],
+      "user-1",
       sendSse
     );
 
