@@ -5,7 +5,9 @@ import UserMenu from "@/components/auth/UserMenu";
 import ThemeToggle from "@/components/shared/ThemeToggle";
 import LanguageToggle from "@/components/shared/LanguageToggle";
 import ErrorBoundary from "@/components/shared/ErrorBoundary";
+import GlobalChatPanel from "@/components/chat/GlobalChatPanel";
 import { useForestStore } from "@/lib/store";
+import { useUserForests } from "@/lib/hooks/use-user-forests";
 import { appName } from "@/lib/i18n";
 import Link from "next/link";
 
@@ -17,6 +19,12 @@ export default function ForestLayout({
   const language = useForestStore((s) => s.language) ?? "en";
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
+
+  const { forests } = useUserForests();
+  const setForests = useForestStore((s) => s.setForests);
+  useEffect(() => {
+    if (forests.length > 0) setForests(forests);
+  }, [forests, setForests]);
 
   return (
     <ErrorBoundary>
@@ -34,7 +42,12 @@ export default function ForestLayout({
             <UserMenu />
           </div>
         </header>
-        <main className="flex-1 overflow-hidden">{children}</main>
+        <main className="flex-1 overflow-hidden flex flex-row">
+          <div className="flex-1 min-w-0">{children}</div>
+          <div className="w-[400px] shrink-0 border-l border-gray-200 dark:border-gray-700">
+            <GlobalChatPanel />
+          </div>
+        </main>
       </div>
     </ErrorBoundary>
   );

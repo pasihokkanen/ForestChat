@@ -53,7 +53,7 @@ describe("single-source pipeline with mock", () => {
       values: [{ field: "removal_m3", as: "removal", fn: "sum" }],
     };
 
-    const result = await recomputeChartData(supabase, "forest-1", config);
+    const result = await recomputeChartData(supabase, ["forest-1"], config);
     expect(result.data).toEqual([
       { year: 2026, removal: 500, _stand_ids: [] },
       { year: 2027, removal: 300, _stand_ids: [] },
@@ -76,7 +76,7 @@ describe("growth_m3_total computed field", () => {
       values: [{ field: "growth_m3_total", as: "growth", fn: "sum" }],
     };
 
-    const result = await recomputeChartData(supabase, "forest-1", config);
+    const result = await recomputeChartData(supabase, ["forest-1"], config);
 
     // 5.5 × 2.0 = 11.0 + 3.0 × 1.5 = 4.5 → total 15.5
     expect(result.data).toHaveLength(1);
@@ -100,7 +100,7 @@ describe("removal_m3 computed field (Phase 4b)", () => {
       values: [{ field: "removal_m3", as: "volume", fn: "sum" }],
     };
 
-    const result = await recomputeChartData(supabase, "forest-1", config);
+    const result = await recomputeChartData(supabase, ["forest-1"], config);
 
     // 2026: 100 m³, 2027: 150 + 50 = 200 m³
     expect(result.data).toHaveLength(2);
@@ -123,7 +123,7 @@ describe("removal_m3 computed field (Phase 4b)", () => {
       values: [{ field: "removal_m3", as: "volume", fn: "sum" }],
     };
 
-    const result = await recomputeChartData(supabase, "forest-1", config);
+    const result = await recomputeChartData(supabase, ["forest-1"], config);
 
     // null × 50 → 0, 200 × null → 0, 200 × 50 → 100
     expect(result.data).toHaveLength(1);
@@ -165,7 +165,7 @@ describe("cross-source merge", () => {
       sort: { by: "year" },
     };
 
-    const result = await recomputeChartData(supabase, "forest-1", config);
+    const result = await recomputeChartData(supabase, ["forest-1"], config);
 
     expect(result.data).toHaveLength(2);
     expect(result.data[0]).toMatchObject({ year: 2026, removal: 500, growth: 10 });
@@ -201,7 +201,7 @@ describe("cross-source merge", () => {
       ],
     };
 
-    const result = await recomputeChartData(supabase, "forest-1", config);
+    const result = await recomputeChartData(supabase, ["forest-1"], config);
 
     // Growth (6.0) should appear in ALL years (2026, 2027, 2028 — gap year filled).
     expect(result.data).toHaveLength(3);
@@ -239,7 +239,7 @@ describe("cross-source merge", () => {
       ],
     };
 
-    const result = await recomputeChartData(supabase, "forest-1", config);
+    const result = await recomputeChartData(supabase, ["forest-1"], config);
 
     // Inner merge: only years present in ALL queries → none (compartments has no rows)
     expect(result.data).toHaveLength(0);
@@ -279,7 +279,7 @@ describe("cumulative post-merge", () => {
       ],
     };
 
-    const result = await recomputeChartData(supabase, "forest-1", config);
+    const result = await recomputeChartData(supabase, ["forest-1"], config);
 
     expect(result.data).toHaveLength(3);
 
@@ -330,7 +330,7 @@ describe("fillMergeGaps in cross queries", () => {
       sort: { by: "year" },
     };
 
-    const result = await recomputeChartData(supabase, "forest-1", config);
+    const result = await recomputeChartData(supabase, ["forest-1"], config);
 
     // Should have 5 rows: 2026, 2027, 2028, 2029, 2030
     expect(result.data).toHaveLength(5);
@@ -393,7 +393,7 @@ describe("error handling", () => {
     };
 
     await expect(
-      recomputeChartData(supabase, "forest-1", config)
+      recomputeChartData(supabase, ["forest-1"], config)
     ).rejects.toThrow("Sub-query (operations) failed");
   });
 });
@@ -417,7 +417,7 @@ describe("comparison filter operators", () => {
       filters: { age_years: ">60" },
     };
 
-    const result = await recomputeChartData(supabase, "forest-1", config);
+    const result = await recomputeChartData(supabase, ["forest-1"], config);
     // Mock doesn't actually filter data, but the query should build without error
     expect(result.data).toBeDefined();
     expect(result.data.length).toBeGreaterThan(0);
@@ -435,7 +435,7 @@ describe("comparison filter operators", () => {
       filters: { age_years: ">=40" },
     };
 
-    const result = await recomputeChartData(supabase, "forest-1", config);
+    const result = await recomputeChartData(supabase, ["forest-1"], config);
     expect(result.data).toBeDefined();
   });
 
@@ -451,7 +451,7 @@ describe("comparison filter operators", () => {
       filters: { area_ha: "<5" },
     };
 
-    const result = await recomputeChartData(supabase, "forest-1", config);
+    const result = await recomputeChartData(supabase, ["forest-1"], config);
     expect(result.data).toBeDefined();
   });
 
@@ -467,7 +467,7 @@ describe("comparison filter operators", () => {
       filters: { volume_m3: "<=100" },
     };
 
-    const result = await recomputeChartData(supabase, "forest-1", config);
+    const result = await recomputeChartData(supabase, ["forest-1"], config);
     expect(result.data).toBeDefined();
   });
 
@@ -483,7 +483,7 @@ describe("comparison filter operators", () => {
       filters: { age_years: { gt: 60 } },
     };
 
-    const result = await recomputeChartData(supabase, "forest-1", config);
+    const result = await recomputeChartData(supabase, ["forest-1"], config);
     expect(result.data).toBeDefined();
   });
 
@@ -499,7 +499,7 @@ describe("comparison filter operators", () => {
       filters: { age_years: 60 },
     };
 
-    const result = await recomputeChartData(supabase, "forest-1", config);
+    const result = await recomputeChartData(supabase, ["forest-1"], config);
     expect(result.data).toBeDefined();
   });
 
@@ -518,7 +518,7 @@ describe("comparison filter operators", () => {
       filters: { "comp.age_years": ">60" },
     };
 
-    const result = await recomputeChartData(supabase, "forest-1", config);
+    const result = await recomputeChartData(supabase, ["forest-1"], config);
     expect(result.data).toBeDefined();
   });
 });

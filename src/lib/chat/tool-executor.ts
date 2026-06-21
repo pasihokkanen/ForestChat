@@ -12,6 +12,10 @@ import { recomputeChartData, recomputeAllCharts } from "../ai/chart-engine";
 import type { ChartQueryConfig, AnyQueryConfig } from "../ai/chart-engine";
 import { detectChartTitleFi } from "../ai/chart-engine";
 import { serverMsg } from "../i18n";
+import { readFileSync, writeFileSync } from "fs";
+import { parseForestDataCsv } from "../import/csv-parser";
+import { importStandsFromCsv } from "../import/csv-importer";
+import { env } from "../env";
 
 export interface ToolResult {
   success: boolean;
@@ -191,7 +195,7 @@ const toolHandlers: Record<string, ToolHandler> = {
           qc = parsed as unknown as AnyQueryConfig;
         } else { qc = query_config as AnyQueryConfig; }
 
-        const engineResult = await recomputeChartData(ctx.supabase, ctx.forestId, qc);
+        const engineResult = await recomputeChartData(ctx.supabase, [ctx.forestId], qc);
         const isSingleSource = qc.source !== "cross" && Array.isArray((qc as ChartQueryConfig).values);
         const scValues = isSingleSource ? (qc as ChartQueryConfig).values : undefined;
 
@@ -392,7 +396,7 @@ const toolHandlers: Record<string, ToolHandler> = {
     const { chart_id, query_config, title_en, title_fi, type, x_key, y_key, y_key2, name_key, color_key, waterfall_base } = args;
     if (!chart_id || typeof chart_id !== "string") return { success: false, result: "", error: "chart_id is required" };
     if (!query_config) return { success: false, result: "", error: "query_config is required" };
-    const engineResult = await recomputeChartData(ctx.supabase, ctx.forestId, query_config as AnyQueryConfig);
+    const engineResult = await recomputeChartData(ctx.supabase, [ctx.forestId], query_config as AnyQueryConfig);
     const { data: existing } = await ctx.supabase.from("chart_tabs").select("*").eq("forest_id", ctx.forestId).eq("chart_id", chart_id as string).single();
     const ex = existing as Record<string, unknown> ?? {};
     const newTitleEn = (title_en as string) ?? (ex.title_en as string) ?? "Chart";
@@ -418,6 +422,177 @@ const toolHandlers: Record<string, ToolHandler> = {
     }, { onConflict: "forest_id, chart_id" });
     ctx.sendSse?.("create_chart", chartTab);
     return { success: true, result: serverMsg("chartCreatedEngine", (ctx.language ?? "en") as "en" | "fi", String(newTitleEn), String(newType), String(engineResult.data.length)) };
+  },
+
+  // ── Dashboard tools (B4) ──
+
+  list_forests: async (_args, ctx) => {
+    const { data, error } = await ctx.supabase
+      .from("forests")
+      .select("id, name, municipality, property_id, total_area_ha")
+      .eq("owner_id", ctx.userId)
+      .order("name");
+    if (error) return { success: false, result: "", error: error.message };
+    if (!data || data.length === 0) return { success: true, result: "No forests found. Use import_forest_csv to add one." };
+    const lines = (data as Array<Record<string, unknown>>).map(f =>
+      `- ${f.name} (${f.municipality || "no municipality"}, ${f.property_id || "no property ID"}) [${f.id}]`
+    );
+    return { success: true, result: `Your forests:\n${lines.join("\n")}` };
+  },
+
+  open_forest: async (args, ctx) => {
+    const forest_id = args.forest_id as string;
+    if (!forest_id) return { success: false, result: "", error: "forest_id is required" };
+    const { data, error } = await ctx.supabase
+      .from("forests")
+      .select("id, name")
+      .eq("id", forest_id)
+      .eq("owner_id", ctx.userId)
+      .single();
+    if (error || !data) return { success: false, result: "", error: `Forest ${forest_id} not found` };
+    ctx.sendSse?.("open_forest", { forest_id, name: data.name });
+    return { success: true, result: `Opening forest: ${data.name}` };
+  },
+
+  close_forest: async (args, ctx) => {
+    const forest_id = args.forest_id as string;
+    if (!forest_id) return { success: false, result: "", error: "forest_id is required" };
+    ctx.sendSse?.("close_forest", { forest_id });
+    return { success: true, result: `Removed forest from active set.` };
+  },
+
+  // ── Import tools (B6) ──
+
+  preview_csv_file: async (args, _ctx) => {
+    const path = args.path as string;
+    if (!path) return { success: false, result: "", error: "path is required" };
+
+    let content: string;
+    try {
+      content = readFileSync(path, "utf-8");
+    } catch {
+      return { success: false, result: "", error: `Cannot read file: ${path}` };
+    }
+
+    let parsed;
+    try {
+      parsed = parseForestDataCsv(content);
+    } catch (err) {
+      return { success: false, result: "", error: `CSV parse error: ${err instanceof Error ? err.message : String(err)}` };
+    }
+
+    const totalArea = parsed.stands.reduce((sum, s) => sum + s.area_ha, 0);
+    const sampleIds = parsed.stands.slice(0, 3).map(s => s.stand_id).join(", ");
+    const speciesList = parsed.speciesList.length > 0 ? parsed.speciesList.join(", ") : "none detected";
+
+    return {
+      success: true,
+      result: [
+        `CSV Preview:`,
+        `  Stands: ${parsed.totalStands}`,
+        `  Total area: ${totalArea.toFixed(1)} ha`,
+        `  Total volume: ${parsed.totalVolumeM3.toLocaleString()} m³`,
+        `  Species: ${speciesList}`,
+        `  Sample stand IDs: ${sampleIds || "none"}`,
+      ].join("\n"),
+    };
+  },
+
+  import_forest_csv: async (args, ctx) => {
+    const path = args.path as string;
+    const property_id = args.property_id as string;
+    const name = args.name as string | undefined;
+    if (!path) return { success: false, result: "", error: "path is required" };
+    if (!property_id) return { success: false, result: "", error: "property_id is required" };
+
+    let content: string;
+    try {
+      content = readFileSync(path, "utf-8");
+    } catch {
+      return { success: false, result: "", error: `Cannot read file: ${path}` };
+    }
+
+    let parsed;
+    try {
+      parsed = parseForestDataCsv(content);
+    } catch (err) {
+      return { success: false, result: "", error: `CSV parse error: ${err instanceof Error ? err.message : String(err)}` };
+    }
+
+    if (parsed.totalStands === 0) {
+      return { success: false, result: "", error: "CSV contains no stand data" };
+    }
+
+    try {
+      const result = await importStandsFromCsv(
+        parsed,
+        property_id,
+        name || `Forest ${property_id}`,
+        ctx.userId,
+        env.mmlApiKey,
+        ctx.supabase
+      );
+      return {
+        success: true,
+        result: [
+          `Forest imported: ${result.name}`,
+          `  Forest ID: ${result.forestId}`,
+          `  Property ID: ${result.propertyId}`,
+          `  Stands imported: ${result.standsImported}`,
+          `  Stands with geometry: ${result.standsWithGeometry}`,
+          `  Species rows: ${result.speciesRowsImported}`,
+          `  Total volume: ${result.totalVolumeM3.toLocaleString()} m³`,
+          result.warnings.length > 0 ? `  Warnings: ${result.warnings.join("; ")}` : "",
+        ].filter(Boolean).join("\n"),
+      };
+    } catch (err) {
+      return { success: false, result: "", error: `Import failed: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  },
+
+  convert_csv_format: async (args, _ctx) => {
+    const path = args.path as string;
+    const format = args.format as string;
+    if (!path) return { success: false, result: "", error: "path is required" };
+    if (!format) return { success: false, result: "", error: "format is required (kuviotiedot or simple_columns)" };
+
+    let content: string;
+    try {
+      content = readFileSync(path, "utf-8");
+    } catch {
+      return { success: false, result: "", error: `Cannot read file: ${path}` };
+    }
+
+    const rows = content.trim().split("\n");
+    const headers = rows[0].split(";").map(h => h.trim());
+
+    const fiToEn: Record<string, string> = {
+      pinta_ala_ha: "area_ha",
+      maaluokka: "land_class",
+      kehitysluokka: "development_class",
+      kasvupaikka: "site_type",
+      maalaji: "soil_type",
+      ojitustilanne: "drainage_status",
+      paapuulaji: "main_species",
+      total_ika: "total_age",
+      total_ppa: "total_basal_area",
+      total_runkoluku: "total_stem_count_per_ha",
+      total_kpituus: "total_mean_height",
+      total_klapimitta: "total_mean_diameter",
+      total_tukki_pct: "total_log_pct",
+    };
+
+    const enToFi = Object.fromEntries(Object.entries(fiToEn).map(([k, v]) => [v, k]));
+
+    const targetMap = format === "kuviotiedot" ? enToFi : fiToEn;
+    const direction = format === "kuviotiedot" ? "English → Finnish" : "Finnish → English";
+
+    const mappedHeaders = headers.map(h => targetMap[h] || h);
+    const mappedContent = [mappedHeaders.join(";"), ...rows.slice(1)].join("\n");
+
+    writeFileSync(path, mappedContent, "utf-8");
+
+    return { success: true, result: `Converted CSV to ${format} format (${direction}). ${headers.length} columns mapped.` };
   },
 };
 

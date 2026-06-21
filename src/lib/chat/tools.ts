@@ -492,5 +492,91 @@ The data field (computed cache of chart values) is NOT returned — it's too lar
         },
       },
     },
+    // ── Dashboard tools (B4) ──
+    {
+      type: "function",
+      function: {
+        name: "list_forests",
+        description: "List all your forests with summary statistics. Works in dashboard mode when no forests are active.",
+        parameters: {
+          type: "object",
+          properties: {},
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "open_forest",
+        description: "Navigate to a forest's detail page or activate it on the dashboard.",
+        parameters: {
+          type: "object",
+          properties: {
+            forest_id: { type: "string", description: "Forest ID to open or activate" },
+          },
+          required: ["forest_id"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "close_forest",
+        description: "Remove a forest from the active set on the dashboard.",
+        parameters: {
+          type: "object",
+          properties: {
+            forest_id: { type: "string", description: "Forest ID to remove from active set" },
+          },
+          required: ["forest_id"],
+        },
+      },
+    },
+    // ── Import tools (B6) ──
+    {
+      type: "function",
+      function: {
+        name: "preview_csv_file",
+        description: "Preview a CSV file without importing it. Returns detected format, stand count, total area, volume, species, and sample stand IDs.",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Absolute path to the uploaded CSV file" },
+          },
+          required: ["path"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "import_forest_csv",
+        description: "Import a CSV file as a new forest. Parses the CSV, creates a forest record, imports compartments, species, and WKT geometries. Requires property_id.",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Absolute path to the uploaded CSV file" },
+            property_id: { type: "string", description: "Finnish property ID (e.g. 123-456-789-0). REQUIRED." },
+            name: { type: "string", description: "Forest name. Auto-derived from property_id if omitted." },
+          },
+          required: ["path", "property_id"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "convert_csv_format",
+        description: "Convert a CSV file between Finnish kuviotiedot format and simple English columns. Reads the CSV, detects current format, maps column names, and writes back.",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Absolute path to the CSV file" },
+            format: { type: "string", enum: ["kuviotiedot", "simple_columns"], description: "Target format: 'kuviotiedot' (Finnish headers) or 'simple_columns' (English headers)" },
+          },
+          required: ["path", "format"],
+        },
+      },
+    },
   ];
 }

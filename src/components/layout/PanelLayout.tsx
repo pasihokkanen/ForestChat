@@ -15,24 +15,23 @@ interface PanelLayoutTabs {
 interface PanelLayoutProps {
   chartsPanel: React.ReactNode;
   tabs: PanelLayoutTabs;
-  chatPanel: React.ReactNode;
 }
 
 const STORAGE_KEY = "forestchat-panel-widths";
 
-function loadWidths(): { charts: number; chat: number } {
+function loadWidths(): { charts: number } {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) return JSON.parse(stored);
   } catch {
     // ignore
   }
-  return { charts: 400, chat: 380 };
+  return { charts: 400 };
 }
 
-function saveWidths(charts: number, chat: number) {
+function saveWidths(charts: number) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ charts, chat }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ charts }));
   } catch {
     // ignore
   }
@@ -88,7 +87,6 @@ function TabContainer({ tabs }: { tabs: PanelLayoutTabs }) {
 export default function PanelLayout({
   chartsPanel,
   tabs,
-  chatPanel,
 }: PanelLayoutProps) {
   const isLarge = useMediaQuery("(min-width: 1280px)");
   const isMedium = useMediaQuery("(min-width: 1024px)");
@@ -96,23 +94,18 @@ export default function PanelLayout({
 
   const savedWidths = useRef(loadWidths());
   const [chartsWidth, setChartsWidth] = useState(savedWidths.current.charts);
-  const [chatWidth, setChatWidth] = useState(savedWidths.current.chat);
   const [chartsOpen, setChartsOpen] = useState(false);
 
   // Persist widths when they change
   useEffect(() => {
-    saveWidths(chartsWidth, chatWidth);
-  }, [chartsWidth, chatWidth]);
+    saveWidths(chartsWidth);
+  }, [chartsWidth]);
 
   const handleChartsResize = useCallback((delta: number) => {
     setChartsWidth((w) => Math.max(280, Math.min(600, w + delta)));
   }, []);
 
-  const handleChatResize = useCallback((delta: number) => {
-    setChatWidth((w) => Math.max(300, Math.min(500, w - delta)));
-  }, []);
-
-  // Large screen: 3-panel with resizers
+  // Large screen: 2-panel with resizer
   if (isLarge) {
     return (
       <div className="h-full relative">
@@ -130,12 +123,6 @@ export default function PanelLayout({
           </div>
           {/* Tab container with map, stands, operations */}
           <TabContainer tabs={tabs} />
-          {/* Map-chat resizer — always rendered */}
-          <PanelResizer onResize={handleChatResize} />
-          {/* Chat panel — always rendered */}
-          <div className="shrink-0" style={{ width: chatWidth }}>
-            {chatPanel}
-          </div>
 
           {/* Fullscreen charts overlay */}
           {chartsFullscreen && (
@@ -153,11 +140,8 @@ export default function PanelLayout({
     return (
       <div className="h-full relative">
         <div className="flex flex-col h-full">
-          <div className="flex flex-1 min-h-0">
+          <div className="flex-1 min-h-0">
             <TabContainer tabs={tabs} />
-            <div className="w-[380px] border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shrink-0">
-              {chatPanel}
-            </div>
           </div>
           {chartsOpen && !chartsFullscreen && (
             <div className="h-[300px] border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
@@ -184,20 +168,11 @@ export default function PanelLayout({
     );
   }
 
-  // Small screen: map + chat, charts as toggle overlay
+  // Small screen: map with charts as toggle overlay
   return (
     <div className="h-full relative">
-      <div className="flex h-full">
-        <div className={`flex-1 relative min-w-0 ${chartsFullscreen ? "hidden" : ""}`}>
-          <TabContainer tabs={tabs} />
-        </div>
-        <div
-          className={`w-[380px] border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shrink-0 ${
-            chartsFullscreen ? "hidden" : ""
-          }`}
-        >
-          {chatPanel}
-        </div>
+      <div className={`h-full ${chartsFullscreen ? "hidden" : ""}`}>
+        <TabContainer tabs={tabs} />
       </div>
 
       {/* Fullscreen charts overlay */}

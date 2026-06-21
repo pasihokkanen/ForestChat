@@ -7,9 +7,21 @@ import type {
   PlanMetadata,
 } from "@/types/database";
 
-type LoadingKey = "forest" | "compartments";
+type LoadingKey = "forest" | "compartments" | "forests";
 
 export interface ForestSlice {
+  // ── Multi-forest (Phase A) ──
+  forests: Forest[];             // all user's forests (loaded once)
+  activeForestIds: string[];     // checked forests
+  isLoadingForests: boolean;
+
+  setForests: (forests: Forest[]) => void;
+  toggleActiveForest: (id: string) => void;
+  setActiveForests: (ids: string[]) => void;
+  isActive: (id: string) => boolean;
+
+  // ── Single-forest (legacy — holds data for one forest at a time,
+  //     will hold COMBINED data from all active forests in Phase C) ──
   forest: Forest | null;
   compartments: Compartment[];
   compartmentSpecies: CompartmentSpecies[];
@@ -32,6 +44,9 @@ export interface ForestSlice {
 }
 
 const initialState = {
+  forests: [] as Forest[],
+  activeForestIds: [] as string[],
+  isLoadingForests: false,
   forest: null as Forest | null,
   compartments: [] as Compartment[],
   compartmentSpecies: [] as CompartmentSpecies[],
@@ -43,9 +58,25 @@ const initialState = {
   refetchCounter: 0,
 };
 
-export const createForestSlice: StateCreator<ForestSlice> = (set) => ({
+export const createForestSlice: StateCreator<ForestSlice> = (set, get) => ({
   ...initialState,
 
+  // ── Multi-forest setters ──
+  setForests: (forests) => set({ forests }),
+
+  toggleActiveForest: (id) =>
+    set((state) => {
+      const set = new Set(state.activeForestIds);
+      if (set.has(id)) set.delete(id);
+      else set.add(id);
+      return { activeForestIds: Array.from(set) };
+    }),
+
+  setActiveForests: (ids) => set({ activeForestIds: ids }),
+
+  isActive: (id) => get().activeForestIds.includes(id),
+
+  // ── Single-forest setters ──
   setForest: (forest) => set({ forest }),
 
   setCompartments: (compartments) => set({ compartments }),
@@ -60,7 +91,9 @@ export const createForestSlice: StateCreator<ForestSlice> = (set) => ({
     set(
       key === "forest"
         ? { isLoadingForest: value }
-        : { isLoadingCompartments: value }
+        : key === "compartments"
+        ? { isLoadingCompartments: value }
+        : { isLoadingForests: value }
     ),
 
   setError: (error) => set({ forestError: error }),

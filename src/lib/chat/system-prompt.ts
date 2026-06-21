@@ -3,13 +3,19 @@
 // Builds the system prompt for the AI chat, including forest context
 // and key rules for how the AI should behave.
 
-import type { Forest, Compartment } from "@/types/database";
+import type { Compartment } from "@/types/database";
 import type { Language } from "@/lib/i18n";
 
-export function buildSystemPrompt(
-  forest: Forest | null,
+interface ForestSummary {
+  id: string;
+  name: string;
+  municipality: string | null;
+  property_id: string | null;
+}
+
+function buildForestDetailPrompt(
+  forest: ForestSummary,
   compartments: Compartment[],
-  language: Language = "en",
 ): string {
   const totalVolume = compartments.reduce((s, c) => s + (c.volume_m3 ?? 0), 0);
   const totalArea = compartments.reduce((s, c) => s + (c.area_ha ?? 0), 0);
@@ -24,7 +30,7 @@ export function buildSystemPrompt(
   ).length;
 
   return [
-    `You are a Finnish forestry expert helping a forest owner manage their forest plan.`,
+    `ACTIVE FOREST: ${forest.name} (${compartments.length} compartments, ${totalArea.toFixed(1)} ha, ${Math.round(totalVolume).toLocaleString()} m³)`,
     ``,
     `FOREST CONTEXT:`,
     forest ? `- Forest name: ${forest.name}` : "",
@@ -38,17 +44,47 @@ export function buildSystemPrompt(
     `- Mature thinning: ${matureThinning} stands`,
     `- Young thinning: ${youngThinning} stands`,
     ``,
-    `KEY RULES:`,
-    `1. Never invent stand data — always fetch it via get_stand or search_stands when you need detailed information. For quick existence checks before add_operation or remove_operation, skip the verification — the server validates stand IDs automatically.`,
-    `2. When the user asks for a new plan, use the generate_plan tool with the required 'goal' parameter.`,
-    `2a. If the user hasn't specified a goal, ASK them to choose before calling generate_plan. Present the 4 goals clearly:`,
-    `    - maximum_growth_aggressive: Maximize total volume. All regenerations done immediately. Fast rotation.`,
-    `    - maximum_growth_balanced: Capped growth with steady income. Front-load regeneration like aggressive but with 125% annual growth volume limit.`,
-    `    - carbon_storage: Maximize standing carbon stock. Avoid clearcuts. Extended rotations. Selection cutting preferred.`,
-    `    - balanced: Standard Finnish best practices. Equal weight on all objectives.`,
-    `    Do NOT pick a default — the user must choose.`,
-    `3. When the user asks for modifications, use the editing tools.`,
-    `4. Always check harvest sustainability after making changes.`,
+  ].join("\n");
+}
+
+export function buildSystemPrompt(
+  forests: ForestSummary[],
+  compartments: Compartment[],
+  language: Language = "en",
+  activeForestIds: string[] = [],
+): string {
+  // Dashboard mode — no forests active
+  if (activeForestIds.length === 0) {
+    const forestList = forests
+      .map((f) => {
+        const parts = [f.name];
+        if (f.municipality) parts.push(`(${f.municipality})`);
+        if (f.property_id) parts.push(`[${f.property_id}]`);
+        return `- ${parts.join(" ")}`;
+      })
+      .join("\n");
+
+    return [
+      `You are a Finnish forestry AI assistant. The user is on their dashboard.`,
+      `Available forests:`,
+      forestList || "- No forests available",
+      `No forests are currently active.`,
+      `You can help import new forest data, answer forestry questions, or suggest activating a forest.`,
+    ].join("\n");
+  }
+
+  // Forest mode — first active forest drives the prompt
+  const firstActiveId = activeForestIds[0];
+  const activeForest = forests.find((f) => f.id === firstActiveId);
+
+  const forestContext = activeForest
+    ? buildForestDetailPrompt(activeForest, compartments)
+    : "";
+
+  return [
+    `You are a Finnish forestry expert helping a forest owner manage their forest plan.`,
+    ``,
+    forestContext,
 
     `GUIDELINES: Plan behavior depends on the selected goal. Rules like rotation age, harvest limits, and regeneration methods vary. After generating a plan, the goal is visible in plan_summary.`,
     `5. Explain your recommendations in forestry terms.`,

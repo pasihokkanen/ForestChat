@@ -287,7 +287,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "forest_id required" }, { status: 400 });
     }
 
-    const session = await getOrCreateSession(forestId, user.id);
+    const session = await getOrCreateSession(user.id);
     const messages = await getChatMessages(session.id);
 
     return NextResponse.json({
@@ -329,12 +329,12 @@ export async function POST(request: NextRequest) {
       }
 
       // 3. Get/create session
-      const session = await getOrCreateSession(forest_id, user.id);
+      const session = await getOrCreateSession(user.id);
 
       // -- Command handling (before AI agent loop) --
       // /new — Start a fresh conversation (creates new session)
       if (message === "/new") {
-        const newSession = await createSession(forest_id, user.id, undefined, session.model ?? undefined);
+        const newSession = await createSession(user.id, undefined, session.model ?? undefined);
         send({ event: "chunk", data: { content: serverMsg("newConversation", lang) } });
         send({ event: "done", data: { message_id: "", session_id: newSession.id, model: newSession.model } });
         close();
@@ -369,7 +369,12 @@ export async function POST(request: NextRequest) {
       const activeModel = resolveModel(session.model);
 
       // 7. Build messages array for OpenRouter
-      const systemPrompt = buildSystemPrompt(forest, compartments, language ?? "en");
+      const systemPrompt = buildSystemPrompt(
+        forest ? [{ id: forest.id, name: forest.name, municipality: forest.municipality, property_id: forest.property_id }] : [],
+        compartments,
+        language ?? "en",
+        [forest_id],
+      );
       const tools = getTools();
 
       const openRouterMessages: Array<{ role: string; content: string; tool_call_id?: string }> = [
@@ -637,7 +642,7 @@ export async function POST(request: NextRequest) {
 
       // Phase 4b: After ALL iterations + fallback — recompute charts once if any mutation happened
       if (needsRecompute) {
-        await recomputeAllCharts(ctx.supabase, ctx.forestId, sendSse);
+        await recomputeAllCharts(ctx.supabase, [ctx.forestId], sendSse);
       }
 
       // Store final assistant message

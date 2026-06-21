@@ -11,7 +11,9 @@ export type SseEventType =
   | "remove_chart"
   | "clear_charts"
   | "charts_refreshed"
-  | "show_in_ui";
+  | "show_in_ui"
+  | "open_forest"
+  | "close_forest";
 
 export interface ShowInUiPayload {
   target: "stands" | "operations";
@@ -31,6 +33,8 @@ interface SseCallbacks {
   onClearCharts?: () => void;
   onChartsRefreshed?: (chartIds: string[]) => void;
   onShowInUi?: (payload: ShowInUiPayload) => void;
+  onOpenForest?: (forestId: string, name: string) => void;
+  onCloseForest?: (forestId: string) => void;
 }
 
 export async function streamChat(
@@ -111,6 +115,12 @@ export async function streamChat(
               break;
             case "show_in_ui":
               callbacks.onShowInUi?.(data as ShowInUiPayload);
+              break;
+            case "open_forest":
+              callbacks.onOpenForest?.(data.forest_id as string, data.name as string);
+              break;
+            case "close_forest":
+              callbacks.onCloseForest?.(data.forest_id as string);
               break;
           }
         } catch {

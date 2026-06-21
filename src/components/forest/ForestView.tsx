@@ -13,7 +13,6 @@ import { useEffect, useState, useRef, Suspense } from "react";
 import dynamic from "next/dynamic";
 import StandLayer from "@/components/map/StandLayer";
 import StandLegend from "@/components/map/StandLegend";
-import ChatPanel from "@/components/chat/ChatPanel";
 import PanelLayout from "@/components/layout/PanelLayout";
 import ChartsPanel from "@/components/charts/ChartsPanel";
 import StandList from "@/components/forest/StandList";
@@ -190,7 +189,6 @@ export default function ForestView({ forestId }: ForestViewProps) {
         stands: <StandList map={map} />,
         operations: <OperationList map={map} />,
       }}
-      chatPanel={<ChatPanel forestId={forestId} />}
     />
   );
 }

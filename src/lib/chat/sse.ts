@@ -22,7 +22,9 @@ export interface SseEvent {
     | "remove_chart"
     | "clear_charts"
     | "charts_refreshed"
-    | "show_in_ui";
+    | "show_in_ui"
+    | "open_forest"
+    | "close_forest";
   data: {
     content?: string;
     name?: string;

@@ -418,14 +418,14 @@ function parseNumeric(s: string): number | string {
 
 function buildQuery(
   supabase: SupabaseClient,
-  forestId: string,
+  forestIds: string[],
   config: ChartQueryConfig
 ) {
   const selectStr = buildSelect(config);
   let query = supabase
     .from(config.source)
     .select(selectStr)
-    .eq("forest_id", forestId)
+    .in("forest_id", forestIds)
     .limit(MAX_ROWS);
 
   // Apply filters — Phase 4c.1: resolve join-prefixed filter keys
@@ -1040,7 +1040,7 @@ function applyCrossCumulative(
  *  (cumulative is deferred to post-merge in the cross pipeline). */
 async function recomputeSubQuery(
   supabase: SupabaseClient,
-  forestId: string,
+  forestIds: string[],
   subConfig: SubQueryConfig,
   skipCumulative: boolean
 ): Promise<Record<string, unknown>[]> {
@@ -1077,7 +1077,7 @@ async function recomputeSubQuery(
   }
 
   // 2. Build and execute query
-  const query = buildQuery(supabase, forestId, config);
+  const query = buildQuery(supabase, forestIds, config);
   const { data: rawRows, error } = await query;
 
   if (error) {
@@ -1124,7 +1124,7 @@ async function recomputeSubQuery(
  *  fill gaps, and apply deferred cumulative. */
 async function recomputeCrossData(
   supabase: SupabaseClient,
-  forestId: string,
+  forestIds: string[],
   config: CrossQueryConfig
 ): Promise<ChartEngineResult> {
   const strategy = config.merge_strategy ?? "outer";
@@ -1132,7 +1132,7 @@ async function recomputeCrossData(
   // 1. Run all sub-queries (cumulative stripped, applied post-merge)
   const subResults: Record<string, unknown>[][] = [];
   for (const subCfg of config.queries) {
-    const rows = await recomputeSubQuery(supabase, forestId, subCfg, true);
+    const rows = await recomputeSubQuery(supabase, forestIds, subCfg, true);
     subResults.push(rows);
   }
 
@@ -1190,12 +1190,12 @@ async function recomputeCrossData(
  */
 export async function recomputeChartData(
   supabase: SupabaseClient,
-  forestId: string,
+  forestIds: string[],
   config: AnyQueryConfig
 ): Promise<ChartEngineResult> {
   // Phase 4c.3: cross-source dispatch
   if (config.source === "cross") {
-    return recomputeCrossData(supabase, forestId, config as CrossQueryConfig);
+    return recomputeCrossData(supabase, forestIds, config as CrossQueryConfig);
   }
 
   // Existing single-source pipeline
@@ -1220,7 +1220,7 @@ export async function recomputeChartData(
   }
 
   // 2. Build and execute query
-  const query = buildQuery(supabase, forestId, sc);
+  const query = buildQuery(supabase, forestIds, sc);
   const { data: rawRows, error } = await query;
 
   if (error) {
@@ -1277,13 +1277,13 @@ export async function recomputeChartData(
  */
 export async function recomputeAllCharts(
   supabase: SupabaseClient,
-  forestId: string,
+  forestIds: string[],
   sendSse?: (event: string, data: unknown) => void
 ): Promise<void> {
   const { data: tabs, error } = await supabase
     .from("chart_tabs")
-    .select("chart_id, query_config, title_en, title_fi")
-    .eq("forest_id", forestId)
+    .select("chart_id, forest_id, query_config, title_en, title_fi")
+    .in("forest_id", forestIds)
     .not("query_config", "is", null);
 
   if (error) {
@@ -1299,7 +1299,7 @@ export async function recomputeAllCharts(
     try {
       // Phase 4c: widened type — query_config may be ChartQueryConfig or CrossQueryConfig
       const config = tab.query_config as AnyQueryConfig;
-      const result = await recomputeChartData(supabase, forestId, config);
+      const result = await recomputeChartData(supabase, forestIds, config);
 
       await supabase
         .from("chart_tabs")
@@ -1307,7 +1307,7 @@ export async function recomputeAllCharts(
           data: result.data,
           computed_at: result.computedAt,
         })
-        .eq("forest_id", forestId)
+        .eq("forest_id", tab.forest_id)
         .eq("chart_id", tab.chart_id);
 
       recomputedIds.push(tab.chart_id);

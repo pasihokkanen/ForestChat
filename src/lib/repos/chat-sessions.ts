@@ -1,18 +1,19 @@
 import type { ChatSession } from "@/types/database";
 import { createServerSupabase } from "@/lib/supabase/server";
 
+/** Get the user's most recent session or create one with forest_id = NULL.
+ *  Forest context now comes from the Zustand store's activeForestIds (Decision D1),
+ *  NOT from the session row. */
 export async function getOrCreateSession(
-  forestId: string,
   userId: string,
   title?: string
 ): Promise<ChatSession> {
   const supabase = await createServerSupabase();
 
-  // Check for existing active session
+  // Check for existing session — user-scoped, no forest_id filter
   const { data: existing } = await supabase
     .from("chat_sessions")
     .select("*")
-    .eq("forest_id", forestId)
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -22,11 +23,11 @@ export async function getOrCreateSession(
     return existing as ChatSession;
   }
 
-  // Create new session
+  // Create new session — user-scoped, forest_id = null
   const { data, error } = await supabase
     .from("chat_sessions")
     .insert({
-      forest_id: forestId,
+      forest_id: null,
       user_id: userId,
       title: title ?? "Forest Plan Chat",
     })
@@ -54,9 +55,8 @@ export async function getSessionById(
   return data as ChatSession;
 }
 
-/** Create a fresh session (used by /new command) */
+/** Create a fresh session (used by /new command). User-scoped, forest_id = null. */
 export async function createSession(
-  forestId: string,
   userId: string,
   title?: string,
   model?: string
@@ -65,7 +65,7 @@ export async function createSession(
   const { data, error } = await supabase
     .from("chat_sessions")
     .insert({
-      forest_id: forestId,
+      forest_id: null,
       user_id: userId,
       title: title ?? "Forest Plan Chat",
       model: model ?? null,
