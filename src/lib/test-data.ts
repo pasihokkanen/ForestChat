@@ -16,6 +16,7 @@ export const testCompartments: CompartmentFeatureCollection = {
       properties: {
         id: "test-1",
         stand_id: "1",
+        forest_id: "test-forest",
         main_species: "Pine",
         development_class: "young_thinning",
         site_type: "mesic",
@@ -38,6 +39,7 @@ export const testCompartments: CompartmentFeatureCollection = {
       properties: {
         id: "test-2",
         stand_id: "2",
+        forest_id: "test-forest",
         main_species: "Spruce",
         development_class: "mature_thinning",
         site_type: "mesic",
@@ -60,6 +62,7 @@ export const testCompartments: CompartmentFeatureCollection = {
       properties: {
         id: "test-3",
         stand_id: "3",
+        forest_id: "test-forest",
         main_species: "Birch",
         development_class: "regeneration_ready",
         site_type: "herb-rich heath",
@@ -82,6 +85,7 @@ export const testCompartments: CompartmentFeatureCollection = {
       properties: {
         id: "test-4",
         stand_id: "4",
+        forest_id: "test-forest",
         main_species: "Pine",
         development_class: "seedling_small",
         site_type: "sub-xeric",
@@ -104,6 +108,7 @@ export const testCompartments: CompartmentFeatureCollection = {
       properties: {
         id: "test-5",
         stand_id: "5",
+        forest_id: "test-forest",
         main_species: "Spruce",
         development_class: "mature_thinning",
         site_type: "mesic",
@@ -126,6 +131,7 @@ export const testCompartments: CompartmentFeatureCollection = {
       properties: {
         id: "test-6",
         stand_id: "6",
+        forest_id: "test-forest",
         main_species: "Pine",
         development_class: "regeneration_ready",
         site_type: "sub-xeric",
@@ -148,6 +154,7 @@ export const testCompartments: CompartmentFeatureCollection = {
       properties: {
         id: "test-7",
         stand_id: "7",
+        forest_id: "test-forest",
         main_species: "Birch",
         development_class: "young_thinning",
         site_type: "herb-rich heath",
@@ -170,6 +177,7 @@ export const testCompartments: CompartmentFeatureCollection = {
       properties: {
         id: "test-8",
         stand_id: "8",
+        forest_id: "test-forest",
         main_species: "Spruce",
         development_class: "open_area",
         site_type: "mesic",
@@ -192,6 +200,7 @@ export const testCompartments: CompartmentFeatureCollection = {
       properties: {
         id: "test-9",
         stand_id: "9",
+        forest_id: "test-forest",
         main_species: "Pine",
         development_class: "seed_tree",
         site_type: "xeric",
@@ -214,6 +223,7 @@ export const testCompartments: CompartmentFeatureCollection = {
       properties: {
         id: "test-10",
         stand_id: "10",
+        forest_id: "test-forest",
         main_species: "Spruce",
         development_class: "seedling_small",
         site_type: "mesic",

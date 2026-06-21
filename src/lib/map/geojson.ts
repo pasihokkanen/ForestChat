@@ -92,6 +92,7 @@ export function compartmentsToGeoJSON(
         geometry: geom as unknown as CompartmentFeature["geometry"],
         properties: {
           id: c.id,
+          forest_id: c.forest_id,
           stand_id: c.stand_id,
           main_species: c.main_species,
           development_class: c.development_class,

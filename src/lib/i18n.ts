@@ -473,6 +473,7 @@ export function toolStatusLabel(status: string, lang: Language): string {
 // ── Stand list labels ──
 export interface StandListLabels {
   colStand: string;
+  colForest: string;
   colSpecies: string;
   colArea: string;
   colVolume: string;
@@ -480,9 +481,11 @@ export interface StandListLabels {
   colDevClass: string;
   colSiteType: string;
   colGrowth: string;
+  filterForest: string;
   filterSpecies: string;
   filterDevClass: string;
   filterSite: string;
+  chipForest: string;
   placeholderAgeMin: string;
   placeholderAgeMax: string;
   placeholderAreaMin: string;
@@ -517,6 +520,7 @@ export function standListLabels(lang: Language): StandListLabels {
   if (lang === "fi") {
     return {
       colStand: "Kuvio",
+      colForest: "Metsä",
       colSpecies: "Puulaji",
       colArea: "Pinta-ala (ha)",
       colVolume: "Tilavuus (m³)",
@@ -524,9 +528,11 @@ export function standListLabels(lang: Language): StandListLabels {
       colDevClass: "Kehitysluokka",
       colSiteType: "Kasvupaikka",
       colGrowth: "Kasvu (m³/ha/v)",
+      filterForest: "Metsä",
       filterSpecies: "Puulaji",
       filterDevClass: "Kehityslk.",
       filterSite: "Kasvupaikka",
+      chipForest: "Metsä",
       placeholderAgeMin: "Ikä ≥",
       placeholderAgeMax: "Ikä ≤",
       placeholderAreaMin: "Ala ≥",
@@ -559,6 +565,7 @@ export function standListLabels(lang: Language): StandListLabels {
   }
   return {
     colStand: "Stand",
+    colForest: "Forest",
     colSpecies: "Species",
     colArea: "Area (ha)",
     colVolume: "Volume (m³)",
@@ -566,9 +573,11 @@ export function standListLabels(lang: Language): StandListLabels {
     colDevClass: "Dev. Class",
     colSiteType: "Site Type",
     colGrowth: "Growth (m³/ha/y)",
+    filterForest: "Forest",
     filterSpecies: "Species",
     filterDevClass: "Dev. Class",
     filterSite: "Site",
+    chipForest: "Forest",
     placeholderAgeMin: "Age ≥",
     placeholderAgeMax: "Age ≤",
     placeholderAreaMin: "Area ≥",
@@ -603,6 +612,7 @@ export function standListLabels(lang: Language): StandListLabels {
 // ── Operation list labels ──
 export interface OperationListLabels {
   colStand: string;
+  colForest: string;
   colType: string;
   colYear: string;
   colAge: string;
@@ -616,8 +626,10 @@ export interface OperationListLabels {
   colIncome: string;
   colCost: string;
   colDevClass: string;
+  filterForest: string;
   filterType: string;
   filterSpecies: string;
+  chipForest: string;
   placeholderYearFrom: string;
   placeholderYearTo: string;
   placeholderStandId: string;
@@ -639,6 +651,7 @@ export function operationListLabels(lang: Language): OperationListLabels {
   if (lang === "fi") {
     return {
       colStand: "Kuvio",
+      colForest: "Metsä",
       colType: "Tyyppi",
       colYear: "Vuosi",
       colAge: "Ikä",
@@ -652,8 +665,10 @@ export function operationListLabels(lang: Language): OperationListLabels {
       colIncome: "Tuotto (€)",
       colCost: "Kulu (€)",
       colDevClass: "Kehityslk.",
+      filterForest: "Metsä",
       filterType: "Tyyppi",
       filterSpecies: "Puulaji",
+      chipForest: "Metsä",
       placeholderYearFrom: "Vuosi alkaen",
       placeholderYearTo: "Vuosi asti",
       placeholderStandId: "Kuvion ID",
@@ -673,6 +688,7 @@ export function operationListLabels(lang: Language): OperationListLabels {
   }
   return {
     colStand: "Stand",
+    colForest: "Forest",
     colType: "Type",
     colYear: "Year",
     colAge: "Age",
@@ -686,8 +702,10 @@ export function operationListLabels(lang: Language): OperationListLabels {
     colIncome: "Income (€)",
     colCost: "Cost (€)",
     colDevClass: "Dev. Class",
+    filterForest: "Forest",
     filterType: "Type",
     filterSpecies: "Species",
+    chipForest: "Forest",
     placeholderYearFrom: "Year from",
     placeholderYearTo: "Year to",
     placeholderStandId: "Stand ID",

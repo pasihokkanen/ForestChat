@@ -42,6 +42,46 @@ export interface StandLayerProps {
   isDark?: boolean;
 }
 
+function forestHueColor(forestId: string): string {
+  const hue = parseInt(forestId.slice(0, 8), 16) % 360;
+  return `hsl(${hue}, 70%, 45%)`;
+}
+
+function syncForestOutlineLayers(map: maplibregl.Map, activeForestIds: string[]) {
+  const STANDS_SOURCE = "stands";
+
+  const existingLayers = map.getStyle()?.layers ?? [];
+  const oldOutlineIds = existingLayers
+    .filter((l) => l.id.startsWith("stands-outline-"))
+    .map((l) => l.id);
+
+  for (const id of oldOutlineIds) {
+    try { if (map.getLayer(id)) map.removeLayer(id); } catch { /* skip */ }
+  }
+
+  if (activeForestIds.length <= 1) return;
+
+  for (const forestId of activeForestIds) {
+    const layerId = `stands-outline-${forestId}`;
+    const color = forestHueColor(forestId);
+    try {
+      if (map.getLayer(layerId)) continue;
+      if (!map.getSource(STANDS_SOURCE)) continue;
+      map.addLayer({
+        id: layerId,
+        type: "line",
+        source: STANDS_SOURCE,
+        filter: ["==", ["get", "forest_id"], forestId],
+        paint: {
+          "line-color": color,
+          "line-width": 2,
+          "line-opacity": 0.8,
+        },
+      });
+    } catch { /* skip */ }
+  }
+}
+
 // ── Persisted popup position — remembered across open/close, default top-left ──
 const popupPos = { left: 12, top: 12 };
 
@@ -101,6 +141,11 @@ function showCustomPopup(
   const state = useForestStore.getState();
   const lang = state.language ?? "en";
 
+  const popupForestId = props.forest_id as string | undefined;
+  const forestName = popupForestId
+    ? (state.forests.find((f) => f.id === popupForestId)?.name ?? "")
+    : "";
+
   // Build popup HTML — read fresh data from store each time
   const devClass = (displayDevClass(props.development_class as string, lang)) ?? "—";
   const siteType = (displaySiteType(props.site_type as string, lang)) ?? "—";
@@ -142,7 +187,8 @@ function showCustomPopup(
   el.innerHTML = `
     <div style="position:relative">
       <button class="popup-close" style="position:absolute;top:1px;right:1px;border:none;background:transparent;font-size:18px;cursor:pointer;color:${closeBtnColor};line-height:1;width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:4px;z-index:1">×</button>
-      <h3 class="popup-drag-handle" style="font-weight:600;font-size:15px;margin:0 0 8px 0;padding:4px 20px 4px 0;border-bottom:1px solid ${borderColor};color:${textColor};cursor:grab;user-select:none">${pl.standPrefix} ${standId}</h3>
+      <h3 class="popup-drag-handle" style="font-weight:600;font-size:15px;margin:0 0 4px 0;padding:4px 20px 4px 0;color:${textColor};cursor:grab;user-select:none">${pl.standPrefix} ${standId}</h3>
+      ${forestName ? `<div style="font-size:12px;color:${mutedColor};margin:0 0 8px 0;padding-bottom:6px;border-bottom:1px solid ${borderColor}">${forestName}</div>` : `<div style="border-bottom:1px solid ${borderColor};margin:0 0 8px 0"></div>`}
 
       <h4 style="font-weight:500;font-size:12px;margin:0 0 3px 0;color:${sectionTitleColor};text-transform:uppercase;letter-spacing:0.5px">${pl.standDetails}</h4>
       <div style="margin:0 0 8px 0">
@@ -252,6 +298,9 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
   const selectStand = useForestStore((s) => s.selectStand);
   const setHighlightedStands = useForestStore((s) => s.setHighlightedStands);
   const activeMainTab = useForestStore((s) => s.activeMainTab);
+  const activeForestIds = useForestStore((s) => s.activeForestIds);
+  const forestHueColorRef = useRef(forestHueColor);
+  forestHueColorRef.current = forestHueColor;
 
   // When highlighting changes (e.g. from list row click), close popup if
   // the selected stand no longer matches the highlight
@@ -330,6 +379,12 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
         for (const id of ["stands-highlight", "stands-highlight-fill", LAYER_ID]) {
           if (map.getLayer(id)) map.removeLayer(id);
         }
+        const existingLayers = map.getStyle()?.layers ?? [];
+        for (const l of existingLayers) {
+          if ((l.id as string).startsWith("stands-outline-")) {
+            try { if (map.getLayer(l.id as string)) map.removeLayer(l.id as string); } catch { /* skip */ }
+          }
+        }
         if (map.getSource(SOURCE_ID)) map.removeSource(SOURCE_ID);
 
         map.addSource(SOURCE_ID, { type: "geojson", data: compartmentsRef.current });
@@ -373,6 +428,20 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
           filter: highlightFilter,
           paint: { "line-color": "#FFD700", "line-width": 4, "line-opacity": 0.9 },
         });
+
+        const afIds = useForestStore.getState().activeForestIds;
+        if (afIds.length > 1) {
+          for (const forestId of afIds) {
+            const color = forestHueColorRef.current(forestId);
+            map.addLayer({
+              id: `stands-outline-${forestId}`,
+              type: "line",
+              source: SOURCE_ID,
+              filter: ["==", ["get", "forest_id"], forestId],
+              paint: { "line-color": color, "line-width": 2, "line-opacity": 0.8 },
+            });
+          }
+        }
       } catch { /* transitional — next style.load will retry */ }
     };
 
@@ -509,6 +578,12 @@ export default function StandLayer({ map, compartments, styleVersion = 0, isDark
       // Layer/source may not be available during layout transitions — skip
     }
   }, [map, selectedStandId, highlightedStandIds, styleVersion]);
+
+  // Update forest outline layers when activeForestIds changes
+  useEffect(() => {
+    if (!map) return;
+    syncForestOutlineLayers(map, activeForestIds);
+  }, [map, activeForestIds, styleVersion]);
 
   // Zoom to selected/highlighted stands when selection changes via AI or chart click.
   // Handles both single-stand (zoom + popup) and multi-stand (zoom to bounds, no popup).

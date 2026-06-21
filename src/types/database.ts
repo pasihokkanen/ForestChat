@@ -128,6 +128,7 @@ export interface ChartQueryConfig {
 export interface CompartmentFeature extends GeoJSON.Feature<GeoJSON.MultiPolygon> {
   properties: {
     id: string;
+    forest_id: string;
     stand_id: string;
     main_species: string | null;
     development_class: string | null;

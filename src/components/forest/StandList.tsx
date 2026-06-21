@@ -35,10 +35,12 @@ const SPECIES_OPTIONS = [
 const STAND_COLUMN_KEYS = [
   "colStand", "colSpecies", "colArea", "colVolume",
   "colAge", "colDevClass", "colSiteType", "colGrowth",
+  "colForest",
 ] as const;
 
 const COL_KEY_TO_DATA: Record<string, keyof Compartment> = {
   colStand: "stand_id",
+  colForest: "forest_id",
   colSpecies: "main_species",
   colArea: "area_ha",
   colVolume: "volume_m3",
@@ -61,6 +63,7 @@ const standPersist = {
   speciesFilter: [] as string[],
   devClassFilter: [] as string[],
   siteTypeFilter: [] as string[],
+  forestFilter: [] as string[],
   ageMin: null as number | null,
   ageMax: null as number | null,
   areaMin: null as number | null,
@@ -84,6 +87,15 @@ export default function StandList({ map }: StandListProps) {
   const aiStandFilters = useForestStore((s) => s.aiStandFilters);
   const language = useForestStore((s) => s.language) ?? "en";
   const forestId = useForestStore((s) => s.forest?.id ?? null);
+  const forests = useForestStore((s) => s.forests);
+  const activeForestIds = useForestStore((s) => s.activeForestIds);
+  const forestNameMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const f of forests) m.set(f.id, f.name);
+    return m;
+  }, [forests]);
+  const forestNames = useMemo(() => forests.map((f) => f.name).filter((n, i, a) => a.indexOf(n) === i), [forests]);
+  const showForestColumn = activeForestIds.length > 1;
   const L = standListLabels(language);
 
   // ── State backed by module-level standPersist to survive tab switches ──
@@ -139,6 +151,16 @@ export default function StandList({ map }: StandListProps) {
       return next;
     });
   };
+  const [forestFilter, setForestFilterRaw] = useState<Set<string>>(
+    () => new Set(standPersist.forestFilter)
+  );
+  const setForestFilter: React.Dispatch<React.SetStateAction<Set<string>>> = (v) => {
+    setForestFilterRaw((prev) => {
+      const next = typeof v === "function" ? v(prev) : v;
+      standPersist.forestFilter = Array.from(next);
+      return next;
+    });
+  };
 
   const [ageMin, setAgeMinRaw] = useState<number | null>(standPersist.ageMin);
   const setAgeMin = (v: number | null) => { standPersist.ageMin = v; setAgeMinRaw(v); };
@@ -159,14 +181,17 @@ export default function StandList({ map }: StandListProps) {
   const [speciesOpen, setSpeciesOpen] = useState(false);
   const [devClassOpen, setDevClassOpen] = useState(false);
   const [siteTypeOpen, setSiteTypeOpen] = useState(false);
+  const [forestOpen, setForestOpen] = useState(false);
   const speciesRef = useRef<HTMLDivElement>(null);
   const devClassRef = useRef<HTMLDivElement>(null);
   const siteTypeRef = useRef<HTMLDivElement>(null);
+  const forestRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (speciesRef.current && !speciesRef.current.contains(e.target as Node)) setSpeciesOpen(false);
       if (devClassRef.current && !devClassRef.current.contains(e.target as Node)) setDevClassOpen(false);
       if (siteTypeRef.current && !siteTypeRef.current.contains(e.target as Node)) setSiteTypeOpen(false);
+      if (forestRef.current && !forestRef.current.contains(e.target as Node)) setForestOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -179,6 +204,7 @@ export default function StandList({ map }: StandListProps) {
       setSpeciesFilter(new Set());
       setDevClassFilter(new Set());
       setSiteTypeFilter(new Set());
+      setForestFilter(new Set());
       setAgeMin(null);
       setAgeMax(null);
       setAreaMin(null);
@@ -279,6 +305,7 @@ export default function StandList({ map }: StandListProps) {
   };
 
   const hasActiveFilters = speciesFilter.size > 0 || devClassFilter.size > 0 || siteTypeFilter.size > 0 ||
+    forestFilter.size > 0 ||
     ageMin != null || ageMax != null || areaMin != null || areaMax != null ||
     volumeMin != null || volumeMax != null || globalFilter !== "";
 
@@ -286,6 +313,7 @@ export default function StandList({ map }: StandListProps) {
     setSpeciesFilter(new Set());
     setDevClassFilter(new Set());
     setSiteTypeFilter(new Set());
+    setForestFilter(new Set());
     setAgeMin(null);
     setAgeMax(null);
     setAreaMin(null);
@@ -308,6 +336,9 @@ export default function StandList({ map }: StandListProps) {
     if (siteTypeFilter.size > 0) {
       filtered = filtered.filter((c) => siteTypeFilter.has(c.site_type ?? ""));
     }
+    if (forestFilter.size > 0) {
+      filtered = filtered.filter((c) => forestFilter.has(forestNameMap.get(c.forest_id) ?? ""));
+    }
     if (ageMin != null) filtered = filtered.filter((c) => (c.age_years ?? 0) >= ageMin);
     if (ageMax != null) filtered = filtered.filter((c) => (c.age_years ?? 0) <= ageMax);
     if (areaMin != null) filtered = filtered.filter((c) => (c.area_ha ?? 0) >= areaMin);
@@ -321,20 +352,31 @@ export default function StandList({ map }: StandListProps) {
           c.stand_id.toLowerCase().includes(lower) ||
           (c.main_species ?? "").toLowerCase().includes(lower) ||
           (c.development_class ?? "").toLowerCase().includes(lower) ||
-          (c.site_type ?? "").toLowerCase().includes(lower)
+          (c.site_type ?? "").toLowerCase().includes(lower) ||
+          (forestNameMap.get(c.forest_id) ?? "").toLowerCase().includes(lower)
       );
     }
 
     if (sortKey) {
-      const dataKey = COL_KEY_TO_DATA[sortKey] ?? sortKey;
-      filtered.sort((a, b) => {
-        const aVal = (a as unknown as Record<string, unknown>)[dataKey] ?? 0;
-        const bVal = (b as unknown as Record<string, unknown>)[dataKey] ?? 0;
-        const cmp = typeof aVal === "number" && typeof bVal === "number"
-          ? aVal - bVal
-          : naturalCompare(aVal, bVal);
-        return sortDir === "asc" ? cmp : -cmp;
-      });
+      if (sortKey === "colForest") {
+        filtered.sort((a, b) => {
+          const aName = forestNameMap.get(a.forest_id) ?? "";
+          const bName = forestNameMap.get(b.forest_id) ?? "";
+          let cmp = naturalCompare(aName, bName);
+          if (cmp === 0) cmp = naturalCompare(a.stand_id, b.stand_id);
+          return sortDir === "asc" ? cmp : -cmp;
+        });
+      } else {
+        const dataKey = COL_KEY_TO_DATA[sortKey] ?? sortKey;
+        filtered.sort((a, b) => {
+          const aVal = (a as unknown as Record<string, unknown>)[dataKey] ?? 0;
+          const bVal = (b as unknown as Record<string, unknown>)[dataKey] ?? 0;
+          const cmp = typeof aVal === "number" && typeof bVal === "number"
+            ? aVal - bVal
+            : naturalCompare(aVal, bVal);
+          return sortDir === "asc" ? cmp : -cmp;
+        });
+      }
     }
 
     const rows: StandDisplayRow[] = [];
@@ -350,7 +392,8 @@ export default function StandList({ map }: StandListProps) {
     }
     return rows;
   }, [compartments, compartmentSpecies, operations, expandedStands, speciesFilter, devClassFilter,
-      siteTypeFilter, ageMin, ageMax, areaMin, areaMax, volumeMin, volumeMax, globalFilter, sortKey, sortDir]);
+      siteTypeFilter, forestFilter, ageMin, ageMax, areaMin, areaMax, volumeMin, volumeMax, globalFilter, sortKey, sortDir,
+      forestNameMap]);
 
   if (compartments.length === 0) {
     return (
@@ -365,6 +408,33 @@ export default function StandList({ map }: StandListProps) {
       {/* Filter bar */}
       <div className="shrink-0 border-b border-gray-200 dark:border-gray-700 p-2 space-y-2 bg-gradient-to-b from-gray-200 to-gray-100 dark:from-gray-700 dark:to-gray-800 rounded-t-lg">
         <div className="flex flex-wrap gap-2 items-center">
+          {/* Forest multi-select */}
+          {showForestColumn && (
+            <div className="relative" ref={forestRef}>
+              <button
+                onClick={() => setForestOpen((v) => !v)}
+                className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                {L.filterForest}{forestFilter.size > 0 ? ` (${forestFilter.size})` : " ▼"}
+              </button>
+              {forestOpen && (
+                <div className="absolute top-full left-0 mt-1 z-20 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg p-1 min-w-[160px]">
+                  {forestNames.map((name) => (
+                    <label key={name} className="flex items-center gap-1.5 px-2 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={forestFilter.has(name)}
+                        onChange={() => toggleFilter(setForestFilter, name)}
+                        className="h-3 w-3"
+                      />
+                      {name}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Species multi-select */}
           <div className="relative" ref={speciesRef}>
             <button
@@ -533,6 +603,12 @@ export default function StandList({ map }: StandListProps) {
                 <button onClick={() => toggleFilter(setSiteTypeFilter, st)} className="ml-0.5 hover:text-red-500">✕</button>
               </span>
             ))}
+            {Array.from(forestFilter).map((fn) => (
+              <span key={`fo-${fn}`} className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-teal-100 dark:bg-teal-900/30 text-teal-800 dark:text-teal-300 rounded">
+                {L.chipForest}: {fn}
+                <button onClick={() => toggleFilter(setForestFilter, fn)} className="ml-0.5 hover:text-red-500">✕</button>
+              </span>
+            ))}
             {ageMin != null && (
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300 rounded">
                 {L.chipAge}: ≥{ageMin}
@@ -571,7 +647,17 @@ export default function StandList({ map }: StandListProps) {
           <thead className="sticky top-0 bg-gray-100 dark:bg-gray-800 z-10">
             <tr>
               <th className="w-8 px-1 py-1.5 text-left"></th>
-              {STAND_COLUMN_KEYS.map((colKey) => (
+              {showForestColumn && (
+                <th
+                  className="px-2 py-1.5 text-left text-xs font-medium text-gray-600 dark:text-gray-400 cursor-pointer hover:text-gray-900 dark:hover:text-gray-200 select-none"
+                  style={{ width: 100 }}
+                  onClick={() => handleSort("colForest")}
+                >
+                  {L.colForest}
+                  {sortKey === "colForest" && (sortDir === "asc" ? " ▲" : " ▼")}
+                </th>
+              )}
+              {STAND_COLUMN_KEYS.filter(k => k !== "colForest").map((colKey) => (
                 <th
                   key={colKey}
                   className="px-2 py-1.5 text-left text-xs font-medium text-gray-600 dark:text-gray-400 cursor-pointer hover:text-gray-900 dark:hover:text-gray-200 select-none"
@@ -605,6 +691,9 @@ export default function StandList({ map }: StandListProps) {
                         {isExpanded ? "▼" : "▶"}
                       </button>
                     </td>
+                    {showForestColumn && (
+                      <td className="px-2 py-1 text-xs" style={{ width: 100 }}>{forestNameMap.get(row.data.forest_id) ?? row.data.forest_id}</td>
+                    )}
                     <td className="px-2 py-1 font-mono text-xs">{row.data.stand_id}</td>
                     <td className="px-2 py-1">{displaySpecies(row.data.main_species ?? "", language) || "—"}</td>
                     <td className="px-2 py-1 text-right">{(row.data.area_ha ?? 0).toFixed(1)}</td>
@@ -650,7 +739,7 @@ export default function StandList({ map }: StandListProps) {
 
                 return (
                   <tr key={`expand-${row.parentStandId}`}>
-                    <td colSpan={9} className="p-0">
+                      <td colSpan={showForestColumn ? 10 : 9} className="p-0">
                       <div className="border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/20">
                         {/* Current State — species rows with ALL fields */}
                         <div className="px-4 py-2">

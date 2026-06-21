@@ -21,13 +21,14 @@ const SPECIES_OPTIONS = [
 
 // Column keys — labels come from i18n
 const OP_COLUMN_KEYS = [
-  "colStand", "colType", "colYear", "colAge", "colSpecies", "colArea",
+  "colForest", "colStand", "colType", "colYear", "colAge", "colSpecies", "colArea",
   "colVolume", "colStems", "colHeight", "colDiameter",
   "colRemoval", "colIncome", "colCost", "colDevClass",
 ] as const;
 
 const COL_KEY_TO_DATA: Record<string, string> = {
   colStand: "stand_id",
+  colForest: "forest_id",
   colType: "type",
   colYear: "year",
   colAge: "age_years",
@@ -44,6 +45,7 @@ const COL_KEY_TO_DATA: Record<string, string> = {
 };
 
 const COL_WIDTHS: Record<string, number> = {
+  colForest: 100,
   colStand: 60, colType: 120, colYear: 55, colAge: 45,
   colSpecies: 90, colArea: 55, colVolume: 70, colStems: 55,
   colHeight: 45, colDiameter: 45, colRemoval: 55, colIncome: 70,
@@ -60,6 +62,8 @@ function OperationRow({
   onShowOnMap,
   language,
   showOnMapLabel,
+  forestNameMap,
+  showForestColumn,
 }: {
   index: number;
   style: React.CSSProperties;
@@ -70,6 +74,8 @@ function OperationRow({
   onShowOnMap: (standId: string) => void;
   language: string;
   showOnMapLabel: string;
+  forestNameMap: Map<string, string>;
+  showForestColumn: boolean;
 }) {
   const row = rows[index];
   const standId = String(row._standId ?? "");
@@ -83,6 +89,9 @@ function OperationRow({
       }`}
       onClick={(e) => onRowClick(standId, String(row._opId ?? ""), e as unknown as React.MouseEvent)}
     >
+      {showForestColumn && (
+        <div className="px-2 py-1 text-xs w-[100px] shrink-0 truncate">{String(row._forestName ?? "")}</div>
+      )}
       <div className="px-2 py-1 font-mono text-xs w-[60px] shrink-0">{standId}</div>
       <div className="px-2 py-1 text-xs w-[120px] shrink-0">{String(row._typeLabel ?? "")}</div>
       <div className="px-2 py-1 text-right text-xs w-[55px] shrink-0">{String(row._year ?? "")}</div>
@@ -132,6 +141,7 @@ const opPersist = {
   typeFilter: [] as string[],
   standFilter: "",
   speciesFilter: [] as string[],
+  forestFilter: [] as string[],
   globalFilter: "",
   lastClickedStandId: null as string | null,
   scrollTop: 0,
@@ -149,6 +159,15 @@ export default function OperationList({ map }: OperationListProps) {
   const setPendingStandSelection = useForestStore((s) => s.setPendingStandSelection);
   const aiOperationFilters = useForestStore((s) => s.aiOperationFilters);
   const language = useForestStore((s) => s.language) ?? "en";
+  const forests = useForestStore((s) => s.forests);
+  const activeForestIds = useForestStore((s) => s.activeForestIds);
+  const forestNameMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const f of forests) m.set(f.id, f.name);
+    return m;
+  }, [forests]);
+  const forestNames = useMemo(() => forests.map((f) => f.name).filter((n, i, a) => a.indexOf(n) === i), [forests]);
+  const showForestColumn = activeForestIds.length > 1;
   const L = operationListLabels(language);
 
   const compMap = useMemo(() => {
@@ -187,6 +206,17 @@ export default function OperationList({ map }: OperationListProps) {
     });
   };
 
+  const [forestFilter, setForestFilterRaw] = useState<Set<string>>(
+    () => new Set(opPersist.forestFilter)
+  );
+  const setForestFilter: React.Dispatch<React.SetStateAction<Set<string>>> = (v) => {
+    setForestFilterRaw((prev) => {
+      const next = typeof v === "function" ? v(prev) : v;
+      opPersist.forestFilter = Array.from(next);
+      return next;
+    });
+  };
+
   const [globalFilter, setGlobalFilterRaw] = useState(opPersist.globalFilter);
   const setGlobalFilter = (v: string) => { opPersist.globalFilter = v; setGlobalFilterRaw(v); };
 
@@ -209,6 +239,7 @@ export default function OperationList({ map }: OperationListProps) {
       setTypeFilter(new Set());
       setStandFilter("");
       setSpeciesFilter(new Set());
+      setForestFilter(new Set());
 
       const f = aiOperationFilters as Record<string, unknown>;
       if (Array.isArray(f.years) && f.years.length > 0) {
@@ -229,14 +260,17 @@ export default function OperationList({ map }: OperationListProps) {
 
   const [typeOpen, setTypeOpen] = useState(false);
   const [speciesOpen, setSpeciesOpen] = useState(false);
+  const [forestOpen, setForestOpen] = useState(false);
 
   // Close dropdowns when clicking outside
   const typeRef = useRef<HTMLDivElement>(null);
   const speciesRef = useRef<HTMLDivElement>(null);
+  const forestRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (typeRef.current && !typeRef.current.contains(e.target as Node)) setTypeOpen(false);
       if (speciesRef.current && !speciesRef.current.contains(e.target as Node)) setSpeciesOpen(false);
+      if (forestRef.current && !forestRef.current.contains(e.target as Node)) setForestOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -346,7 +380,7 @@ export default function OperationList({ map }: OperationListProps) {
   };
 
   const hasActiveFilters = yearFrom != null || yearTo != null || typeFilter.size > 0 ||
-    standFilter !== "" || speciesFilter.size > 0 || globalFilter !== "";
+    standFilter !== "" || speciesFilter.size > 0 || forestFilter.size > 0 || globalFilter !== "";
 
   const clearAllFilters = () => {
     setYearFrom(null);
@@ -354,6 +388,7 @@ export default function OperationList({ map }: OperationListProps) {
     setTypeFilter(new Set());
     setStandFilter("");
     setSpeciesFilter(new Set());
+    setForestFilter(new Set());
     setGlobalFilter("");
   };
 
@@ -386,6 +421,9 @@ export default function OperationList({ map }: OperationListProps) {
         return speciesFilter.has(sp);
       });
     }
+    if (forestFilter.size > 0) {
+      filtered = filtered.filter((r) => forestFilter.has(forestNameMap.get(r.op.forest_id) ?? ""));
+    }
     if (standFilter) {
       const standIds = standFilter.split(",").map((s) => s.trim()).filter(Boolean);
       if (standIds.length > 0) {
@@ -403,6 +441,7 @@ export default function OperationList({ map }: OperationListProps) {
           (comp?.stand_id ?? "").toLowerCase().includes(lower) ||
           (pre?.main_species ?? comp?.main_species ?? "").toLowerCase().includes(lower) ||
           (pre?.development_class ?? comp?.development_class ?? "").toLowerCase().includes(lower) ||
+          (forestNameMap.get(r.op.forest_id) ?? "").toLowerCase().includes(lower) ||
           String(pre?.age_years ?? comp?.age_years ?? "").includes(lower) ||
           String(pre?.volume_m3 ?? comp?.volume_m3 ?? "").includes(lower) ||
           String(pre?.stem_count_per_ha ?? "").includes(lower) ||
@@ -433,6 +472,7 @@ export default function OperationList({ map }: OperationListProps) {
         case "income_eur": return row.op.income_eur ?? 0;
         case "cost_eur": return row.op.cost_eur ?? 0;
         case "development_class": return row.pre?.development_class ?? row.comp?.development_class ?? "";
+        case "forest_id": return forestNameMap.get(row.op.forest_id) ?? "";
         default: return "";
       }
     };
@@ -459,6 +499,7 @@ export default function OperationList({ map }: OperationListProps) {
       return {
         ...row,
         _standId: standId,
+        _forestName: forestNameMap.get(row.op.forest_id) ?? "",
         _opId: row.op.id,
         _typeLabel: displayOp(row.op.type, language),
         _year: row.op.year,
@@ -475,7 +516,7 @@ export default function OperationList({ map }: OperationListProps) {
         _devClassLabel: pre?.development_class ? displayDevClass(pre.development_class, language) : comp?.development_class ? displayDevClass(comp.development_class, language) : "",
       };
     });
-  }, [operations, compMap, yearFrom, yearTo, typeFilter, speciesFilter, standFilter, globalFilter, sortKey, sortDir, language]);
+  }, [operations, compMap, yearFrom, yearTo, typeFilter, speciesFilter, forestFilter, standFilter, globalFilter, sortKey, sortDir, language, forestNameMap]);
 
   if (operations.length === 0) {
     return (
@@ -558,6 +599,33 @@ export default function OperationList({ map }: OperationListProps) {
             )}
           </div>
 
+          {/* Forest multi-select */}
+          {showForestColumn && (
+            <div className="relative" ref={forestRef}>
+              <button
+                onClick={() => setForestOpen((v) => !v)}
+                className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                {L.filterForest}{forestFilter.size > 0 ? ` (${forestFilter.size})` : " ▼"}
+              </button>
+              {forestOpen && (
+                <div className="absolute top-full left-0 mt-1 z-20 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg p-1 min-w-[160px]">
+                  {forestNames.map((name) => (
+                    <label key={name} className="flex items-center gap-1.5 px-2 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={forestFilter.has(name)}
+                        onChange={() => toggleFilter(setForestFilter, name)}
+                        className="h-3 w-3"
+                      />
+                      {name}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Stand filter */}
           <input
             type="text"
@@ -607,6 +675,12 @@ export default function OperationList({ map }: OperationListProps) {
                 <button onClick={() => toggleFilter(setSpeciesFilter, s)} className="ml-0.5 hover:text-red-500">✕</button>
               </span>
             ))}
+            {Array.from(forestFilter).map((fn) => (
+              <span key={`fo-${fn}`} className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-teal-100 dark:bg-teal-900/30 text-teal-800 dark:text-teal-300 rounded">
+                {L.chipForest}: {fn}
+                <button onClick={() => toggleFilter(setForestFilter, fn)} className="ml-0.5 hover:text-red-500">✕</button>
+              </span>
+            ))}
             {standFilter && (
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 rounded">
                 {L.chipStand}: {standFilter}
@@ -620,7 +694,17 @@ export default function OperationList({ map }: OperationListProps) {
       {/* Table */}
       {/* Column headers */}
       <div className="flex items-center shrink-0 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-xs font-medium text-gray-600 dark:text-gray-400 select-none">
-        {OP_COLUMN_KEYS.map((colKey) => (
+        {showForestColumn && (
+          <div
+            className="px-2 py-1.5 cursor-pointer hover:text-gray-900 dark:hover:text-gray-200"
+            style={{ width: COL_WIDTHS.colForest ?? 100 }}
+            onClick={() => handleSort("colForest")}
+          >
+            {L.colForest}
+            {sortKey === "colForest" && (sortDir === "asc" ? " ▲" : " ▼")}
+          </div>
+        )}
+        {OP_COLUMN_KEYS.filter(k => k !== "colForest").map((colKey) => (
           <div
             key={colKey}
             className="px-2 py-1.5 cursor-pointer hover:text-gray-900 dark:hover:text-gray-200"
@@ -651,6 +735,8 @@ export default function OperationList({ map }: OperationListProps) {
             onShowOnMap: handleShowOnMap,
             language,
             showOnMapLabel: L.showOnMap,
+            forestNameMap,
+            showForestColumn,
           }}
         />
         {displayRows.length === 0 && hasActiveFilters && (

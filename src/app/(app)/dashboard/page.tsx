@@ -1,91 +1,133 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { useEffect, useState, useRef, Suspense } from "react";
+import dynamic from "next/dynamic";
 import { useForestStore } from "@/lib/store";
+import { useCompartments } from "@/lib/hooks/use-compartments";
+import { useOperations } from "@/lib/hooks/use-operations";
+import { useCompartmentSpecies } from "@/lib/hooks/use-compartment-species";
+import { usePlanMetadata } from "@/lib/hooks/use-plan-metadata";
+import { useCharts } from "@/lib/hooks/use-charts";
+import { compartmentsToGeoJSON, fitBoundsToFeatures } from "@/lib/map/geojson";
 import { dashboardLabels } from "@/lib/i18n";
-import ForestList from "@/components/forest/ForestList";
+import { testCompartments } from "@/lib/test-data";
+import type { CompartmentFeatureCollection } from "@/types/database";
+import type maplibregl from "maplibre-gl";
+import ForestSelector from "@/components/forest/ForestSelector";
+import PanelLayout from "@/components/layout/PanelLayout";
+import ChartsPanel from "@/components/charts/ChartsPanel";
+import StandLayer from "@/components/map/StandLayer";
+import StandLegend from "@/components/map/StandLegend";
+import StandList from "@/components/forest/StandList";
+import OperationList from "@/components/forest/OperationList";
 import Link from "next/link";
 
+const MapView = dynamic(() => import("@/components/map/MapView"), {
+  ssr: false,
+});
+
+/** Mirror the zoom-to-property crosshair icon from ForestView. */
+const CROSSHAIR_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" width="20" height="20">
+  <circle cx="12" cy="12" r="8.5"/>
+  <line x1="12" y1="2.5" x2="12" y2="7"/>
+  <line x1="12" y1="17" x2="12" y2="21.5"/>
+  <line x1="2.5" y1="12" x2="7" y2="12"/>
+  <line x1="17" y1="12" x2="21.5" y2="12"/>
+  <circle cx="12" cy="12" r="3" fill="currentColor"/>
+</svg>`;
+
 export default function DashboardPage() {
-  const [stats, setStats] = useState<{ count: number; totalArea: number } | null>(null);
-  const [hasForests, setHasForests] = useState<boolean | null>(null);
+  const forests = useForestStore((s) => s.forests);
+  const activeForestIds = useForestStore((s) => s.activeForestIds);
   const language = useForestStore((s) => s.language) ?? "en";
   const L = dashboardLabels(language);
 
+  const effectiveIds = activeForestIds.length > 0 ? activeForestIds : null;
+
+  const {
+    data: compartments,
+    loading: compartmentsLoading,
+    error: compartmentsError,
+  } = useCompartments(effectiveIds);
+  useOperations(effectiveIds);
+  useCompartmentSpecies(effectiveIds);
+  usePlanMetadata(effectiveIds);
+
+  const setCompartments = useForestStore((s) => s.setCompartments);
+
+  useCharts(activeForestIds);
+
   useEffect(() => {
-    const supabase = createClient();
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!session?.user) return;
+    if (compartments.length > 0) setCompartments(compartments);
+  }, [compartments, setCompartments]);
 
-      const { data: forests, error: forestErr } = await supabase
-        .from("forests")
-        .select("id")
-        .eq("owner_id", session.user.id);
+  const [map, setMap] = useState<maplibregl.Map | null>(null);
+  const [mapStyleVersion, setMapStyleVersion] = useState(0);
+  const [isDark, setIsDark] = useState(false);
 
-      if (forestErr || !forests) return;
+  const handleMapReady = (mapInstance: maplibregl.Map) => {
+    setMap(mapInstance);
+  };
 
-      const count = forests.length;
-      setHasForests(count > 0);
+  const EMPTY_GEOJSON: CompartmentFeatureCollection = { type: "FeatureCollection", features: [] };
+  const hasGeometry = compartments.some((c) => c.geometry !== null);
+  const geojson = hasGeometry
+    ? compartmentsToGeoJSON(compartments)
+    : compartmentsLoading
+      ? EMPTY_GEOJSON
+      : testCompartments;
 
-      if (count === 0) {
-        setStats({ count: 0, totalArea: 0 });
-        return;
+  const zoomControlRef = useRef<maplibregl.IControl | null>(null);
+  useEffect(() => {
+    if (!map) return;
+
+    if (zoomControlRef.current) {
+      map.removeControl(zoomControlRef.current);
+    }
+
+    class ZoomToControl implements maplibregl.IControl {
+      _container!: HTMLDivElement;
+      _map!: maplibregl.Map;
+
+      onAdd(mapInstance: maplibregl.Map): HTMLElement {
+        this._map = mapInstance;
+        this._container = document.createElement("div");
+        this._container.className = "maplibregl-ctrl maplibregl-ctrl-group";
+        this._container.innerHTML =
+          '<button type="button" class="maplibregl-ctrl-zoom-to-property" title="Zoom to property" aria-label="Zoom to property">' +
+          `<span class="maplibregl-ctrl-icon" aria-hidden="true">${CROSSHAIR_ICON}</span></button>`;
+        this._container.addEventListener("click", (e) => {
+          e.stopPropagation();
+          fitBoundsToFeatures(this._map, geojson);
+        });
+        return this._container;
       }
 
-      const forestIds = forests.map((f: { id: string }) => f.id);
-      const { data: comps, error: compErr } = await supabase
-        .from("compartments")
-        .select("area_ha")
-        .in("forest_id", forestIds);
-
-      if (compErr || !comps) {
-        setStats({ count, totalArea: 0 });
-        return;
+      onRemove(): void {
+        this._container.remove();
       }
 
-      const totalArea = comps.reduce(
-        (sum: number, c: { area_ha: number | null }) => sum + (c.area_ha ?? 0),
-        0
-      );
+      getDefaultPosition(): maplibregl.ControlPosition {
+        return "top-right";
+      }
+    }
 
-      setStats({ count, totalArea });
-    });
-  }, []);
+    const control = new ZoomToControl();
+    map.addControl(control, "top-right");
+    zoomControlRef.current = control;
 
-  return (
-    <div className="max-w-4xl mx-auto p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">{L.myForests}</h1>
-        <Link
-          href="/forest/new"
-          className="rounded-md bg-green-700 dark:bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 dark:hover:bg-green-700 transition-colors"
-        >
-          {L.importForest}
-        </Link>
-      </div>
+    return () => {
+      if (zoomControlRef.current) {
+        map.removeControl(zoomControlRef.current);
+        zoomControlRef.current = null;
+      }
+    };
+  }, [map, geojson]);
 
-      {/* Summary stats */}
-      {stats && stats.count > 0 && (
-        <div className="grid grid-cols-2 gap-4 mb-6">
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4">
-            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">{L.statForests}</p>
-            <p className="text-2xl font-semibold text-gray-900 dark:text-gray-100 mt-1">
-              {stats.count}
-            </p>
-          </div>
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4">
-            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">{L.statTotalArea}</p>
-            <p className="text-2xl font-semibold text-gray-900 dark:text-gray-100 mt-1">
-              {Math.round(stats.totalArea).toLocaleString()} ha
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Getting Started card when no forests */}
-      {hasForests === false && (
-        <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-8 text-center mb-6">
+  if (forests.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-full p-8">
+        <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-8 text-center max-w-md">
           <div className="text-4xl mb-3">🌲</div>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
             {L.gettingStarted}
@@ -100,9 +142,67 @@ export default function DashboardPage() {
             {L.importFirstForest}
           </Link>
         </div>
-      )}
+      </div>
+    );
+  }
 
-      <ForestList />
+  return (
+    <div className="flex h-full">
+      <ForestSelector className="w-[240px] shrink-0 border-r border-gray-200 dark:border-gray-700" />
+
+      <div className="flex-1 min-w-0">
+        {activeForestIds.length > 0 ? (
+          <PanelLayout
+            chartsPanel={<ChartsPanel />}
+            tabs={{
+              map: (
+                <div className="flex-1 relative min-w-0 h-full">
+                  <Suspense
+                    fallback={
+                      <div className="w-full h-full flex items-center justify-center text-gray-500">
+                        Loading map...
+                      </div>
+                    }
+                  >
+                    <MapView
+                      onMapReady={handleMapReady}
+                      onStyleChange={({ isDark: dark, styleVersion }) => {
+                        setMapStyleVersion(styleVersion);
+                        setIsDark(dark);
+                      }}
+                    />
+                  </Suspense>
+                  <StandLayer map={map} compartments={geojson} styleVersion={mapStyleVersion} isDark={isDark} />
+                  <StandLegend compartments={geojson} />
+
+                  {compartmentsError && (
+                    <div className="absolute top-4 left-4 z-10 bg-red-50 border border-red-200 rounded-md px-3 py-2 text-xs text-red-700 max-w-xs">
+                      {compartmentsError}
+                    </div>
+                  )}
+                </div>
+              ),
+              stands: <StandList map={map} />,
+              operations: <OperationList map={map} />,
+            }}
+          />
+        ) : (
+          <div className="flex items-center justify-center h-full p-8">
+            <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50/50 dark:bg-gray-900/50 p-8 text-center max-w-md">
+              <div className="text-3xl mb-3">🌲</div>
+              <h2 className="text-base font-semibold text-gray-700 dark:text-gray-300">
+                {L.gettingStarted}
+              </h2>
+              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                {L.gettingStartedDesc}
+              </p>
+              <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
+                Select forests from the sidebar to begin.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
